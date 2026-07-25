@@ -1,0 +1,11 @@
+# Third-party packages imported by ema_downloader.py (entrypoint) and
+# extract_ema_pdfs.py (helper).
+# Common (pre-installed in the pipeline image):
+requests
+pandas
+openpyxl
+beautifulsoup4
+# NON-COMMON (flag for automation/requirements.txt):
+pypdf
+openai
+tqdm

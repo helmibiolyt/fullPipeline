@@ -1,0 +1,9 @@
+entrypoint: clinicaltrials_gov_downloader.py
+# No threading: the API returns 1000 full studies per request (bulk-efficient);
+# per-study threading would balloon ~500 requests into ~500k. Cursor paging is sequential.
+in_place: true
+output_subdirs: [clinicaltrials_data]
+size_class: heavy
+timeout_min: 360
+mirror: true
+enabled: true

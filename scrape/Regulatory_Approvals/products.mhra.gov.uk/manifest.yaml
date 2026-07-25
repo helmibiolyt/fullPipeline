@@ -1,0 +1,11 @@
+entrypoint: mhra_downloader.py
+# Keep raw PDFs + metadata CSV (vector store extracts docs); no LLM/API key needed.
+args: "--download-pdfs --skip-llm"
+in_place: true
+output_subdirs: [mhra_data, mhra_data/pdfs]
+size_class: medium
+# Downloads raw PDFs for all MHRA products — a large, resumable crawl (checkpoint.json).
+# 0 = no time limit: never kill it while it's still making progress.
+timeout_min: 0
+mirror: true
+enabled: true

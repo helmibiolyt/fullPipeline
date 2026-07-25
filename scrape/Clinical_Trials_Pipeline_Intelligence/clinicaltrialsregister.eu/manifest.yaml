@@ -1,0 +1,9 @@
+entrypoint: run_all.py
+in_place: true
+output_subdirs: [eu_ctr_trials]
+size_class: medium
+# ~2000 text pages (whole EU CTR corpus); resumes from existing page_*.txt.
+# 0 = no time limit: never kill it while it's still making progress.
+timeout_min: 0
+mirror: true
+enabled: true

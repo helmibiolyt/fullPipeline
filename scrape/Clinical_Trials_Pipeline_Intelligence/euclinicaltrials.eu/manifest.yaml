@@ -1,0 +1,8 @@
+entrypoint: eu_ctis_downloader.py
+args: "--full --threads 5"   # threaded per-trial detail fetches (~5 req/s cap)
+in_place: true
+output_subdirs: [ctis_data]
+size_class: heavy
+timeout_min: 360
+mirror: true
+enabled: true

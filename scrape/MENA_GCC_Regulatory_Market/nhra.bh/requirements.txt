@@ -1,0 +1,9 @@
+requests
+beautifulsoup4
+pandas
+openpyxl
+xlrd
+pdfplumber
+python-docx
+lxml
+python-pptx

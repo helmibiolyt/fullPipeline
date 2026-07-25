@@ -1,0 +1,3 @@
+# Browser automation (chromium is already installed in the pipeline image at
+# /ms-playwright). If not already present in automation/requirements.txt, add it.
+playwright

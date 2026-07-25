@@ -1,0 +1,6 @@
+# Third-party packages imported by orangebook_downloader.py.
+# Pre-installed in the pipeline image (no versions needed).
+requests
+beautifulsoup4
+# NON-COMMON (flag for automation/requirements.txt):
+tqdm

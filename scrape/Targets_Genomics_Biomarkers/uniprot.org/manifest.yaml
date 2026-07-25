@@ -1,0 +1,14 @@
+# Pipeline manifest for Targets_Genomics_Biomarkers/uniprot.org
+# Auto-discovered by the Airflow DAG. Topic/source come from the folder path.
+entrypoint: scraper.py
+in_place: true
+output_subdirs:
+- Drug_Targets
+- Disease_Proteins
+- Enzyme_Classes
+- Oncogenes
+- Tumor_Suppressors
+size_class: small
+timeout_min: 60
+mirror: true
+enabled: false   # TEMP: committed to S3 already — skip recovery run

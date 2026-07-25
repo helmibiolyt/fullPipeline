@@ -1,0 +1,13 @@
+entrypoint: chictr_downloader.py
+# Preferred: 10 concurrent workers (args below) once the source is reachable.
+# GATED: source returns HTTP 405 on its search endpoint + a WAF slider-CAPTCHA from
+# this datacenter IP, so unattended runs collect 0 records. Needs a residential proxy
+# (like jrct) and/or CAPTCHA handling before it can scrape. Re-enable once it works.
+args: "--threads 10"
+in_place: true
+output_subdirs: [chictr_trails2]
+size_class: medium
+timeout_min: 180
+mirror: true
+enabled: false
+xvfb: true                    # headful browser -> run under xvfb-run

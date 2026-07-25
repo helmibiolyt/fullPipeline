@@ -1,0 +1,11 @@
+# Pipeline manifest for MENA_GCC_Regulatory_Market/nhra.bh
+# Auto-discovered by the Airflow DAG. Topic/source come from the folder path.
+entrypoint: scrape_nhra.py
+in_place: true
+output_subdirs:
+- Pharmacy & Pharmaceutical Products Regulation
+- Clinical Trials & CPD Regulation Section
+size_class: small
+timeout_min: 60
+mirror: true
+enabled: false   # TEMP: committed to S3 already — skip recovery run

@@ -1,0 +1,9 @@
+entrypoint: pmda_collector.py
+# Keep raw PDFs + metadata CSV (vector store extracts docs); no LLM/API key needed.
+args: "--skip-llm"
+in_place: true
+output_subdirs: [pmda_data, pmda_data/pdfs, pmda_data/master_lists]
+size_class: medium
+timeout_min: 240
+mirror: true
+enabled: false   # TEMP: committed to S3 already — skip this recovery run

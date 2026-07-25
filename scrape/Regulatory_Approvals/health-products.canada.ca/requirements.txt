@@ -1,0 +1,5 @@
+# Third-party packages imported by canada_dpd_downloader.py.
+# Pre-installed in the pipeline image (no versions needed).
+requests
+# NON-COMMON (flag for automation/requirements.txt):
+tqdm

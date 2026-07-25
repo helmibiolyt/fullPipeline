@@ -1,0 +1,14 @@
+entrypoint: jrct_downloader.py
+# GATED: source blocks this host's datacenter IP (403). Tor is unreliable here too —
+# jrct actively blocks most Tor exit nodes, so scraping only succeeds on the rare
+# allowed exit. Needs a residential/allowlisted proxy for reliable scraping; then run
+# with:  args: "--proxy <proxy-url> --timeout 90"  (scraper's static-proxy handling is
+# already fixed). Existing data lives in S3 under "Clinical Trials & Pipeline
+# Intelligence/jrct_trials/".
+# args: "--proxy socks5h://tor:9050 --timeout 90"
+in_place: true
+output_subdirs: [jrct_trials]
+size_class: medium
+timeout_min: 360
+mirror: false
+enabled: false

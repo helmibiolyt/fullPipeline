@@ -1,0 +1,7 @@
+# Third-party packages imported by pmda_collector.py.
+# Common (pre-installed in the pipeline image):
+requests
+beautifulsoup4
+# NON-COMMON (flag for automation/requirements.txt):
+pypdf
+tqdm

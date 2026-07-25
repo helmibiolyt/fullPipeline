@@ -1,0 +1,20 @@
+# ── Ignore everything by default (blocks .env, secrets, and ALL data) ──
+*
+
+# Descend into subdirectories so code + .gitkeep below can match
+!*/
+
+# ── Re-include ONLY what we publish ──
+!*.py
+!*.md
+!requirements.txt
+!manifest.yaml
+!.gitignore
+!.gitkeep
+
+# ── Belt-and-suspenders: never publish these ──
+.env
+**/.env
+__pycache__/
+.claude/
+*.pyc

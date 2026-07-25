@@ -1,0 +1,3 @@
+# Third-party packages imported by who_icd_downloader.py
+requests
+beautifulsoup4

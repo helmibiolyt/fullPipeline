@@ -1,0 +1,14 @@
+# Pipeline manifest for Targets_Genomics_Biomarkers/cbioportal.org
+# Auto-discovered by the Airflow DAG. Topic/source come from the folder path.
+entrypoint: scraper.py
+in_place: true
+output_subdirs:
+- Cancer_Types
+- Studies
+- Clinical_Data
+- Mutations
+- Treatments
+size_class: medium
+timeout_min: 120
+mirror: true
+enabled: false   # TEMP: committed to S3 already — skip recovery run

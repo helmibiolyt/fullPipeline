@@ -1,0 +1,7 @@
+# Third-party packages imported by mhra_downloader.py.
+# Common (pre-installed in the pipeline image):
+requests
+# NON-COMMON (flag for automation/requirements.txt):
+pypdf
+python-dotenv
+tqdm

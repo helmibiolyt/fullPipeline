@@ -1,0 +1,7 @@
+entrypoint: gsrs_downloader.py
+in_place: true
+output_subdirs: [gsrs_data]
+size_class: medium
+timeout_min: 180
+mirror: true
+enabled: false   # TEMP: committed to S3 already — skip this recovery run

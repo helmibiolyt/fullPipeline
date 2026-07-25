@@ -1,0 +1,7 @@
+entrypoint: atc_ddd_downloader.py
+in_place: true
+output_subdirs: [atc_ddd_data]
+size_class: small
+timeout_min: 60
+mirror: true
+enabled: false   # TEMP: committed to S3 already — skip this recovery run

@@ -1,0 +1,3 @@
+# Third-party packages imported by nci_thesaurus_downloader.py
+# (csv/json/zipfile/shutil are stdlib)
+requests

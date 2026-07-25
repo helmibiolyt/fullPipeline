@@ -1,0 +1,93 @@
+# Local Airflow (LocalExecutor + Postgres) for the scraping pipeline.
+#
+#   cd automation && cp .env.example .env   # then edit if needed
+#   docker compose build
+#   docker compose up airflow-init
+#   docker compose up -d
+#   open http://localhost:8080   (user: airflow / pass: airflow)
+#
+# Mounts:
+#   ../scrape            -> /opt/scrape        (the 14 source scrapers)
+#   ./dags ./plugins ./config ./data ./logs
+#   ~/.aws (read-only)   -> /home/airflow/.aws (moine profile for S3)
+
+x-airflow-common: &airflow-common
+  build: .
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    # Fixed secret key so all webserver workers share one session/CSRF key.
+    AIRFLOW__WEBSERVER__SECRET_KEY: "moine-scrapers-local-dev-secret"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    PYTHONPATH: /opt/pylib
+    # --- pipeline settings (read by scrape_pipeline.settings) ---
+    SCRAPE_ROOT: /opt/scrape
+    RUN_ROOT: /opt/automation/data/runs
+    S3_BUCKET: moine-data
+    RETENTION_RUNS: "0"   # keep only live CSVs; drop the staging copy after commit
+    # --- AWS (moine-data) via env keys — no ~/.aws profile needed in-container ---
+    AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+    AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+    AWS_DEFAULT_REGION: us-east-1
+    # Playwright browsers live here (shared path; tasks run as root)
+    PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./plugins:/opt/pylib
+    - ./logs:/opt/airflow/logs
+    - ./config:/opt/automation/config
+    - ./data:/opt/automation/data
+    - ../scrape:/opt/scrape
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: docker.io/library/postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+    restart: always
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create --username airflow --password airflow \
+          --firstname a --lastname b --role Admin --email admin@example.com || true
+        airflow pools set scrapers_small  4 "small scrapers"  || true
+        airflow pools set scrapers_medium 3 "medium scrapers" || true
+        airflow pools set scrapers_heavy  2 "heavy scrapers"  || true
+    restart: on-failure
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      retries: 5
+    restart: always
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: always
+
+volumes:
+  postgres-db:

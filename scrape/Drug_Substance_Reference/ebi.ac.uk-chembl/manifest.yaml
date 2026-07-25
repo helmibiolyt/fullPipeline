@@ -1,0 +1,7 @@
+entrypoint: chembl_downloader.py
+in_place: true
+output_subdirs: [chembl_data]
+size_class: heavy
+timeout_min: 720
+mirror: true
+enabled: false   # bulk-DB source: full data = download-db (~20GB SQLite) + table->CSV extraction. Deferred (deliberate heavy job).

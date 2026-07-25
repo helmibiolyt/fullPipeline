@@ -1,0 +1,24 @@
+# Embeddings + rerank (bge-m3 dense+sparse, bge-reranker-v2-m3)
+FlagEmbedding>=1.2.10
+torch>=2.1
+
+# Vector DB
+qdrant-client>=1.9
+
+# Document extraction
+pymupdf>=1.24          # PDF text + layout (import: fitz)
+python-docx>=1.1       # .docx
+python-pptx>=0.6       # .pptx
+
+# API service (researcher agent calls this)
+fastapi>=0.110
+uvicorn[standard]>=0.29
+
+# S3 + utils
+boto3>=1.34
+python-dotenv>=1.0
+tqdm>=4.66
+
+# Optional: semantic chunking helper
+langchain-experimental>=0.0.60
+langchain-text-splitters>=0.2

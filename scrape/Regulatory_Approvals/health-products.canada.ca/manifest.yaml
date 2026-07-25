@@ -1,0 +1,9 @@
+entrypoint: canada_dpd_downloader.py
+# Multi-command tool; download-bulk fetches the DPD extracts -> SQLite -> master CSVs.
+args: "download-bulk"
+in_place: true
+output_subdirs: [canada_dpd_data]
+size_class: medium
+timeout_min: 180
+mirror: true
+enabled: true

@@ -1,0 +1,7 @@
+# Your scraper's Python deps. These common ones are ALREADY in the pipeline image,
+# so if you only use these, nothing else is needed:
+#   requests, beautifulsoup4, lxml, pandas, openpyxl, python-dateutil
+#
+# If you need a package NOT listed above, add it here AND tell the maintainer to
+# add it to automation/requirements.txt (the Docker image installs that one).
+requests>=2.28

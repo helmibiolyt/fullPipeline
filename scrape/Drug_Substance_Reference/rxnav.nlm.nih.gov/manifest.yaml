@@ -1,0 +1,7 @@
+entrypoint: rxnorm_scraper.py
+in_place: true
+output_subdirs: [rxnorm_data]
+size_class: medium
+timeout_min: 180
+mirror: false
+enabled: false   # TEMP: committed to S3 already — skip this recovery run

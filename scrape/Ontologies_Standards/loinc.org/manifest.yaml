@@ -1,0 +1,11 @@
+entrypoint: loinc_downloader.py
+# Mode required: 'crawl' scrapes public LOINC pages unauthenticated (no login).
+# ('bulk-download' needs a LOINC account.)
+args: "crawl"
+in_place: true
+output_subdirs: [loinc_data]
+size_class: medium
+timeout_min: 180
+mirror: false   # crawl mode resumes/appends via progress file (loinc_progress.json)
+enabled: true
+xvfb: true                    # headful browser -> run under xvfb-run

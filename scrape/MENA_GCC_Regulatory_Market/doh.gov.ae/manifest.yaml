@@ -1,0 +1,14 @@
+# Pipeline manifest for MENA_GCC_Regulatory_Market/doh.gov.ae
+# Auto-discovered by the Airflow DAG. Topic/source come from the folder path.
+entrypoint: scraper.py
+in_place: true
+output_subdirs:
+- Circulars
+- Policies
+- Medications & Supplements
+- Guidelines
+- Standards
+size_class: medium
+timeout_min: 120
+mirror: true
+enabled: false   # TEMP: committed to S3 already — skip recovery run

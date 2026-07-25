@@ -1,0 +1,15 @@
+# Pipeline manifest — REQUIRED. The Airflow DAG auto-discovers this scraper by
+# finding this file. Topic and source come from the folder path:
+#   scrape/<Topic>/<source>/manifest.yaml   ->   this is <Topic>=_template, source=example.com
+# Put your real folder under a real <Topic> (e.g. Clinical_Trials/clinicaltrials.gov/).
+
+entrypoint: scraper.py        # the file the DAG runs as `python <entrypoint>`
+in_place: true                # true: scraper writes next to itself (typical)
+                              # false: scraper writes to {run_dir}; also set args below
+# args: "--output-dir {run_dir}"   # only when in_place: false
+
+output_subdirs: [MyCategory]  # folder(s) you write CSVs into; [] = auto-detect all CSVs
+size_class: small             # small | medium | heavy  (Airflow concurrency pool)
+timeout_min: 60               # hard cap on the scrape step
+mirror: true                  # true: full replace each run; false: additive/append-only
+enabled: true                 # false = discovered but not built into the DAG (WIP)

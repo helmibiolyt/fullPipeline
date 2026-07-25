@@ -1,0 +1,9 @@
+entrypoint: ema_downloader.py
+# Keep raw PDFs (vector store extracts them); no LLM/API key needed.
+args: "--save-pdfs --skip-llm"
+in_place: true
+output_subdirs: [ema_data, ema_data/pdfs, ema_data/additional_tables]
+size_class: heavy
+timeout_min: 720
+mirror: true
+enabled: false   # TEMP: committed to S3 already — skip this recovery run

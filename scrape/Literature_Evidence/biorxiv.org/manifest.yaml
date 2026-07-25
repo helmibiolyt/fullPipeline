@@ -1,0 +1,8 @@
+entrypoint: biorxiv_downloader.py
+args: "--threads 5"   # parallel page-offset fetches (~5 req/s cap)
+in_place: true
+output_subdirs: [biorxiv]
+size_class: small
+timeout_min: 60
+mirror: false
+enabled: false   # TEMP: committed to S3 already — skip this recovery run

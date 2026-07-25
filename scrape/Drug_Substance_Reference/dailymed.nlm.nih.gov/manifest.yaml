@@ -1,0 +1,8 @@
+entrypoint: dailymed_downloader.py
+in_place: true
+output_subdirs: [dailymed_data]
+size_class: heavy
+timeout_min: 360
+mirror: true
+enabled: false   # TEMP: committed to S3 already — skip this recovery run
+args: "api-fetch-spls"

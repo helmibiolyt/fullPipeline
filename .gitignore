@@ -1,0 +1,38 @@
+# ─────────── SECRETS — never commit ───────────
+**/.env
+.env
+*.env
+!*.env.example
+
+# ─────────── Airflow runtime data + logs (GBs) ───────────
+automation/data/
+automation/logs/
+
+# ─────────── Python ───────────
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ─────────── Vector store local data ───────────
+vector_store/qdrant_data/
+vector_store/hf-cache/
+vector_store/*.bin
+
+# ─────────── OS / editor ───────────
+.DS_Store
+*.swp
+*~
+
+# ─────────── Belt-and-suspenders: never commit bulk data anywhere ───────────
+# (scrape/ also has its own allowlist .gitignore blocking its 17 GB of data)
+*.jsonl
+*.ndjson
+*.zip
+*.parquet
+*.sqlite
+*.db
+# raw docs pulled by scrapers (they live in S3, not git)
+**/pdfs/
+**/*.pdf

@@ -1,0 +1,7 @@
+entrypoint: pubchem_downloader.py
+in_place: true
+output_subdirs: [pubchem_data]
+size_class: heavy
+timeout_min: 720
+mirror: true
+enabled: false   # bulk-DB source (~11GB download-bulk + extract-bulk). Deferred (disk).

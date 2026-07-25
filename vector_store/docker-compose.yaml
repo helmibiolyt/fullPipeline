@@ -1,0 +1,33 @@
+# Portable vector-store stack: Qdrant + the retrieval/ingest API.
+# Deploy on any EC2:
+#   cp .env.example .env   # AWS keys
+#   docker compose up -d --build
+#   curl localhost:8000/health
+#   curl -X POST localhost:8000/ingest -d '{"prefix":"Regulatory_Approvals/ema.europa.eu","limit":20}' -H "Content-Type: application/json"
+#   curl -X POST localhost:8000/search -d '{"query":"contraindication in hepatic impairment"}' -H "Content-Type: application/json"
+services:
+  qdrant:
+    image: docker.io/qdrant/qdrant:latest
+    ports:
+      - "6333:6333"      # REST + dashboard (/dashboard)
+      - "6334:6334"      # gRPC
+    volumes:
+      - qdrant-storage:/qdrant/storage
+    restart: always
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      QDRANT_URL: http://qdrant:6333   # server mode inside the stack
+    volumes:
+      - hf-cache:/root/.cache/huggingface   # persist bge-m3 / reranker weights
+    depends_on:
+      - qdrant
+    restart: always
+
+volumes:
+  qdrant-storage:
+  hf-cache:

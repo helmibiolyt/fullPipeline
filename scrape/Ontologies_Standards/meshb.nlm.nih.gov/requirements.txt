@@ -1,0 +1,4 @@
+# Third-party packages imported by mesh_downloader.py
+# (XML parsing uses the stdlib xml.etree; pandas is only used for optional previews)
+requests
+pandas

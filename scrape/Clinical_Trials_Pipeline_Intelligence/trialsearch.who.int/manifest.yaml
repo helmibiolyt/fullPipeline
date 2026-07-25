@@ -1,0 +1,7 @@
+entrypoint: run_all.py
+in_place: true
+output_subdirs: [who_trials_csv]
+size_class: heavy
+timeout_min: 600
+mirror: true
+enabled: false   # TEMP: committed to S3 already — skip this recovery run

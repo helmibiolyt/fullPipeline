@@ -1,0 +1,6 @@
+# List only deps the scraper actually imports.
+# Already in the pipeline image:
+#   requests, beautifulsoup4, lxml, pandas, openpyxl, python-dateutil
+# NON-COMMON (flag to maintainer for automation/requirements.txt): python-dotenv
+requests
+python-dotenv

@@ -1,0 +1,12 @@
+# List only deps the entrypoint and its helper actually import.
+# Already in the pipeline image:
+#   requests, beautifulsoup4, lxml, pandas, openpyxl, python-dateutil
+# NON-COMMON (flag to maintainer for automation/requirements.txt):
+#   python-dotenv, numpy
+# NOTE: lxml is required as the parser backend for BeautifulSoup(xml_content, "xml").
+requests
+beautifulsoup4
+lxml
+pandas
+python-dotenv
+numpy
