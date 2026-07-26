@@ -29,7 +29,7 @@ import argparse
 import re
 import subprocess
 import sys
-import urllib.request
+import requests
 from collections import Counter
 from pathlib import Path
 
@@ -147,16 +147,27 @@ def check_upstream(src, root: Path, timeout: int = 20):
     if not hosts:
         return "SKIP", "no upstream host found in code"
     host = hosts.most_common(1)[0][0]
-    req = urllib.request.Request(
-        f"https://{host}/",
-        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                               "AppleWebKit/537.36 (KHTML, like Gecko) "
-                               "Chrome/120.0.0.0 Safari/537.36"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return ("PASS", f"{host} -> {r.status}") if r.status < 400 else ("WARN", f"{host} -> {r.status}")
+        # requests, not urllib: the scrapers use requests, which trusts certifi,
+        # while urllib trusts the system store. moh.gov.om verifies fine under
+        # one and fails under the other, and reporting a source as unreachable
+        # when its own client reaches it is worse than not checking at all.
+        r = requests.get(
+            f"https://{host}/", timeout=timeout, allow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                   "Chrome/120.0.0.0 Safari/537.36"})
     except Exception as e:  # noqa: BLE001 - a dead host is the finding, not a crash
-        return "WARN", f"{host}: {str(e)[:90]}"
+        return "WARN", f"{host}: {type(e).__name__}: {str(e)[:80]}"
+
+    if r.status_code < 400:
+        return "PASS", f"{host} -> {r.status_code}"
+    # An API root or an object-store bucket root answering 400/403/404 is
+    # correct behaviour, not an outage: there is nothing published at "/".
+    # Flagging those produced three of five warnings on the first run, all noise.
+    if r.status_code in (400, 403, 404):
+        return "SKIP", f"{host} -> {r.status_code} at root (no root resource; not a signal)"
+    return "WARN", f"{host} -> {r.status_code}"
 
 
 def main():
