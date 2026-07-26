@@ -24,12 +24,22 @@ timeout_min: 360
 # started at page 1, ran to the timeout and committed nothing. hydrate brings
 # back the CSV and the cursors, and each run advances the crawl further.
 # The pre-2021 rows already in the CSV are kept - they cost nothing and are real
-# works - so expect some duplicate openalex_id values where the old unscoped
-# crawl overlapped 2021+. Deduplicate on openalex_id at graph load.
+# works. The old unscoped crawl and the 2021+ one did overlap - a cursor
+# belongs to one query and knows nothing about another - which produced 93,431
+# duplicate openalex_id values, every one of them a 2021-or-later work. Those
+# were removed before the commit, so what is in S3 is deduplicated. Note the
+# scraper itself has no works-level dedup, only for authors/institutions, so
+# changing the query scope again would reintroduce them.
 hydrate: [openalex/openalex_works.csv, openalex/openalex_works_progress.json]
 # MUST stay false. Under full-replace a run that is killed at the timeout
 # publishes only what it managed this session: 1.7 GB against the 2.38 GB
 # already in S3 is a 0.71 ratio, which clears MIN_COMPLETENESS_RATIO and would
 # have silently replaced the larger file with the smaller one.
 mirror: false
-enabled: true
+# DISABLED: all fifteen API keys report "Insufficient budget ... you only
+# have $0 remaining". No run can harvest anything until credits are topped
+# up, and leaving it enabled would re-upload 18.83 GB every week for no new
+# data. 9,662,165 works are committed; openalex_works_progress.json is in S3
+# and hydrated, so a future run resumes from the saved per-year cursors
+# instead of re-crawling. Roughly 2.75M works remain, about $2.75 of credit.
+enabled: false
