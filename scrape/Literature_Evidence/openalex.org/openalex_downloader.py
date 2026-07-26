@@ -891,16 +891,25 @@ def run_downloader(
         # 8.7 million records before every API key hit its budget exited 1, so
         # nothing was committed and the next run had to redo it. Keep whatever
         # the session earned; only a session that earned nothing is a failure.
-        if global_counter.value == 0:
+        # "Harvested nothing this session" is NOT the same as "nothing to
+        # publish". The counter is per-process while the CSV accumulates across
+        # attempts, so a retry after the API budget ran dry sees zero even
+        # though the previous attempt left 8.7M records on disk uncommitted.
+        # Judge the file, not the counter.
+        works_csv = Path(output_dir) / f"{file_prefix}_works.csv"
+        on_disk = works_csv.stat().st_size if works_csv.exists() else 0
+        if on_disk <= 0:
             logger.error(
-                "   Nothing was harvested this session, so there is nothing to "
-                "publish - failing so the run is retried rather than committed."
+                "   Nothing harvested and no output file - failing so the run is "
+                "retried rather than committed."
             )
             sys.exit(1)
         logger.warning(
-            f"   Committing the {global_counter.value:,} record(s) this session did "
-            f"harvest; the {partition_failures} unfinished partition(s) resume from "
-            f"their saved cursors on the next run."
+            f"   Publishing what is on disk: {works_csv.name} is "
+            f"{on_disk / 1e9:.2f} GB ({global_counter.value:,} record(s) added this "
+            f"session). This source is mirror:false, so the commit is additive and "
+            f"the {partition_failures} unfinished partition(s) resume from their "
+            f"saved cursors next run."
         )
         return
     logger.info(f"   HARVEST PROCESS COMPLETE. Total parsed & saved records: {global_counter.value}")
