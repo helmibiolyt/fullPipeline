@@ -9,4 +9,4 @@ timeout_min: 60
 # and it would publish a partial dataset over a good one.
 hydrate: [biorxiv/biorxiv_metadata.csv]
 mirror: false
-enabled: false
+enabled: true

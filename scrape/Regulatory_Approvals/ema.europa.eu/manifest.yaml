@@ -18,4 +18,4 @@ hydrate: [ema_data/ema_documents.csv]
 # MUST stay false: the run deliberately re-uploads only new PDFs, so a
 # full-replace commit would delete the 13,333 it skipped.
 mirror: false
-enabled: true
+enabled: false

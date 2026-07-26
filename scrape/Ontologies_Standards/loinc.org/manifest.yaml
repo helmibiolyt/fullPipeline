@@ -17,5 +17,5 @@ hydrate: [loinc_data/loinc_crawled_codes.csv]
 # under loinc_data/ and a full-replace commit would delete all 74 of those files,
 # since a crawl-mode run never reproduces them.
 mirror: false
-enabled: false
+enabled: true
 xvfb: true                    # headful browser -> run under xvfb-run

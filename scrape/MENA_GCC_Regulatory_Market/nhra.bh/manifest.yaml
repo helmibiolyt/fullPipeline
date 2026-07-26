@@ -9,4 +9,4 @@ output_subdirs:
 size_class: small
 timeout_min: 60
 mirror: true
-enabled: false
+enabled: true
