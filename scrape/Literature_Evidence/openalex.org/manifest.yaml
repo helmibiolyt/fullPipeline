@@ -1,17 +1,31 @@
 # The pipeline auto-discovers this file. Topic and source come from the folder
 # path (scrape/<Topic>/<source>/), so they are NOT repeated here.
 entrypoint: openalex_downloader.py
+# Scope: Health Sciences (domain 4) from 2021 on. Unfiltered, the query matches
+# 52M works - about 173 hours of crawling, which no schedule absorbs. The year
+# cut takes that to 11.4M without excluding any kind of work: type filtering was
+# considered and rejected, since the genuinely useless types (peer-review
+# reports, supplementary material, errata) are only ~4.5%, while `review` is the
+# single most valuable type here. Anything unwanted is cheaper to drop at graph
+# load time than to re-crawl for.
+#
+# Passing both years also switches the scraper from one sequential stream to six
+# per-year partitions crawled in parallel, each with its own cursor, so a run
+# that is cut short resumes per year rather than from the top.
+args: "--start-year 2021 --end-year 2026 --threads 6"
 in_place: true
 output_subdirs: [openalex]
 size_class: medium             # slow multi-year API crawler over biomedical works
-timeout_min: 180
-# INCREMENTAL, and it has to be. The query matches ~52 million works and the
-# crawler sustains roughly 5,000 rows/min, so a complete pass needs about a
-# week - it can never finish inside one run. The scraper already keeps a cursor
-# in openalex_works_progress.json and knows how to continue from it; what was
-# missing is that nothing restored that cursor, so every run started at page 1,
-# ran to the timeout and committed nothing. hydrate brings back the CSV and the
-# cursor, and each run advances the crawl further.
+timeout_min: 360
+# INCREMENTAL, and it has to be. Even scoped to 2021+ the query matches 11.4M
+# works, which is more than one run can finish. The scraper already keeps a
+# cursor per partition in openalex_works_progress.json and knows how to continue
+# from it; what was missing is that nothing restored that cursor, so every run
+# started at page 1, ran to the timeout and committed nothing. hydrate brings
+# back the CSV and the cursors, and each run advances the crawl further.
+# The pre-2021 rows already in the CSV are kept - they cost nothing and are real
+# works - so expect some duplicate openalex_id values where the old unscoped
+# crawl overlapped 2021+. Deduplicate on openalex_id at graph load.
 hydrate: [openalex/openalex_works.csv, openalex/openalex_works_progress.json]
 # MUST stay false. Under full-replace a run that is killed at the timeout
 # publishes only what it managed this session: 1.7 GB against the 2.38 GB
