@@ -7,4 +7,4 @@ output_subdirs: [ctis_data]
 size_class: heavy
 timeout_min: 360
 mirror: true
-enabled: false
+enabled: true

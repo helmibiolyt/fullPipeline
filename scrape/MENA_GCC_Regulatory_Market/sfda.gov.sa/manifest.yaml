@@ -17,4 +17,4 @@ mirror: true
 # publishing them, so leaving this flag off turns the run into a hard failure
 # instead of silent data loss.
 args: --output-dir {run_dir} --playwright
-enabled: false
+enabled: true
