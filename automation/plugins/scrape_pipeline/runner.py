@@ -17,9 +17,12 @@ from .settings import (
     DOC_SUFFIXES,
     JSONL_SUFFIXES,
     KEEP_LOCAL_RUNS,
+    KEEP_SCRAPER_STATE,
     PUBLISH_SUFFIXES,
     RUN_ROOT,
     SPREADSHEET_SUFFIXES,
+    STATE_FILE_SUFFIXES,
+    STATE_NAME_MARKERS,
     STRUCTURED_DROPPED_SUFFIXES,
     TABULAR_SUFFIXES,
     TSV_SUFFIXES,
@@ -196,23 +199,45 @@ def collect(src: Source, run_id: str) -> None:
         raise RuntimeError(f"scraper {src.slug} produced no artifacts")
 
 
+def _is_state_file(p: Path) -> bool:
+    """True for a scraper's resume state (checkpoint / progress / SQLite).
+
+    These are deliberately preserved by the post-commit wipe. Every scraper here
+    already knows how to resume — via checkpoint.json, *_progress.json,
+    tracker.json or a per-source SQLite DB — but wiping that state after each
+    commit meant the next run always re-crawled the whole source from scratch.
+    The state is KB-to-MB; the data it describes is GB.
+    """
+    name = p.name.lower()
+    if p.suffix.lower() in STATE_FILE_SUFFIXES:
+        return True
+    if p.suffix.lower() not in {".json", ".txt", ".jsonl"}:
+        return False
+    return any(marker in name for marker in STATE_NAME_MARKERS)
+
+
 def _wipe_workdir_data(src: Source) -> None:
     """Delete the scraper's own downloaded data (keep code/manifest/structure).
 
     Total scrape data exceeds local disk, so once a source is committed to S3
     (the source of truth) its local folder is freed. Runs only on the success
     path. Set WIPE_SCRAPER_DIR=0 to keep folders (uses more disk, enables resume).
+    Resume state is kept regardless unless KEEP_SCRAPER_STATE=0.
     """
     wd = workdir(src)
     keep_names = {"requirements.txt", "manifest.yaml", ".gitignore", ".env", ".gitkeep"}
     keep_suffixes = {".py", ".md", ".yaml"}
     freed = 0
+    kept_state = 0
     for p in wd.rglob("*"):
         if not p.is_file():
             continue
         if p.name in keep_names or p.suffix.lower() in keep_suffixes:
             continue
         if any(part in ARTIFACT_EXCLUDE_DIRS for part in p.parts):
+            continue
+        if KEEP_SCRAPER_STATE and _is_state_file(p):
+            kept_state += 1
             continue
         try:
             freed += p.stat().st_size
@@ -221,6 +246,8 @@ def _wipe_workdir_data(src: Source) -> None:
             pass
     if freed:
         log.info("[%s] freed %.1f MB of local scraper data (S3 has it)", src.slug, freed / 1e6)
+    if kept_state:
+        log.info("[%s] kept %d resume-state file(s) for the next run", src.slug, kept_state)
 
 
 def cleanup_local(src: Source, run_id: str, keep: int | None = None) -> None:

@@ -11,20 +11,17 @@ Features:
      and dynamically creates/adapts the SQLite database schema.
   2. Resilient Checkpointing: Keeps track of page crawling, PDF processing, and 
      extraction using a local SQLite database, enabling immediate resumption.
-  3. Multi-Threaded Concurrency: Concurrently crawls EPAR pages and extracts text 
-     from documents using a thread pool executor.
-  4. In-Memory PDF Text Extraction: Uses pypdf to extract plain text directly 
-     from streamed PDF bytes without saving PDFs to disk (saving ~20+ GB storage).
-  5. Structured LLM API Integration: Uses the MiniMax-M3 LLM API via OpenAI SDK to 
-     extract structured clinical fields (composition, indications, posology, contraindications, 
-     side effects, efficacy, NCT trials details).
-  6. Comprehensive CSV Reports: Automatically exports:
-     - Document-level extractions (ema_pdf_extractions.csv)
-     - Trial-level clinical registry data (ema_clinical_trials.csv)
-     - Consolidated drug-level regulatory summaries (ema_drug_summary.csv)
+  3. Multi-Threaded Concurrency: Concurrently crawls EPAR pages and downloads
+     documents using a thread pool executor.
+  4. Raw Document Storage: PDFs are streamed and stored as-is. There is no text
+     extraction and no LLM conversion here — the vector store handles documents
+     downstream, so this scraper only ever produces CSV metadata + raw docs.
+  5. Comprehensive CSV Reports: Automatically exports:
+     - Medicine and document catalogues (ema_medicines.csv, ema_documents.csv)
+     - The 10 additional EMA tables via --download-all-tables
 
 Requirements:
-    pip install requests pandas openpyxl beautifulsoup4 pypdf openai
+    pip install requests pandas openpyxl beautifulsoup4
 """
 
 import os
@@ -50,17 +47,6 @@ import pandas as pd
 import io
 
 # PDF library
-try:
-    from pypdf import PdfReader
-except ImportError:
-    PdfReader = None
-
-# OpenAI SDK for MiniMax API
-try:
-    from openai import OpenAI
-except ImportError:
-    OpenAI = None
-
 # S3 upload removed — the pipeline owns S3 (scrapers write local CSV only).
 boto3 = None
 BotoCoreError = Exception
@@ -78,9 +64,6 @@ BASE_DIR = Path(__file__).resolve().parent
 BASE_URL = "https://www.ema.europa.eu"
 MEDICINES_EXCEL_URL = "https://www.ema.europa.eu/en/documents/report/medicines-output-medicines-report_en.xlsx"
 DOWNLOAD_PAGE_URL = "https://www.ema.europa.eu/en/medicines/download-medicine-data"
-
-DEFAULT_MINIMAX_API_KEY = os.environ.get("MINIMAX_API_KEY", "")
-MINIMAX_BASE_URL = "https://api.minimax.io/v1"
 
 ADDITIONAL_TABLES = {
     "post_authorisation": "https://www.ema.europa.eu/en/documents/report/medicines-output-post_authorisation-report_en.xlsx",
@@ -150,86 +133,6 @@ class SafeRetry(Retry):
                 return float(retry_after)
             except ValueError:
                 return 1.0
-
-# -- Prompt Builders for LLM -------------------------------------------------
-def get_prompt_for_doc_type(doc_type: str) -> str:
-    """Builds document-type specific prompts for LLM structured JSON extraction."""
-    clinical_trials_spec = """
-You must also identify and extract structured information for each clinical trial or study mentioned in the text. Return this in a key "clinical_trials" which must be a list of objects, where each object contains these exact keys (use null for any missing details):
-- "nct_id": The registry identifier (e.g. NCT03361748).
-- "brief_title": Short title of the study.
-- "official_title": Full official scientific title of the study.
-- "overall_status": Status of the trial (e.g., active, completed, recruiting, terminated).
-- "start_date": Trial start date.
-- "sponsor": Lead sponsor / developer.
-- "condition": Condition or disease being studied (e.g., Multiple Myeloma).
-- "phase": The phase of the trial (e.g., Phase 3, Phase 1/2, Pivotal, Supportive).
-- "intervention_name": Name of the drug or therapy (e.g. idecabtagene vicleucel).
-- "intervention_type": Type of intervention (e.g. biological, gene therapy, small molecule, vaccine).
-- "primary_outcome": Description of the primary efficacy outcomes/endpoints.
-- "secondary_outcome": Description of secondary outcomes/endpoints.
-- "country": Location or country where the trial was conducted (e.g., multinational, EU, US).
-- "study_type": Study type (e.g., interventional, observational, randomized, open-label).
-- "enrollment": Number of patients enrolled/randomized.
-
-Also extract:
-- "document_procedure_dates": Dates associated with the regulatory procedure, CHMP opinion date, publication date, or version date of this document. Return null if not found.
-
-Make sure the values are precise, complete, and directly extracted or summarized from the text.
-Do not include markdown code block formatting (like ```json) in your response. Just return the JSON object."""
-
-    if doc_type == "overview":
-        return """You are an expert clinical data extraction assistant.
-Your task is to extract relevant clinical and regulatory information from the provided European Medicines Agency (EMA) EPAR Medicine Overview document text.
-You must return a valid JSON object with the following keys:
-1. "nct_numbers": A list of clinical trial registry IDs (like NCT00000000) found in the text. Return an empty list if none are found.
-2. "composition": Qualitative and quantitative composition details of active substance.
-3. "therapeutic_indications": What the medicine is used for / approved indications.
-4. "posology": How the medicine is used/administered.
-5. "contraindications": Contraindications (who should not take it).
-6. "undesirable_effects": Side effects and risks.
-7. "benefits_in_studies": Efficacy and benefits shown in studies.
-8. "benefit_risk_balance": Summary of why the medicine was approved (benefit-risk balance).
-""" + clinical_trials_spec
-
-    elif doc_type == "product-information":
-        return """You are an expert clinical data extraction assistant.
-Your task is to extract relevant prescribing information from the provided Summary of Product Characteristics (SmPC).
-You must return a valid JSON object with the following keys:
-1. "nct_numbers": A list of clinical trial registry IDs (like NCT00000000) found in the text. Return an empty list if none are found.
-2. "composition": Qualitative and quantitative composition details of active substance.
-3. "therapeutic_indications": Approved therapeutic indications.
-4. "posology": Posology and method of administration.
-5. "contraindications": Documented contraindications.
-6. "undesirable_effects": Undesirable effects / side effects.
-""" + clinical_trials_spec
-
-    elif doc_type == "assessment-report":
-        return """You are an expert clinical data extraction assistant.
-Your task is to extract relevant clinical efficacy and safety details from the EPAR Assessment Report.
-You must return a valid JSON object with the following keys:
-1. "nct_numbers": A list of clinical trial registry IDs (like NCT00000000) found in the text. Return an empty list if none are found.
-2. "benefits_in_studies": Summary of the clinical trial efficacy results.
-3. "benefit_risk_balance": Detailed conclusions on the benefit-risk balance.
-""" + clinical_trials_spec
-
-    else:
-        return """You are an expert clinical data extraction assistant.
-Your task is to extract a brief summary and any clinical trial numbers from this regulatory document.
-You must return a valid JSON object with the following keys:
-1. "nct_numbers": A list of clinical trial registry IDs (like NCT00000000) found in the text. Return an empty list if none are found.
-2. "document_summary": A detailed summary of the content and purpose of this document.
-""" + clinical_trials_spec
-
-def clean_and_parse_json(raw_text: str) -> dict:
-    """Strips LLM reasoning/thinking blocks and extracts a parseable JSON dictionary."""
-    cleaned = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
-    first_brace = cleaned.find("{")
-    last_brace = cleaned.rfind("}")
-    if first_brace == -1 or last_brace == -1:
-        raise ValueError("Could not find outer JSON braces in the LLM response.")
-    json_str = cleaned[first_brace:last_brace+1]
-    return json.loads(json_str)
 
 # -- HTTP Session Builder ----------------------------------------------------
 def build_session(max_retries: int) -> requests.Session:
@@ -471,7 +374,7 @@ class DatabaseManager:
 
     def update_pdf_extraction(self, doc_url: str, prod_num: str, med_name: str, doc_type: str, 
                               status: str, error: str = None, data: dict = None):
-        """Thread-safe update of the checkpoint database with LLM extraction results."""
+        """Thread-safe update of the per-document status in the checkpoint database."""
         nct_str = ",".join(data.get("nct_numbers", [])) if data and "nct_numbers" in data else None
         trials_json = json.dumps(data["clinical_trials"]) if data and "clinical_trials" in data else None
             
@@ -693,32 +596,23 @@ class EMADataCollector:
             
         log.info("EPAR page crawling finished.")
 
-# -- In-Memory PDF Processing & LLM Text Extractor ----------------------------
+# -- In-Memory PDF Streaming & Raw Storage ------------------------------------
 class EMAPDFProcessor:
-    """Streams PDFs in-memory, extracts text, and invokes MiniMax-M3 LLM for structured clinical data."""
+    """Streams PDFs in-memory and stores them raw for the downstream vector store."""
     def __init__(self, db: DatabaseManager, session: requests.Session, output_dir: Path,
-                 api_key: str = None, s3_client=None, s3_bucket=None, s3_prefix=None, s3_direct=False,
-                 save_pdfs=False, skip_llm=False):
+                 s3_client=None, s3_bucket=None, s3_prefix=None, s3_direct=False,
+                 save_pdfs=False):
         self.db = db
         self.session = session
         self.output_dir = output_dir
-        self.api_key = api_key or DEFAULT_MINIMAX_API_KEY
         self.s3_client = s3_client
         self.s3_bucket = s3_bucket
         self.s3_prefix = s3_prefix
         self.s3_direct = s3_direct
         self.save_pdfs = save_pdfs
-        self.skip_llm = skip_llm
-
-        # No LLM client is created (and no API key is needed) when the raw docs are
-        # kept for downstream extraction by the vector store.
-        if OpenAI and not skip_llm:
-            self.openai_client = OpenAI(api_key=self.api_key, base_url=MINIMAX_BASE_URL)
-        else:
-            self.openai_client = None
 
     def process_pdf(self, url: str, rel_path: str, referer: str, prod_num: str, med_name: str, doc_type: str) -> bool:
-        """Streams PDF bytes in memory, extracts text with pypdf, calls MiniMax LLM, and updates database."""
+        """Streams PDF bytes in memory and stores the raw document; no text or LLM extraction."""
         headers = {}
         if referer:
             headers["Referer"] = referer
@@ -754,91 +648,13 @@ class EMAPDFProcessor:
                         f.write(pdf_bytes)
                     log.info(f"Saved raw PDF locally: {rel_path}")
 
-            # Raw-only mode: keep the PDF as-is (the vector store extracts it later),
-            # skip all LLM text-extraction. No MiniMax/OpenAI key required.
-            if self.skip_llm:
-                self.db.update_download_status(url, 'completed', size)
-                self.db.update_pdf_extraction(url, prod_num, med_name, doc_type,
-                                              'raw_saved', error=None)
-                return True
+            # Raw-only: the PDF is stored as-is for the vector store to handle.
+            # No text extraction and no LLM conversion happen here by design.
+            self.db.update_download_status(url, 'completed', size)
+            self.db.update_pdf_extraction(url, prod_num, med_name, doc_type,
+                                          'raw_saved', error=None)
+            return True
 
-            # 1. Text Extraction using pypdf
-            if PdfReader is None:
-                log.error("'pypdf' package is not installed. Install with: pip install pypdf")
-                self.db.update_download_status(url, 'failed', error="pypdf not installed")
-                return False
-                
-            try:
-                reader = PdfReader(io.BytesIO(pdf_bytes))
-                total_pages = len(reader.pages)
-                
-                max_pages = total_pages
-                if doc_type == "product-information":
-                    max_pages = min(total_pages, 15)
-                elif doc_type == "assessment-report":
-                    max_pages = min(total_pages, 30)
-                elif doc_type not in ["overview"]:
-                    max_pages = min(total_pages, 10)
-                    
-                pdf_text = ""
-                for i in range(max_pages):
-                    page_text = reader.pages[i].extract_text()
-                    if page_text:
-                        pdf_text += page_text + "\n"
-                        
-                pdf_text = pdf_text.strip()
-                if not pdf_text:
-                    log.warning(f"[{med_name}] Empty PDF text extracted from {url}")
-                    self.db.update_download_status(url, 'completed', size)
-                    self.db.update_pdf_extraction(url, prod_num, med_name, doc_type, 'empty_text', error="Empty text")
-                    return True
-                    
-            except Exception as e:
-                log.warning(f"[{med_name}] PDF text parsing failed for {url}: {e}")
-                self.db.update_download_status(url, 'failed', error=f"PDF text parse error: {e}")
-                return False
-
-            # 2. Invoke MiniMax-M3 LLM API for structured JSON extraction
-            if self.openai_client is None:
-                log.error("'openai' SDK not installed. Install with: pip install openai")
-                self.db.update_download_status(url, 'completed', size)
-                self.db.update_pdf_extraction(url, prod_num, med_name, doc_type, 'failed', error="openai SDK missing")
-                return True
-
-            system_prompt = get_prompt_for_doc_type(doc_type)
-            user_prompt = f"Document Text:\n{pdf_text}"
-            
-            api_retries = 3
-            api_backoff = 2.0
-            extracted_data = None
-            
-            for attempt in range(api_retries):
-                try:
-                    response = self.openai_client.chat.completions.create(
-                        model="MiniMax-M3",
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt}
-                        ],
-                        timeout=90.0
-                    )
-                    raw_reply = response.choices[0].message.content
-                    extracted_data = clean_and_parse_json(raw_reply)
-                    break
-                except Exception as e:
-                    log.warning(f"[{med_name}] MiniMax API call attempt {attempt+1} failed: {e}")
-                    if attempt < api_retries - 1:
-                        time.sleep(api_backoff * (attempt + 1))
-
-            if extracted_data:
-                self.db.update_pdf_extraction(url, prod_num, med_name, doc_type, 'completed', data=extracted_data)
-                self.db.update_download_status(url, 'completed', size)
-                log.info(f"Successfully extracted structured text from [{med_name}] -> {url}")
-                return True
-            else:
-                self.db.update_pdf_extraction(url, prod_num, med_name, doc_type, 'failed', error="LLM API retries exceeded")
-                self.db.update_download_status(url, 'completed', size)
-                return True
 
         except Exception as e:
             log.error(f"Error processing PDF {url}: {e}")
@@ -847,7 +663,7 @@ class EMAPDFProcessor:
 
     def process_all_queued(self, max_workers: int, limit: int = None):
         """Processes queued PDFs in parallel using ThreadPoolExecutor."""
-        log.info("Starting multi-threaded PDF text & LLM extractions...")
+        log.info("Starting multi-threaded raw PDF downloads...")
         pending_count = self.db.query("SELECT COUNT(*) FROM downloads WHERE status = 'pending';")[0][0]
         log.info(f"Found {pending_count} pending documents in queue.")
         
@@ -968,107 +784,7 @@ def download_all_additional_tables(session: requests.Session, output_dir: Path,
             
     log.info("Additional regulatory tables processing complete.")
 
-# -- CSV Extractions & Clinical Reports Exporter ------------------------------
-def export_extractions_to_csv(db: DatabaseManager, output_dir: Path):
-    """Exports structured document extractions, clinical trials, and drug summary CSVs."""
-    log.info("Exporting structured extractions to CSV reports...")
-    doc_csv = output_dir / "ema_pdf_extractions.csv"
-    trials_csv = output_dir / "ema_clinical_trials.csv"
-    summary_csv = output_dir / "ema_drug_summary.csv"
-
-    # 1. Document-level CSV
-    try:
-        rows = db.query("""
-            SELECT document_url, ema_product_number, medicine_name, document_type,
-                   extraction_status, extraction_error, extracted_at, nct_numbers,
-                   composition, therapeutic_indications, posology, contraindications,
-                   undesirable_effects, benefits_in_studies, benefit_risk_balance,
-                   document_summary, document_procedure_dates
-            FROM pdf_extractions;
-        """)
-        headers = [
-            "document_url", "ema_product_number", "medicine_name", "document_type",
-            "extraction_status", "extraction_error", "extracted_at", "nct_numbers",
-            "composition", "therapeutic_indications", "posology", "contraindications",
-            "undesirable_effects", "benefits_in_studies", "benefit_risk_balance",
-            "document_summary", "document_procedure_dates"
-        ]
-        with open(doc_csv, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow(headers)
-            writer.writerows(rows)
-        log.info(f"Exported document extractions report ({len(rows)} rows): {doc_csv}")
-    except Exception as e:
-        log.error(f"Failed to export document extractions CSV: {e}")
-
-    # 2. Trial-level CSV (Exploding clinical_trials JSON array)
-    try:
-        trial_rows = db.query("""
-            SELECT document_url, ema_product_number, medicine_name, clinical_trials_json
-            FROM pdf_extractions
-            WHERE clinical_trials_json IS NOT NULL AND clinical_trials_json != '';
-        """)
-        extracted_trials = []
-        trial_headers = [
-            "document_url", "ema_product_number", "medicine_name", "nct_id", "brief_title",
-            "official_title", "overall_status", "start_date", "sponsor", "condition", "phase",
-            "intervention_name", "intervention_type", "primary_outcome", "secondary_outcome",
-            "country", "study_type", "enrollment"
-        ]
-        for url, prod_num, med_name, json_str in trial_rows:
-            try:
-                trials_list = json.loads(json_str)
-                if isinstance(trials_list, list):
-                    for trial in trials_list:
-                        if isinstance(trial, dict):
-                            extracted_trials.append([
-                                url, prod_num, med_name,
-                                trial.get("nct_id"), trial.get("brief_title"), trial.get("official_title"),
-                                trial.get("overall_status"), trial.get("start_date"), trial.get("sponsor"),
-                                trial.get("condition"), trial.get("phase"), trial.get("intervention_name"),
-                                trial.get("intervention_type"), trial.get("primary_outcome"), trial.get("secondary_outcome"),
-                                trial.get("country"), trial.get("study_type"), trial.get("enrollment")
-                            ])
-            except Exception:
-                continue
-
-        with open(trials_csv, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow(trial_headers)
-            writer.writerows(extracted_trials)
-        log.info(f"Exported clinical trials report ({len(extracted_trials)} rows): {trials_csv}")
-    except Exception as e:
-        log.error(f"Failed to export clinical trials CSV: {e}")
-
-    # 3. Drug-level Summary CSV
-    try:
-        summary_rows = db.query("""
-            SELECT ema_product_number, medicine_name,
-                   GROUP_CONCAT(DISTINCT nct_numbers) AS nct_numbers,
-                   MAX(composition) AS composition,
-                   MAX(therapeutic_indications) AS therapeutic_indications,
-                   MAX(posology) AS posology,
-                   MAX(contraindications) AS contraindications,
-                   MAX(undesirable_effects) AS undesirable_effects,
-                   MAX(benefits_in_studies) AS benefits_in_studies,
-                   MAX(benefit_risk_balance) AS benefit_risk_balance
-            FROM pdf_extractions
-            WHERE extraction_status = 'completed'
-            GROUP BY ema_product_number, medicine_name;
-        """)
-        summary_headers = [
-            "ema_product_number", "medicine_name", "nct_numbers", "composition",
-            "therapeutic_indications", "posology", "contraindications",
-            "undesirable_effects", "benefits_in_studies", "benefit_risk_balance"
-        ]
-        with open(summary_csv, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow(summary_headers)
-            writer.writerows(summary_rows)
-        log.info(f"Exported drug-level summary report ({len(summary_rows)} rows): {summary_csv}")
-    except Exception as e:
-        log.error(f"Failed to export drug summary CSV: {e}")
-
+# -- Documents Metadata Exporter ---------------------------------------------
 def export_documents_metadata(db: DatabaseManager, output_dir: Path):
     """Exports scraped documents metadata from SQLite to a clean CSV file."""
     log.info("Exporting documents metadata to CSV...")
@@ -1095,7 +811,7 @@ def export_documents_metadata(db: DatabaseManager, output_dir: Path):
 # -- Command Line Interface & Main -------------------------------------------
 def main():
     parser = argparse.ArgumentParser(
-        description="Resilient, multi-threaded collector and in-memory LLM text extractor for EMA approvals (EPARs)."
+        description="Resilient, multi-threaded collector for EMA approvals (EPARs): CSV metadata + raw documents."
     )
     parser.add_argument(
         "--output-dir",
@@ -1129,19 +845,7 @@ def main():
     parser.add_argument(
         "--save-pdfs",
         action="store_true",
-        help="Optionally save raw PDF files to local disk/S3 in addition to text extraction."
-    )
-    parser.add_argument(
-        "--skip-llm",
-        action="store_true",
-        help="Download and keep raw PDFs only; skip MiniMax LLM extraction (no API key needed). "
-             "The vector store handles document extraction downstream."
-    )
-    parser.add_argument(
-        "--minimax-api-key",
-        type=str,
-        default=DEFAULT_MINIMAX_API_KEY,
-        help="API Key for MiniMax LLM API."
+        help="Save raw PDF files to local disk/S3 (the vector store extracts them downstream)."
     )
     parser.add_argument(
         "--limit-medicines",
@@ -1201,14 +905,12 @@ def main():
     # Step 2: Crawl individual EPAR pages for PDF links
     collector.crawl_all_medicines(max_workers=args.threads, limit=args.limit_medicines)
     
-    # Step 3: Stream PDFs in memory, extract text, and call MiniMax LLM
+    # Step 3: Stream PDFs in memory and store them raw
     if not args.skip_pdfs:
         processor = EMAPDFProcessor(
             db, session, output_dir,
-            api_key=args.minimax_api_key,
-            # skip-llm implies keeping the raw PDF, else the run yields no artifacts.
-            save_pdfs=args.save_pdfs or args.skip_llm,
-            skip_llm=args.skip_llm
+            # Always keep the raw PDF — it is the only artifact this step produces.
+            save_pdfs=True
         )
         processor.process_all_queued(max_workers=args.threads, limit=args.limit_downloads)
     else:
@@ -1216,7 +918,6 @@ def main():
         
     # Step 4: Export metadata & extractions to CSV reports (local; pipeline uploads)
     export_documents_metadata(db, output_dir)
-    export_extractions_to_csv(db, output_dir)
 
     log.info("EMA Downloader & Extractor process completed successfully.")
 

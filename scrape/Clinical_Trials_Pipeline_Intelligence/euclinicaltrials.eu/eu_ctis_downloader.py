@@ -104,10 +104,13 @@ STATUS_MAPPING = {
 def get_session():
     """Returns a requests Session configured with retries and exponential backoff."""
     session = requests.Session()
+    # CTIS signals burst throttling with 403 (not 429), and recovers within
+    # ~a minute. Without it here a throttle both kills the crawl (search) and
+    # silently drops detail_data (retrieve), so treat it as retryable.
     retry_strategy = Retry(
         total=5,
         backoff_factor=2.0,
-        status_forcelist=[429, 500, 502, 503, 504],
+        status_forcelist=[403, 429, 500, 502, 503, 504],
         allowed_methods=["GET", "POST"]
     )
     # Pool sized generously so concurrent worker threads don't contend for
@@ -327,8 +330,8 @@ def fetch_detail(session, trial):
 
     Mutates and returns the trial dict (adds ``detail_data`` on success).
     Every outbound request passes through the global RATE_LIMITER so the
-    combined rate across all worker threads stays bounded. HTTP 429/503 are
-    already retried with exponential backoff by the Session's Retry policy;
+    combined rate across all worker threads stays bounded. HTTP 403/429/503
+    are already retried with exponential backoff by the Session's Retry policy;
     a persistent failure is logged and the trial is kept without detail data.
     """
     trial_id = trial.get("ctNumber")

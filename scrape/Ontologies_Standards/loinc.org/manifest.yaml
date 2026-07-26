@@ -5,7 +5,10 @@ args: "crawl"
 in_place: true
 output_subdirs: [loinc_data]
 size_class: medium
-timeout_min: 180
+# Crawls up to 7,500 codes (NLM discovery API cap) at ~45 codes/min => ~170 min,
+# which all but touched the old 180 limit. 360 leaves headroom; the crawl is
+# resumable via loinc_progress.json, so a kill only ever costs the current code.
+timeout_min: 360
 mirror: false   # crawl mode resumes/appends via progress file (loinc_progress.json)
-enabled: true
+enabled: false
 xvfb: true                    # headful browser -> run under xvfb-run

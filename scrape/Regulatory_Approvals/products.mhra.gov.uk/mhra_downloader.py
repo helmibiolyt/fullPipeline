@@ -9,17 +9,17 @@ Features:
   1. Direct Azure Search Integration: Bypasses slow web scraping, HTML parsing,
      and 503 gateway proxy errors by querying their underlying Azure AI Search
      service directly.
-  2. In-Memory PDF Streaming & Text Extraction: Streams PDF files directly into
-     memory and extracts text using pypdf without requiring local disk storage.
-  3. Parallel Multi-LLM Data Extraction: Passes document text to LLMs in parallel
-     (Groq, Gemini, MiniMax) to extract structured regulatory intelligence.
-  4. Structured CSV Generation: Exports raw metadata combined with LLM-extracted
-     pharmacological fields to mhra_llm_extracted_data.csv.
-  5. Optional Local PDF Download: Allows saving local PDF files when --download-pdfs is specified.
-  6. Resumable Checkpoint System: Progress is recorded in a thread-safe JSON checkpoint.
+  2. Raw Document Storage: PDFs are streamed and saved to disk as-is. There is
+     no text extraction and no LLM conversion in this scraper — the vector store
+     handles documents downstream.
+  3. Structured CSV Generation: Exports per-document metadata (including the
+     local PDF path, which links each document back to its record) to
+     mhra_documents.csv, plus raw_metadata.csv.
+  4. Optional Local PDF Download: Allows saving local PDF files when --download-pdfs is specified.
+  5. Resumable Checkpoint System: Progress is recorded in a thread-safe JSON checkpoint.
 
 Requirements:
-    pip install requests pypdf python-dotenv
+    pip install requests
     (Optional) pip install tqdm
 """
 
@@ -47,12 +47,6 @@ try:
 except ImportError:
     tqdm = None
 
-# Optional pypdf for PDF text extraction
-try:
-    from pypdf import PdfReader
-except ImportError:
-    PdfReader = None
-
 # Load .env file automatically
 try:
     import dotenv
@@ -74,35 +68,10 @@ SEARCH_ENDPOINT = "https://mhraproducts4853.search.windows.net/indexes/products-
 API_KEY = "17CCFC430C1A78A169B392A35A99C49D"
 API_VERSION = "2017-11-11"
 
-MHRA_LLM_SYSTEM_PROMPT = """You are an expert pharmaceutical data extraction assistant analyzing UK MHRA (Medicines and Healthcare products Regulatory Agency) drug documents (SPC, PIL, PAR).
-Extract the following information accurately from the provided document text into a clean JSON object. If a field is not present or cannot be determined, use an empty string "".
-
-Return ONLY a JSON object with these exact keys:
-1. "therapeutic_indication": Primary medical condition(s), diseases, or symptoms the drug is indicated for.
-2. "posology_and_administration": Summary of recommended dosage, route of administration, and treatment regimen.
-3. "active_substances_detailed": Active ingredient names and exact strengths/concentrations.
-4. "contraindications": Conditions, allergies, or patient factors where administration is strictly prohibited.
-5. "adverse_effects_summary": Key or most common adverse reactions / side effects reported.
-6. "storage_conditions": Shelf life, temperature, and special storage requirements.
-7. "marketing_authorisation_holder": Company or MAH holder name.
-8. "approval_or_revision_date": Document revision or approval date if stated in the text.
-"""
-
-LLM_EXTRACTED_FIELDS = [
-    "therapeutic_indication",
-    "posology_and_administration",
-    "active_substances_detailed",
-    "contraindications",
-    "adverse_effects_summary",
-    "storage_conditions",
-    "marketing_authorisation_holder",
-    "approval_or_revision_date"
-]
-
 ALL_CSV_FIELDS = [
     "id", "product_name", "doc_type", "pl_number", "substance_name",
     "title", "created", "metadata_storage_size", "original_filename",
-    "azure_blob_url", "local_pdf_path", "llm_extraction_status",
+    "azure_blob_url", "local_pdf_path",
     "therapeutic_indication", "posology_and_administration",
     "active_substances_detailed", "contraindications",
     "adverse_effects_summary", "storage_conditions",
@@ -148,134 +117,6 @@ def build_session(max_retries: int) -> requests.Session:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     })
     return session
-
-# -- LLM Processing Utilities -----------------------------------------------
-def clean_json_response(content: str) -> dict:
-    """Helper to clean reasoning thoughts and markdown backticks from LLM responses."""
-    if "<think>" in content and "</think>" in content:
-        content = content.split("</think>", 1)[1].strip()
-    elif "<think>" in content:
-        parts = content.split("<think>", 1)
-        content = parts[0].strip() if len(parts[0].strip()) > 10 else parts[1].strip()
-        
-    content = content.strip()
-    if content.startswith("```json"):
-        content = content[7:]
-    elif content.startswith("```"):
-        content = content[3:]
-    if content.endswith("```"):
-        content = content[:-3]
-    content = content.strip()
-    
-    try:
-        parsed = json.loads(content)
-        if isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], dict):
-            parsed = parsed[0]
-        return parsed if isinstance(parsed, dict) else {}
-    except Exception:
-        return {}
-
-def extract_info_via_groq(text: str, groq_key: str) -> dict:
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": [
-            {"role": "system", "content": MHRA_LLM_SYSTEM_PROMPT},
-            {"role": "user", "content": f"MHRA DOCUMENT TEXT:\n{text[:30000]}"}
-        ],
-        "temperature": 0.1,
-        "response_format": {"type": "json_object"}
-    }
-    r = requests.post(url, headers=headers, json=payload, timeout=60)
-    r.raise_for_status()
-    content = r.json()["choices"][0]["message"]["content"]
-    return clean_json_response(content)
-
-def extract_info_via_gemini(text: str, gemini_key: str) -> dict:
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
-    payload = {
-        "contents": [{"parts": [{"text": f"{MHRA_LLM_SYSTEM_PROMPT}\n\nMHRA DOCUMENT TEXT:\n{text[:30000]}"}]}],
-        "generationConfig": {"response_mime_type": "application/json", "temperature": 0.1}
-    }
-    r = requests.post(url, json=payload, timeout=60)
-    r.raise_for_status()
-    content = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-    return clean_json_response(content)
-
-def extract_info_via_minimax(text: str, api_key: str, base_url: str) -> dict:
-    url = f"{base_url.rstrip('/')}/chat/completions"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    payload = {
-        "model": "MiniMax-M3",
-        "messages": [
-            {"role": "system", "content": MHRA_LLM_SYSTEM_PROMPT},
-            {"role": "user", "content": f"MHRA DOCUMENT TEXT:\n{text[:30000]}"}
-        ],
-        "temperature": 0.1,
-        "response_format": {"type": "json_object"}
-    }
-    r = requests.post(url, headers=headers, json=payload, timeout=90)
-    r.raise_for_status()
-    content = r.json()["choices"][0]["message"]["content"]
-    return clean_json_response(content)
-
-def extract_info_multi_llm(text: str, worker_id: int = 0) -> dict:
-    """Load balances LLM extraction requests across available providers (Groq, Gemini, MiniMax)."""
-    groq_key = os.getenv("GROQ_API_KEY")
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    minimax_key = os.getenv("MINIMAX_API_KEY")
-    minimax_base = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1")
-    
-    providers = []
-    if groq_key:
-        providers.append("groq")
-    if gemini_key:
-        providers.append("gemini")
-    if minimax_key:
-        providers.append("minimax")
-        
-    if not providers:
-        log.warning("No LLM API keys found in environment (GROQ_API_KEY, GEMINI_API_KEY, MINIMAX_API_KEY). Skipping LLM extraction.")
-        return {}
-        
-    start_index = worker_id % len(providers)
-    ordered_providers = providers[start_index:] + providers[:start_index]
-    
-    last_error = None
-    for p in ordered_providers:
-        try:
-            if p == "groq":
-                return extract_info_via_groq(text, groq_key)
-            elif p == "gemini":
-                return extract_info_via_gemini(text, gemini_key)
-            elif p == "minimax":
-                return extract_info_via_minimax(text, minimax_key, minimax_base)
-        except Exception as e:
-            log.warning(f"LLM provider {p} failed: {e}. Retrying with next provider...")
-            last_error = e
-            
-    log.error(f"All LLM providers failed. Last error: {last_error}")
-    return {}
-
-def extract_text_from_pdf_bytes(pdf_bytes: bytes, max_pages: int = 30) -> str:
-    """Extracts plain text from raw PDF bytes using pypdf in memory."""
-    if PdfReader is None:
-        log.error("'pypdf' package is not installed. Install with: pip install pypdf")
-        return ""
-    try:
-        reader = PdfReader(io.BytesIO(pdf_bytes))
-        total_pages = len(reader.pages)
-        pages_to_read = min(total_pages, max_pages)
-        extracted_text = []
-        for i in range(pages_to_read):
-            page_text = reader.pages[i].extract_text()
-            if page_text:
-                extracted_text.append(page_text)
-        return "\n".join(extracted_text).strip()
-    except Exception as e:
-        log.warning(f"Error parsing PDF text from bytes: {e}")
-        return ""
 
 # -- Metadata Harvester ------------------------------------------------------
 def harvest_metadata(session: requests.Session, limit: int = None) -> list:
@@ -403,10 +244,10 @@ def sanitize_filename(product_name: str, doc_type: str, pl_number: str, original
     filename = "_".join(parts) + ext
     return filename
 
-# -- Unified Metadata & LLM CSV Exporter -------------------------------------
+# -- Per-Document Metadata CSV Exporter --------------------------------------
 def append_to_extracted_csv(output_dir: Path, row_data: dict):
-    """Appends a single processed document record to mhra_llm_extracted_data.csv in a thread-safe manner."""
-    csv_file = output_dir / "mhra_llm_extracted_data.csv"
+    """Appends a single processed document record to mhra_documents.csv in a thread-safe manner."""
+    csv_file = output_dir / "mhra_documents.csv"
     file_exists = csv_file.exists()
     
     with csv_lock:
@@ -518,7 +359,7 @@ def cleanup_and_transform(output_dir: Path):
 # -- Main Execution Pipeline -------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(
-        description="MHRA UK approvals collector with in-memory PDF parsing and parallel LLM data extraction."
+        description="MHRA UK approvals collector: per-document metadata CSV plus raw PDFs."
     )
     parser.add_argument(
         "--output-dir", default=str(BASE_DIR / "mhra_data"), help="Directory to save output files and metadata."
@@ -527,13 +368,13 @@ def main():
         "--threads", type=int, default=5, help="Number of concurrent processing threads."
     )
     parser.add_argument(
-        "--max-retries", type=int, default=5, help="Maximum retries for failed downloads/LLM requests."
+        "--max-retries", type=int, default=5, help="Maximum retries for failed downloads."
     )
     parser.add_argument(
         "--timeout", type=int, default=30, help="Timeout in seconds for HTTP requests."
     )
     parser.add_argument(
-        "--dry-run", action="store_true", help="Scrape metadata index only, without processing PDF text or calling LLMs."
+        "--dry-run", action="store_true", help="Scrape metadata index only, without downloading PDFs."
     )
     parser.add_argument(
         "--limit", type=int, default=None, help="Limit the number of products to process (for testing)."
@@ -542,10 +383,7 @@ def main():
         "--doc-types", default=None, help="Comma-separated document types to process (e.g., 'Par,Spc')."
     )
     parser.add_argument(
-        "--download-pdfs", "--save-pdfs", action="store_true", default=False, help="Save local PDF files to disk in addition to text/LLM processing."
-    )
-    parser.add_argument(
-        "--skip-llm", action="store_true", default=False, help="Skip LLM extraction phase and only extract metadata/text."
+        "--download-pdfs", "--save-pdfs", action="store_true", default=False, help="Save local PDF files to disk (the vector store extracts them downstream)."
     )
     
     args = parser.parse_args()
@@ -553,7 +391,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     
     setup_logging(output_dir)
-    log.info("MHRA UK approvals data collector and LLM extractor started.")
+    log.info("MHRA UK approvals data collector started.")
     
     session = build_session(args.max_retries)
     checkpoint = load_checkpoint(output_dir)
@@ -603,7 +441,7 @@ def main():
         all_records = all_records[:args.limit]
         
     if args.dry_run:
-        log.info("Dry-run active. Exporting raw metadata without processing PDFs or calling LLMs...")
+        log.info("Dry-run active. Exporting raw metadata without downloading PDFs...")
         write_metadata(output_dir, all_records)
         log.info("Dry-run completed successfully.")
         return
@@ -697,19 +535,6 @@ def main():
                     f.write(pdf_bytes)
                 log.debug(f"Saved PDF to {dest_path}")
 
-            # 2. Extract text from PDF in memory
-            pdf_text = extract_text_from_pdf_bytes(pdf_bytes)
-            
-            # 3. Call LLM for extraction
-            llm_results = {}
-            llm_status = "skipped"
-            if not args.skip_llm:
-                if pdf_text:
-                    llm_results = extract_info_multi_llm(pdf_text, worker_id=worker_id)
-                    llm_status = "success" if llm_results else "failed"
-                else:
-                    llm_status = "empty_text"
-                    
             # 4. Construct output CSV row
             pl_str = ";".join(record.get("pl_number", [])) if isinstance(record.get("pl_number"), list) else record.get("pl_number", "")
             sub_str = ";".join(record.get("substance_name", [])) if isinstance(record.get("substance_name"), list) else record.get("substance_name", "")
@@ -726,15 +551,6 @@ def main():
                 "original_filename": record.get("file_name", ""),
                 "azure_blob_url": url,
                 "local_pdf_path": str(dest_path.relative_to(output_dir)) if args.download_pdfs else "",
-                "llm_extraction_status": llm_status,
-                "therapeutic_indication": llm_results.get("therapeutic_indication", ""),
-                "posology_and_administration": llm_results.get("posology_and_administration", ""),
-                "active_substances_detailed": llm_results.get("active_substances_detailed", ""),
-                "contraindications": llm_results.get("contraindications", ""),
-                "adverse_effects_summary": llm_results.get("adverse_effects_summary", ""),
-                "storage_conditions": llm_results.get("storage_conditions", ""),
-                "marketing_authorisation_holder": llm_results.get("marketing_authorisation_holder", ""),
-                "approval_or_revision_date": llm_results.get("approval_or_revision_date", "")
             }
             
             append_to_extracted_csv(output_dir, row_data)
@@ -772,12 +588,12 @@ def main():
     write_metadata(output_dir, all_records)
     
     log.info("==================================================")
-    log.info("         MHRA Processing & LLM Summary            ")
+    log.info("            MHRA Processing Summary               ")
     log.info("==================================================")
     log.info(f"Total product records: {len(all_records):,}")
     log.info(f"Successfully processed: {success_count:,}")
     log.info(f"Failed: {fail_count:,}")
-    log.info(f"Extracted LLM CSV saved to: {(output_dir / 'mhra_llm_extracted_data.csv').resolve()}")
+    log.info(f"Document metadata CSV saved to: {(output_dir / 'mhra_documents.csv').resolve()}")
     log.info("MHRA processor finished successfully.")
     
     cleanup_and_transform(output_dir)

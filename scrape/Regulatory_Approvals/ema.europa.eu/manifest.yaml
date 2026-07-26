@@ -1,9 +1,13 @@
 entrypoint: ema_downloader.py
-# Keep raw PDFs (vector store extracts them); no LLM/API key needed.
-args: "--save-pdfs --skip-llm"
+# Raw PDFs are stored as-is for the vector store; the PDF->LLM->CSV path has
+# been removed from the scraper entirely, so no API key is involved.
+# --download-all-tables exports the 10 additional EMA Excel tables (shortages,
+# orphans, referrals, PIPs, ...) to CSV; without it ema_data/additional_tables/
+# is declared below but never populated.
+args: "--save-pdfs --download-all-tables"
 in_place: true
 output_subdirs: [ema_data, ema_data/pdfs, ema_data/additional_tables]
 size_class: heavy
 timeout_min: 720
 mirror: true
-enabled: false   # TEMP: committed to S3 already — skip this recovery run
+enabled: true

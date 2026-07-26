@@ -257,7 +257,9 @@ def run_downloader(server: str, output_dir: Path, start_date: str, end_date: str
         if not meta_csv_exists:
             with open(metadata_csv_file, "w", newline="", encoding="utf-8") as f_csv:
                 csv.DictWriter(f_csv, fieldnames=csv_fields).writeheader()
-        return
+        # The first page failing means we fetched nothing at all — report it as a
+        # failure rather than publishing the header-only CSV as a good result.
+        return 1
 
     messages = first_data.get("messages", [])
     status = "unknown"
@@ -277,10 +279,15 @@ def run_downloader(server: str, output_dir: Path, start_date: str, end_date: str
         if not meta_csv_exists:
             with open(metadata_csv_file, "w", newline="", encoding="utf-8") as f_csv:
                 csv.DictWriter(f_csv, fieldnames=csv_fields).writeheader()
-        return
+        return 0  # genuinely empty range, not a failure
 
     # Map of offset -> collection list. Page 0 (resume cursor) is already fetched.
     page_results = {cursor: first_collection}
+
+    # Pages that never came back. A failed page is silently an empty page here,
+    # so without this the run would write a short CSV and still exit 0 — the
+    # orchestrator would publish the truncated result as a successful scrape.
+    fetch_failures = 0
 
     # ------------------------------------------------------------------
     # Step 2: work out the remaining offsets and fan them out in parallel.
@@ -311,6 +318,7 @@ def run_downloader(server: str, output_dir: Path, start_date: str, end_date: str
                         except Exception as e:
                             logger.error(f"Error fetching offset {off}: {e}")
                             page_results[off] = []
+                            fetch_failures += 1
             else:
                 # Sequential path (--threads 1); still rate-limited.
                 for off in offsets:
@@ -320,6 +328,7 @@ def run_downloader(server: str, output_dir: Path, start_date: str, end_date: str
                     except Exception as e:
                         logger.error(f"Error fetching offset {off}: {e}")
                         page_results[off] = []
+                        fetch_failures += 1
     else:
         # Fallback: total unknown -> walk pages sequentially (rate-limited) until empty.
         logger.info("Total unknown for this range; walking pages sequentially until exhausted.")
@@ -331,6 +340,7 @@ def run_downloader(server: str, output_dir: Path, start_date: str, end_date: str
                 d = fetch_api_page(server, start_date, end_date, off, delay=delay)
             except Exception as e:
                 logger.error(f"Error fetching offset {off}: {e}")
+                fetch_failures += 1
                 break
             coll = d.get("collection", []) or []
             if not coll:
@@ -397,6 +407,7 @@ def run_downloader(server: str, output_dir: Path, start_date: str, end_date: str
         f"Cursor now {next_cursor}. Progress: {processed_count}{total_target}."
     )
     logger.info(f"Session finished. Total {server} records processed in this session: {len(rows)}.")
+    return fetch_failures
 
 
 def main():
@@ -465,7 +476,7 @@ def main():
     log_file = output_path / "biorxiv_downloader.log"
     setup_logging(args.verbose, log_file)
 
-    run_downloader(
+    failures = run_downloader(
         server="biorxiv",
         output_dir=output_path,
         start_date=args.start_date,
@@ -475,6 +486,10 @@ def main():
         fresh=args.fresh,
         threads=threads
     )
+    # Fail loudly on a partial crawl so the pipeline does not publish it as complete.
+    if failures:
+        logger.error(f"{failures} page fetch(es) failed — crawl is incomplete.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

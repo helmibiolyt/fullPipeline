@@ -54,7 +54,7 @@ def _py(task_id, fn, src: Source, tg, dag, **kw):
 
 with DAG(
     dag_id="scrapers_pipeline",
-    description="Scrape 14 sources, back up locally, then atomically publish to S3.",
+    description="Scrape 43 sources, back up locally, then atomically publish to S3.",
     default_args=DEFAULT_ARGS,
     schedule="@weekly",
     start_date=pendulum.datetime(2026, 7, 1, tz="UTC"),
@@ -69,6 +69,12 @@ with DAG(
         if not src.enabled:            # discovered but not verified yet — skip
             continue
         with TaskGroup(group_id=src.slug) as tg:
+            # Restores the previous run's index/state (manifest `hydrate:`) so the
+            # scraper can skip what it already has. No-op when nothing is declared.
+            hydrate = _py(
+                "hydrate", lambda src, run_id: s3_io.hydrate(src, run_id),
+                src, tg, dag, retries=1,
+            )
             scrape = _py(
                 "scrape", lambda src, run_id: runner.run_scraper(src, run_id),
                 src, tg, dag,
@@ -116,7 +122,7 @@ with DAG(
             )
 
             # Local data is deleted only after a verified S3 commit (success path).
-            scrape >> collect >> validate >> upload >> verify >> commit >> [prune, cleanup]
+            hydrate >> scrape >> collect >> validate >> upload >> verify >> commit >> [prune, cleanup]
             [upload, verify, commit] >> rollback
 
         (last_groups if src.run_last else normal_groups).append((tg, scrape))

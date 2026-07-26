@@ -122,12 +122,17 @@ def download_file_stream(url: str, dest_path: Path) -> bool:
 # real tab-separated content); a non-existent path returns the SPA shell (~2.9 KB),
 # which download_and_convert guards against. Extend this map as EVS exposes more.
 KNOWN_STANDARDS = {
-    "SDTM": ["SDTM Terminology.txt"],
+    # CDASH terminology is published under the SDTM directory on EVS, not a
+    # CDASH/ one (verified: SDTM/CDASH Terminology.txt is text/plain, while
+    # CDASH/CDASH Terminology.txt returns the SPA HTML placeholder).
+    "SDTM": ["SDTM Terminology.txt", "CDASH Terminology.txt"],
     "SEND": ["SEND Terminology.txt"],
     "Protocol": ["Protocol Terminology.txt"],
     "Define-XML": ["Define-XML Terminology.txt"],
     "DDF": ["DDF Terminology.txt"],
     "TMF": ["TMF Terminology.txt"],
+    "ADaM": ["ADaM Terminology.txt"],
+    "Glossary": ["CDISC Glossary.txt"],
 }
 
 

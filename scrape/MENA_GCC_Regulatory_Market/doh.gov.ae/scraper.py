@@ -626,12 +626,6 @@ def main():
         xlsxs = list(folder.glob("*.xlsx")) + list(folder.glob("*.xls"))
         log.info(f"  {folder.name}: {len(csvs)} CSV, {len(pdfs)} PDF, {len(xlsxs)} Excel")
 
-    # Post-process: extract CSVs from PDF/Word/PPT files using MiniMax
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-    from process_files import process_scraper
-    log.info("Post-processing downloaded files with MiniMax...")
-    process_scraper(BASE_DIR)
-
-
 if __name__ == "__main__":
     main()

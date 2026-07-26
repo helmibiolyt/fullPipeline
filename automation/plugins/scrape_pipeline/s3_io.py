@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 
 import boto3
 
-from .paths import data_dir, manifest_path
+from .paths import data_dir, manifest_path, workdir
 from .registry import Source
 from .settings import (
     AWS_REGION,
@@ -53,6 +53,43 @@ def _list(s3, prefix: str) -> dict:
         for o in page.get("Contents", []):
             out[o["Key"]] = o["Size"]
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Step 0: hydrate — restore the previous run's index/state before scraping
+# --------------------------------------------------------------------------- #
+def hydrate(src: Source, run_id: str) -> None:
+    """Pull `manifest.hydrate` paths from the live S3 view into the scraper dir.
+
+    Scrapers know how to skip work they have already done, but they need last
+    run's index to do it: ctri reads completed IDs out of its own CSV, pmda
+    checks which documents it already fetched, and so on. The post-commit wipe
+    removes those files locally, so without this step every run restarts from
+    zero. Only the declared paths are fetched — never the document corpus,
+    which would cost more to download than the re-scrape it saves.
+
+    Missing objects are not an error: the first ever run, or a source whose
+    layout changed, simply starts fresh.
+    """
+    if not src.hydrate:
+        log.info("[%s] no hydrate paths declared; scraping from scratch", src.slug)
+        return
+
+    s3 = _client()
+    wd = workdir(src)
+    fetched = missing = 0
+    for rel in src.hydrate:
+        key = f"{src.s3_base}/{rel}"
+        dest = wd / rel
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            s3.download_file(S3_BUCKET, key, str(dest))
+            fetched += 1
+            log.info("[%s] hydrated %s (%.1f KB)", src.slug, rel, dest.stat().st_size / 1e3)
+        except Exception as e:  # noqa: BLE001 - absence is normal, not fatal
+            missing += 1
+            log.info("[%s] no prior %s in S3 (%s) — continuing", src.slug, rel, type(e).__name__)
+    log.info("[%s] hydrate complete: %d restored, %d absent", src.slug, fetched, missing)
 
 
 # --------------------------------------------------------------------------- #

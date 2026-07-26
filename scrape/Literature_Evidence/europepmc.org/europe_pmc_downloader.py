@@ -32,16 +32,9 @@ HEADERS = {
     "Accept": "application/json,application/xml",
 }
 
-# LLM fields to extract from full text
-LLM_FIELDS = [
-    "nct_id", "brief_title", "official_title", "overall_status", "start_date",
-    "sponsor", "condition", "phase", "intervention_name", "intervention_type",
-    "primary_outcome", "secondary_outcome", "country", "study_type", "enrollment",
-    "medicine_name", "ema_product_number", "active_substance", "composition", 
-    "therapeutic_indications", "posology", "contraindications", "undesirable_effects", 
-    "benefits_in_studies", "benefit_risk_balance", "document_type", "document_url",
-    "llm_relevant_details"
-]
+# Columns of europe_pmc_full_text.csv. The text is parsed straight out of the
+# JATS XML — no LLM is involved anywhere in this scraper.
+FULLTEXT_FIELDS = ["full_text", "text_chars"]
 
 # Logger setup
 logger = logging.getLogger("europe_pmc_downloader")
@@ -103,206 +96,11 @@ def fetch_full_text_xml(pmcid: str) -> str:
     return r.text
 
 # ---------------------------------------------------------------------------
-# MiniMax LLM Extraction
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Multi-LLM Extraction (Groq, Gemini, MiniMax)
-# ---------------------------------------------------------------------------
-
-SYSTEM_PROMPT = (
-    "You are an expert clinical trials and biomedical data extractor. Read the provided scientific article text "
-    "and extract the following details if they exist in the text. For any field not mentioned or not found in the text, "
-    "you MUST set its value to 'None'.\n\n"
-    "FIELDS TO EXTRACT:\n"
-    "- nct_id: ClinicalTrials.gov NCT identifier (e.g. NCT01234567)\n"
-    "- brief_title: Short title of the study\n"
-    "- official_title: Full/official title of the study\n"
-    "- overall_status: Recruitment/overall status of the study (e.g. Active, Completed, recruiting)\n"
-    "- start_date: Start date of the study\n"
-    "- sponsor: Lead sponsor or organization\n"
-    "- condition: The disease, syndrome, or health condition being studied\n"
-    "- phase: The clinical trial phase (e.g. Phase 1, Phase 2, Phase 3, Phase 4)\n"
-    "- intervention_name: Name of the drug, biologic, device, or intervention being tested\n"
-    "- intervention_type: Type of the intervention (e.g. Drug, Biologic, Procedure, Device)\n"
-    "- primary_outcome: The main measurement/outcome used to evaluate efficacy/safety\n"
-    "- secondary_outcome: Other important measurements/outcomes evaluated\n"
-    "- country: Country or countries where the study was conducted\n"
-    "- study_type: Study design (e.g. Interventional, Observational, Randomized Controlled Trial)\n"
-    "- enrollment: Planned or actual number of study participants\n"
-    "- medicine_name: Brand or common name of the medicine\n"
-    "- ema_product_number: The European Medicines Agency (EMA) product number if mentioned\n"
-    "- active_substance: Name of the active substance or drug compound\n"
-    "- composition: Chemical composition, ingredients, or vector details if mentioned\n"
-    "- therapeutic_indications: The approved or studied medical uses/indications\n"
-    "- posology: Dosage, administration route, schedule, or frequency\n"
-    "- contraindications: Conditions or factors that serve as a reason to withhold treatment\n"
-    "- undesirable_effects: Reported side effects, toxicities, or adverse events\n"
-    "- benefits_in_studies: Documented clinical benefits or positive outcomes from the studies\n"
-    "- benefit_risk_balance: The model's or study's assessment of the benefits vs risk ratio\n"
-    "- document_type: The type of document (e.g. overview, assessment report, scientific discussion)\n"
-    "- document_url: The URL or links to regulatory documents if mentioned in the text\n\n"
-    "Additionally, identify other important clinical/scientific facts not captured by the fields above, "
-    "and return them as key-value pairs in the 'relevant_info' object.\n\n"
-    "You MUST respond ONLY with a JSON object containing these exact 27 keys + 'relevant_info', with no extra formatting, "
-    "no explanation, and no comments. All values must be strings:\n"
-    "{\n"
-    "  \"nct_id\": \"None\",\n"
-    "  \"brief_title\": \"None\",\n"
-    "  \"official_title\": \"None\",\n"
-    "  \"overall_status\": \"None\",\n"
-    "  \"start_date\": \"None\",\n"
-    "  \"sponsor\": \"None\",\n"
-    "  \"condition\": \"None\",\n"
-    "  \"phase\": \"None\",\n"
-    "  \"intervention_name\": \"None\",\n"
-    "  \"intervention_type\": \"None\",\n"
-    "  \"primary_outcome\": \"None\",\n"
-    "  \"secondary_outcome\": \"None\",\n"
-    "  \"country\": \"None\",\n"
-    "  \"study_type\": \"None\",\n"
-    "  \"enrollment\": \"None\",\n"
-    "  \"medicine_name\": \"None\",\n"
-    "  \"ema_product_number\": \"None\",\n"
-    "  \"active_substance\": \"None\",\n"
-    "  \"composition\": \"None\",\n"
-    "  \"therapeutic_indications\": \"None\",\n"
-    "  \"posology\": \"None\",\n"
-    "  \"contraindications\": \"None\",\n"
-    "  \"undesirable_effects\": \"None\",\n"
-    "  \"benefits_in_studies\": \"None\",\n"
-    "  \"benefit_risk_balance\": \"None\",\n"
-    "  \"document_type\": \"None\",\n"
-    "  \"document_url\": \"None\",\n"
-    "  \"relevant_info\": {\n"
-    "     \"key_name_1\": \"value_1\"\n"
-    "  }\n"
-    "}"
-)
-
-def clean_json_response(content: str) -> dict:
-    """Helper to clean reasoning thoughts and markdown backticks from LLM responses."""
-    if "<think>" in content and "</think>" in content:
-        content = content.split("</think>", 1)[1].strip()
-    elif "<think>" in content:
-        parts = content.split("<think>", 1)
-        content = parts[0].strip() if len(parts[0].strip()) > 10 else parts[1].strip()
-        
-    content = content.strip()
-    if content.startswith("```json"):
-        content = content[7:]
-    elif content.startswith("```"):
-        content = content[3:]
-    if content.endswith("```"):
-        content = content[:-3]
-    content = content.strip()
-    
-    parsed = json.loads(content)
-    if isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], dict):
-        parsed = parsed[0]
-    return parsed if isinstance(parsed, dict) else {}
-
-def extract_info_via_groq(text: str, groq_key: str) -> dict:
-    """Sends text to Groq API (llama-3.3-70b-versatile)."""
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"ARTICLE TEXT:\n{text[:30000]}"}
-        ],
-        "temperature": 0.1,
-        "response_format": {"type": "json_object"}
-    }
-    r = requests.post(url, headers=headers, json=payload, timeout=60)
-    r.raise_for_status()
-    content = r.json()["choices"][0]["message"]["content"]
-    return clean_json_response(content)
-
-def extract_info_via_gemini(text: str, gemini_key: str) -> dict:
-    """Sends text to Google Gemini REST API (gemini-3.5-flash-lite)."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={gemini_key}"
-    payload = {
-        "contents": [{"parts": [{"text": f"{SYSTEM_PROMPT}\n\nARTICLE TEXT:\n{text[:30000]}"}]}],
-        "generationConfig": {"response_mime_type": "application/json", "temperature": 0.1}
-    }
-    r = requests.post(url, json=payload, timeout=60)
-    r.raise_for_status()
-    content = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-    return clean_json_response(content)
-
-def extract_info_via_minimax(text: str, api_key: str, base_url: str, model: str) -> dict:
-    """Sends text to MiniMax API."""
-    url = f"{base_url.rstrip('/')}/chat/completions"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"ARTICLE TEXT:\n{text[:30000]}"}
-        ],
-        "temperature": 0.1,
-        "response_format": {"type": "json_object"},
-        "extra_body": {"reasoning_split": True}
-    }
-    r = requests.post(url, headers=headers, json=payload, timeout=90)
-    r.raise_for_status()
-    content = r.json()["choices"][0]["message"]["content"]
-    return clean_json_response(content)
-
-def extract_info_multi_llm(text: str, worker_id: int = 0) -> dict:
-    """
-    Multi-LLM extractor that load-balances requests across Groq, Gemini, and MiniMax
-    with automatic failover to alternative providers.
-    """
-    groq_key = os.getenv("GROQ_API_KEY")
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    minimax_key = os.getenv("MINIMAX_API_KEY")
-    minimax_base = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1")
-    
-    # Build list of active providers
-    providers = []
-    if groq_key:
-        providers.append("groq")
-    if gemini_key:
-        providers.append("gemini")
-    if minimax_key:
-        providers.append("minimax")
-        
-    if not providers:
-        raise RuntimeError("No LLM API keys found in environment.")
-        
-    # Rotate primary provider based on worker_id
-    start_index = worker_id % len(providers)
-    ordered_providers = providers[start_index:] + providers[:start_index]
-    
-    last_error = None
-    for p in ordered_providers:
-        try:
-            if p == "groq":
-                logger.debug("Calling Groq API...")
-                return extract_info_via_groq(text, groq_key)
-            elif p == "gemini":
-                logger.debug("Calling Gemini API...")
-                return extract_info_via_gemini(text, gemini_key)
-            elif p == "minimax":
-                logger.debug("Calling MiniMax API...")
-                return extract_info_via_minimax(text, minimax_key, minimax_base, "MiniMax-M3")
-        except Exception as e:
-            logger.warning(f"Provider {p} failed: {e}. Trying next provider...")
-            last_error = e
-            
-    raise RuntimeError(f"All LLM providers failed. Last error: {last_error}")
-
-# ---------------------------------------------------------------------------
 # Parallel Worker for Article Processing
 # ---------------------------------------------------------------------------
 
-def process_single_article(article_data: dict, api_key: str, base_url: str, model: str, worker_id: int = 0) -> dict:
-    """
-    Worker function to fetch XML, parse clean text, and call multi-LLM extraction.
-    """
+def process_single_article(article_data: dict, worker_id: int = 0) -> dict:
+    """Fetch an article's JATS XML and return its cleaned narrative text."""
     art_id = article_data["id"]
     pmcid = article_data.get("pmcid")
     
@@ -321,21 +119,12 @@ def process_single_article(article_data: dict, api_key: str, base_url: str, mode
         if not clean_text or len(clean_text.strip()) < 100:
             return {"id": art_id, "status": "empty_text", "error": "Cleaned text body was too short or empty"}
             
-        # 3. Call Multi-LLM Extractor
-        llm_data = extract_info_multi_llm(clean_text, worker_id=worker_id)
-        
-        # Build result dictionary with fallback to 'None'
-        res_dict = {
+        return {
             "id": art_id,
-            "status": "success"
+            "status": "success",
+            "full_text": clean_text,
+            "text_chars": len(clean_text),
         }
-        for field in LLM_FIELDS:
-            if field == "llm_relevant_details":
-                relevant = llm_data.get("relevant_info", {})
-                res_dict["llm_relevant_details"] = json.dumps(relevant, ensure_ascii=False) if relevant else "None"
-            else:
-                res_dict[field] = llm_data.get(field, "None")
-        return res_dict
     except Exception as e:
         logger.error(f"Error processing article {art_id} ({pmcid}): {e}")
         return {"id": art_id, "status": "failed", "error": str(e)}
@@ -444,7 +233,7 @@ def parse_fulltext_urls(result: dict) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Search Europe PMC, download metadata to CSV, and extract clinical facts with MiniMax LLM."
+        description="Search Europe PMC, download metadata to CSV, and store cleaned open-access full text."
     )
     parser.add_argument(
         "--query",
@@ -509,21 +298,16 @@ def main():
         help="Ignore previous progress and run a clean search crawl."
     )
     parser.add_argument(
-        "--extract-llm",
+        "--extract-fulltext", "--extract-llm",
+        dest="extract_fulltext",
         action="store_true",
-        help="Enable full-text XML extraction and MiniMax LLM clinical facts extraction."
+        help="Fetch open-access JATS XML and store the cleaned article text as CSV."
     )
     parser.add_argument(
         "--threads",
         type=int,
         default=5,
-        help="Number of concurrent threads to use for XML fetching and LLM calls."
-    )
-    parser.add_argument(
-        "--llm-model",
-        type=str,
-        default="MiniMax-M3",
-        help="MiniMax model name to use."
+        help="Number of concurrent threads to use for XML fetching."
     )
     parser.add_argument(
         "--verbose",
@@ -551,15 +335,7 @@ def main():
     fulltext_csv_file = output_path / "europe_pmc_full_text.csv"
     progress_file = output_path / "europe_pmc_progress.json"
 
-    # 2. Secure API Credentials if LLM is enabled
-    api_key = os.getenv("MINIMAX_API_KEY")
-    base_url = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1")
     
-    if args.extract_llm:
-        if not api_key:
-            logger.error("MINIMAX_API_KEY environment variable not found in .env or environment. LLM extraction aborted.")
-            sys.exit(1)
-        logger.info(f"LLM Extraction active using model: {args.llm_model}")
 
     # 3. Formulate Query
     query_parts = [args.query]
@@ -611,7 +387,7 @@ def main():
         except Exception as e:
             logger.warning(f"Could not read existing metadata CSV: {e}")
 
-    completed_llm_ids = set()
+    completed_ft_ids = set()
     if not args.fresh and fulltext_csv_file.exists():
         try:
             with open(fulltext_csv_file, "r", encoding="utf-8") as f:
@@ -620,8 +396,8 @@ def main():
                 if header:
                     for row in reader:
                         if row:
-                            completed_llm_ids.add(row[0])
-            logger.info(f"Loaded {len(completed_llm_ids):,} existing records from {fulltext_csv_file} for LLM de-duplication.")
+                            completed_ft_ids.add(row[0])
+            logger.info(f"Loaded {len(completed_ft_ids):,} existing records from {fulltext_csv_file} for full-text de-duplication.")
         except Exception as e:
             logger.warning(f"Could not read existing full text CSV: {e}")
 
@@ -633,13 +409,13 @@ def main():
         "has_pdf", "cited_by_count", "date_of_creation", "first_publication_date", "full_text_urls"
     ]
     
-    llm_fields = ["id"] + LLM_FIELDS + ["extracted_at"]
+    fulltext_csv_fields = ["id", "status"] + FULLTEXT_FIELDS + ["extracted_at"]
     
     meta_csv_exists = metadata_csv_file.exists() and not args.fresh
-    llm_csv_exists = fulltext_csv_file.exists() and not args.fresh
+    ft_csv_exists = fulltext_csv_file.exists() and not args.fresh
     
     meta_mode = "a" if meta_csv_exists else "w"
-    llm_mode = "a" if llm_csv_exists else "w"
+    ft_mode = "a" if ft_csv_exists else "w"
     
     # Open CSV files
     f_meta = open(metadata_csv_file, meta_mode, newline="", encoding="utf-8")
@@ -648,14 +424,14 @@ def main():
         meta_writer.writeheader()
         f_meta.flush()
 
-    f_llm = None
-    llm_writer = None
-    if args.extract_llm:
-        f_llm = open(fulltext_csv_file, llm_mode, newline="", encoding="utf-8")
-        llm_writer = csv.DictWriter(f_llm, fieldnames=llm_fields)
-        if not llm_csv_exists:
-            llm_writer.writeheader()
-            f_llm.flush()
+    f_ft = None
+    ft_writer = None
+    if args.extract_fulltext:
+        f_ft = open(fulltext_csv_file, ft_mode, newline="", encoding="utf-8")
+        ft_writer = csv.DictWriter(f_ft, fieldnames=fulltext_csv_fields)
+        if not ft_csv_exists:
+            ft_writer.writeheader()
+            f_ft.flush()
 
     # 7. Search & Pagination Loop
     api_url = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
@@ -721,7 +497,7 @@ def main():
 
             # 7a. Parse & Save Metadata
             new_records = []
-            llm_queue = []
+            ft_queue = []
             
             for res in results:
                 art_id = res.get("id")
@@ -729,10 +505,10 @@ def main():
                     continue
                     
                 meta_already_exists = art_id in completed_ids
-                needs_llm = args.extract_llm and art_id not in completed_llm_ids
+                needs_ft = args.extract_fulltext and art_id not in completed_ft_ids
                 
-                # Skip if metadata exists and we do not need LLM extraction
-                if meta_already_exists and not needs_llm:
+                # Skip if metadata exists and we do not need full-text extraction
+                if meta_already_exists and not needs_ft:
                     logger.debug(f"  Skipping existing record for {art_id}")
                     continue
                     
@@ -799,11 +575,11 @@ def main():
                     completed_ids.add(art_id)
                     new_records.append(art_id)
                 
-                # Queue open-access article for LLM extraction if enabled and needed
-                if needs_llm:
+                # Queue open-access article for full-text extraction if enabled and needed
+                if needs_ft:
                     # Check if article has XML capability (must have a PMCID and be open-access/inPMC)
                     if res.get("pmcid") and (res.get("isOpenAccess") == "Y" or res.get("inEPMC") == "Y" or res.get("inPMC") == "Y"):
-                        llm_queue.append(res)
+                        ft_queue.append(res)
             
             f_meta.flush()
             processed_count += len(new_records)
@@ -811,36 +587,36 @@ def main():
             
             logger.info(f"  Saved {len(new_records)} new metadata rows. Progress: {processed_count}/{args.limit if args.limit > 0 else hit_count}")
 
-            # 7b. Parse & Save LLM Dynamic Details (Thread Pool processing)
-            if args.extract_llm and llm_queue:
-                logger.info(f"  Starting LLM processing for {len(llm_queue)} open-access XMLs with {args.threads} threads...")
+            # 7b. Fetch & save cleaned full text (thread pool processing)
+            if args.extract_fulltext and ft_queue:
+                logger.info(f"  Starting full-text XML processing for {len(ft_queue)} open-access XMLs with {args.threads} threads...")
                 
                 with ThreadPoolExecutor(max_workers=args.threads) as executor:
                     futures = {
-                        executor.submit(process_single_article, art, api_key, base_url, args.llm_model, idx): art["id"] 
-                        for idx, art in enumerate(llm_queue)
+                        executor.submit(process_single_article, art, idx): art["id"] 
+                        for idx, art in enumerate(ft_queue)
                     }
                     
-                    llm_success = 0
-                    llm_fail = 0
+                    ft_success = 0
+                    ft_fail = 0
                     for fut in as_completed(futures):
                         art_id = futures[fut]
                         try:
                             result = fut.result()
                             if result.get("status") == "success":
                                 result["extracted_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-                                # Write to LLM CSV
-                                llm_writer.writerow({k: result[k] for k in llm_fields})
-                                f_llm.flush()
-                                completed_llm_ids.add(art_id)
-                                llm_success += 1
+                                # Write to full-text CSV
+                                ft_writer.writerow({k: result.get(k, "") for k in fulltext_csv_fields})
+                                f_ft.flush()
+                                completed_ft_ids.add(art_id)
+                                ft_success += 1
                             else:
                                 logger.warning(f"    Failed to extract facts for {art_id}: {result.get('error')}")
-                                llm_fail += 1
+                                ft_fail += 1
                         except Exception as exc:
                             logger.error(f"    Exception raised for {art_id}: {exc}")
-                            llm_fail += 1
-                logger.info(f"  LLM batch processing complete. Success: {llm_success}, Failed: {llm_fail}")
+                            ft_fail += 1
+                logger.info(f"  Full-text batch processing complete. Success: {ft_success}, Failed: {ft_fail}")
 
             # 7c. Save Progress State
             with open(progress_file, "w", encoding="utf-8") as pf:
@@ -877,13 +653,13 @@ def main():
         logger.info("Progress saved. You can run the command again to resume.")
     finally:
         f_meta.close()
-        if f_llm:
-            f_llm.close()
+        if f_ft:
+            f_ft.close()
             
     logger.info("=" * 60)
     logger.info(f"CRAWL COMPLETE. Metadata saved to: {metadata_csv_file}")
-    if args.extract_llm:
-        logger.info(f"LLM details saved to: {fulltext_csv_file}")
+    if args.extract_fulltext:
+        logger.info(f"Full text saved to: {fulltext_csv_file}")
     logger.info("=" * 60)
 
 if __name__ == "__main__":

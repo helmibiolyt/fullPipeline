@@ -461,10 +461,6 @@ def main():
 
     # Post-processing
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-    from process_files import process_scraper
-    log.info("Post-processing downloaded files with MiniMax...")
-    process_scraper(BASE_DIR)
-
     log.info("=" * 60)
     log.info("OpenFDA scraper complete")
     log.info("=" * 60)

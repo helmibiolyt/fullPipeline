@@ -6,6 +6,4 @@ pandas
 openpyxl
 beautifulsoup4
 # NON-COMMON (flag for automation/requirements.txt):
-pypdf
-openai
 tqdm

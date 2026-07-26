@@ -178,10 +178,5 @@ def main():
     log.info("All scraping complete.")
 
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-    from process_files import process_scraper
-    log.info("Post-processing downloaded files with MiniMax...")
-    process_scraper(BASE_DIR)
-
-
 if __name__ == "__main__":
     main()

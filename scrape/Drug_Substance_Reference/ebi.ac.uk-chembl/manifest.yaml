@@ -4,4 +4,6 @@ output_subdirs: [chembl_data]
 size_class: heavy
 timeout_min: 720
 mirror: true
-enabled: false   # bulk-DB source: full data = download-db (~20GB SQLite) + table->CSV extraction. Deferred (deliberate heavy job).
+# Bulk-DB source: chembl_37_sqlite.tar.gz is 5.37 GB compressed and expands to
+# ~20 GB of SQLite before CSV extraction — expect ~30 GB peak disk.
+enabled: false

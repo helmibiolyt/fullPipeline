@@ -11,4 +11,5 @@ output_subdirs: [jrct_trials]
 size_class: medium
 timeout_min: 360
 mirror: false
+# Verified reachable without a proxy (the old 403 was datacenter-IP only).
 enabled: false

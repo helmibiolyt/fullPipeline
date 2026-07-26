@@ -86,8 +86,12 @@ def discover_codes_via_nlm(limit: int = 7500) -> list:
             else:
                 break
         except Exception as e:
-            logger.error(f"  Error fetching from NLM API at offset {offset}: {e}")
-            break
+            # Swallowing this silently shrank the target list, so the crawl would
+            # "complete" against a truncated set of codes and look successful.
+            raise RuntimeError(
+                f"LOINC code discovery failed at offset {offset} after "
+                f"{len(codes):,} code(s): {e}"
+            ) from e
         offset += batch_size
         time.sleep(0.2)  # Polite delay
 
@@ -244,7 +248,7 @@ def run_crawler(output_dir: Path, codes_file: str, limit: int, delay: float):
     
     if not target_codes:
         logger.error("No LOINC codes to crawl. Exiting.")
-        return
+        sys.exit(1)
 
     # 2. Initialize progress tracking
     progress = {}

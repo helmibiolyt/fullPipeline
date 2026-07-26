@@ -6,4 +6,4 @@ output_subdirs: [MedDRA]
 size_class: small
 timeout_min: 90
 mirror: true
-enabled: false   # TEMP: committed to S3 already — skip this recovery run
+enabled: false

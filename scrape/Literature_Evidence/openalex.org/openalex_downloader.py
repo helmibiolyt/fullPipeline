@@ -613,7 +613,7 @@ def run_partition_worker(
     state = tracker.get_partition_state(partition_name)
     if state.get("completed", False):
         logger.info(f"Partition {partition_name} is already marked as completed. Skipping.")
-        return
+        return False
         
     cursor = state.get("cursor", "*")
     per_page = 100
@@ -690,7 +690,11 @@ def run_partition_worker(
                 
         except Exception as e:
             logger.error(f"[{partition_name}] Critical error in partition loop: {e}")
-            break
+            # Abandoning the partition mid-stream leaves it incomplete. Report that
+            # upward instead of falling through and exiting 0 with partial data.
+            return True
+
+    return False
 
 # ---------------------------------------------------------------------------
 # Main Orchestration Loop
@@ -827,6 +831,9 @@ def run_downloader(
             "filter": all_filter
         })
         
+    # Partitions that aborted mid-stream; any of them means an incomplete harvest.
+    partition_failures = 0
+
     # Run loop
     if len(partitions) > 1:
         # Spin up thread pool executor
@@ -848,13 +855,15 @@ def run_downloader(
                 
             for fut in as_completed(futures):
                 try:
-                    fut.result()
+                    if fut.result():
+                        partition_failures += 1
                 except Exception as e:
                     logger.error(f"Thread worker raised unhandled exception: {e}")
+                    partition_failures += 1
     else:
         # Run sequentially
         p = partitions[0]
-        run_partition_worker(
+        if run_partition_worker(
             partition_name=p["name"],
             filters=p["filter"],
             query=query,
@@ -862,9 +871,18 @@ def run_downloader(
             writer=writer,
             tracker=tracker,
             global_counter=global_counter
-        )
-        
+        ):
+            partition_failures += 1
+
     logger.info("=" * 60)
+    if partition_failures:
+        logger.error(
+            f"   HARVEST INCOMPLETE: {partition_failures} partition(s) aborted early. "
+            f"Parsed & saved so far: {global_counter.value}"
+        )
+        logger.info("=" * 60)
+        # Non-zero exit keeps the pipeline from publishing a partial harvest.
+        sys.exit(1)
     logger.info(f"   HARVEST PROCESS COMPLETE. Total parsed & saved records: {global_counter.value}")
     logger.info("=" * 60)
 

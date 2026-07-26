@@ -9,4 +9,4 @@ output_subdirs:
 size_class: medium
 timeout_min: 120
 mirror: true
-enabled: false   # TEMP: committed to S3 already — skip recovery run
+enabled: false

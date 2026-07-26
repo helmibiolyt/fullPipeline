@@ -408,5 +408,10 @@ def main():
     log.info(f"Session elapsed time           : {total_elapsed:.1f} seconds")
     log.info("=" * 70)
 
+    # A truncated run must fail loudly. Exiting 0 here made the orchestrator treat
+    # a partial dataset as a successful scrape and publish it over the live view.
+    if current_offset < target_total:
+        sys.exit(1)
+
 if __name__ == "__main__":
     main()

@@ -5,4 +5,4 @@ output_subdirs: [biorxiv]
 size_class: small
 timeout_min: 60
 mirror: false
-enabled: false   # TEMP: committed to S3 already — skip this recovery run
+enabled: false

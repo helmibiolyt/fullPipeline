@@ -38,6 +38,11 @@ class Source:
     run_last: bool = False
     # True = run under xvfb-run (headful browser needs a virtual X display).
     xvfb: bool = False
+    # Paths (relative to the source's S3 base) pulled back down from the live
+    # view before scraping, so a scraper can resume where the last run stopped.
+    # Keep this to small state/index files — never the document corpus, or the
+    # download would cost more than the re-scrape it saves. Empty = no hydrate.
+    hydrate: List[str] = field(default_factory=list)
 
     @property
     def slug(self) -> str:
@@ -67,6 +72,7 @@ def _from_manifest(manifest: Path) -> Source:
         enabled=m.get("enabled", True),
         run_last=m.get("run_last", False),
         xvfb=m.get("xvfb", False),
+        hydrate=m.get("hydrate") or [],
     )
 
 

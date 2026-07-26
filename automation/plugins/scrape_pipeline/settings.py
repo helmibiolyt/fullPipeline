@@ -41,6 +41,16 @@ KEEP_LOCAL_RUNS = int(os.environ.get("KEEP_LOCAL_RUNS", "0"))
 # durable copy. 0 = keep scraper folders (more disk, enables cross-run resume).
 WIPE_SCRAPER_DIR = os.environ.get("WIPE_SCRAPER_DIR", "1").lower() not in ("0", "false", "no")
 
+# Scraper resume state (checkpoints, progress files, per-source SQLite). These
+# survive the post-commit wipe: they are KB-to-MB sized while the data they
+# describe is GB sized, and deleting them forced every weekly run to re-crawl
+# each source from scratch. Matched case-insensitively against the file name.
+# KEEP_SCRAPER_STATE=0 restores the old behaviour (wipe everything).
+KEEP_SCRAPER_STATE = os.environ.get("KEEP_SCRAPER_STATE", "1").lower() not in ("0", "false", "no")
+
+STATE_FILE_SUFFIXES = {".db", ".db-wal", ".db-shm", ".sqlite", ".sqlite3"}
+STATE_NAME_MARKERS = ("checkpoint", "progress", "tracker", "_state", "completed_", "_ids")
+
 # Mirror-mode safety guard. A full-replace commit refuses to delete stale live
 # data if the new run has fewer than this fraction of the currently-live file
 # count OR total bytes — i.e. a partial/failed scrape can never wipe good data.

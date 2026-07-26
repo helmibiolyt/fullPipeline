@@ -347,13 +347,7 @@ def main():
         csvs = list(folder.glob("*.csv"))
         print(f"  {folder.relative_to(BASE_DIR)}: {len(csvs)} CSV file(s)")
 
-    # Post-process: extract CSVs from PDF/Word/PPT files using MiniMax
     import sys
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-    from process_files import process_scraper
-    print("Post-processing downloaded files with MiniMax...")
-    process_scraper(BASE_DIR)
-
-
 if __name__ == "__main__":
     main()

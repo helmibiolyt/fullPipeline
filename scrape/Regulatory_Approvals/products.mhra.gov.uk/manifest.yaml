@@ -1,6 +1,7 @@
 entrypoint: mhra_downloader.py
-# Keep raw PDFs + metadata CSV (vector store extracts docs); no LLM/API key needed.
-args: "--download-pdfs --skip-llm"
+# Raw PDFs + metadata CSVs (mhra_documents.csv, raw_metadata.csv). The
+# PDF->LLM->CSV path has been removed from the scraper, so no API key is used.
+args: "--download-pdfs"
 in_place: true
 output_subdirs: [mhra_data, mhra_data/pdfs]
 size_class: medium
@@ -8,4 +9,4 @@ size_class: medium
 # 0 = no time limit: never kill it while it's still making progress.
 timeout_min: 0
 mirror: true
-enabled: true
+enabled: false

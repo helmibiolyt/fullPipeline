@@ -1,8 +1,10 @@
 entrypoint: eu_ctis_downloader.py
-args: "--full --threads 5"   # threaded per-trial detail fetches (~5 req/s cap)
+# Threaded per-trial detail fetches. 5 threads @ 5 req/s tripped CTIS burst
+# throttling (403) after ~200 requests; 2 req/s stays under it.
+args: "--full --threads 2 --max-rps 2"
 in_place: true
 output_subdirs: [ctis_data]
 size_class: heavy
 timeout_min: 360
 mirror: true
-enabled: true
+enabled: false

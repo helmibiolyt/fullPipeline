@@ -1,9 +1,17 @@
 entrypoint: pmda_collector.py
-# Keep raw PDFs + metadata CSV (vector store extracts docs); no LLM/API key needed.
-args: "--skip-llm"
+# Raw PDFs + pmda_metadata.csv (with local_pdf_path). The PDF->LLM->CSV path has
+# been removed from the collector, so downloading docs is now the only mode.
 in_place: true
 output_subdirs: [pmda_data, pmda_data/pdfs, pmda_data/master_lists]
 size_class: medium
 timeout_min: 240
-mirror: true
-enabled: false   # TEMP: committed to S3 already — skip this recovery run
+# INCREMENTAL PILOT ---------------------------------------------------------
+# hydrate restores last run's index (90 KB) — never the PDFs. The collector
+# carries those rows forward and downloads only documents it has not seen, so a
+# weekly run costs a few new PDFs instead of re-fetching all ~550.
+hydrate: [pmda_data/pmda_metadata.csv]
+# Additive: the run intentionally re-uploads only new PDFs, so a full-replace
+# commit would delete every document it skipped. mirror MUST stay false while
+# this source is incremental.
+mirror: false
+enabled: false

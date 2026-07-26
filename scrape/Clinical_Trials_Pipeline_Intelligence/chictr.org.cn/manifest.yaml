@@ -9,5 +9,9 @@ output_subdirs: [chictr_trails2]
 size_class: medium
 timeout_min: 180
 mirror: true
-enabled: false
+# NOTE: the search endpoints (searchproj*.html, showprojEN.html) return 405 from
+# non-China IPs even through real headless Chromium, while the homepage returns
+# 200 — the WAF blocks the search path specifically. Expect this task to fail
+# until a China-based proxy is available; S3 already holds the Old_DataLake copy.
+enabled: true
 xvfb: true                    # headful browser -> run under xvfb-run
