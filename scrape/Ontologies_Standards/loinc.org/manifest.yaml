@@ -17,5 +17,21 @@ hydrate: [loinc_data/loinc_crawled_codes.csv]
 # under loinc_data/ and a full-replace commit would delete all 74 of those files,
 # since a crawl-mode run never reproduces them.
 mirror: false
-enabled: true
+# DISABLED: crawl mode is redundant and cannot get past the site anyway.
+#
+# S3 already holds the official bulk release - 76 files, 1.0 GB, including
+# LoincTable/Loinc.csv at 82 MB with all ~100,000 codes across 40 columns.
+# Every field the crawler scrapes from web pages is already in that table under
+# LOINC's own column names (TIME_ASPCT, SCALE_TYP, METHOD_TYP, RELATEDNAMES2).
+# loinc_crawled_codes.csv, the entire product of crawl mode, is 10 rows.
+#
+# Meanwhile loinc.org sits behind Wordfence and 403s the crawler: 7,500 of 7,500
+# requests failed on 2026-07-26, and a browser User-Agent did not change that.
+# Running it weekly means re-earning an IP block to collect nothing.
+#
+# The bulk release changes roughly twice a year and needs an account plus a
+# captcha, so refreshing it is a deliberate manual step:
+#   python loinc_downloader.py bulk-download --username <u> --password <p>
+# Re-enable only when that is wired up; do NOT re-enable crawl mode.
+enabled: false
 xvfb: true                    # headful browser -> run under xvfb-run
