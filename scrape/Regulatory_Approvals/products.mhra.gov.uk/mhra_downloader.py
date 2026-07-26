@@ -447,13 +447,30 @@ def main():
         return
         
     # -- Phase 2: Build Processing Queue --------------------------------------
+    # Documents already published to S3, restored by the pipeline's hydrate step.
+    # checkpoint.json tracks progress but never leaves the host, so without this a
+    # fresh machine re-downloads all ~43k PDFs S3 already holds. Filenames are
+    # deterministic (sanitize_filename), so matching on the relative path is safe.
+    published = set()
+    idx_path = output_dir / "mhra_documents.csv"
+    if idx_path.exists():
+        with open(idx_path, newline="", encoding="utf-8", errors="replace") as f:
+            for row in csv.DictReader(f):
+                p = (row.get("local_pdf_path") or "").strip().replace("\\", "/")
+                if p:
+                    published.add(p)
+        log.info(f"{len(published):,} document(s) already published to S3 will be skipped.")
+    else:
+        log.info("No previous mhra_documents.csv - treating this as a first run.")
+
     process_queue = []
-    
+    already_have = 0
+
     for idx, r in enumerate(all_records):
         url = r.get("metadata_storage_path")
         if not url:
             continue
-            
+
         doc_type = str(r.get("doc_type", "unknown")).lower()
         product_name = r.get("product_name", "unknown")
         pl_number = r.get("pl_number", [])
@@ -466,7 +483,11 @@ def main():
         r["local_pdf_path"] = rel_pdf_path
         
         state_record = checkpoint["processed_urls"].get(url, {})
-        if state_record.get("status") == "completed":
+        if rel_pdf_path and rel_pdf_path.replace("\\", "/") in published:
+            # Already in S3 from an earlier run; keep the row so the metadata CSV
+            # stays complete, but do not fetch the file again.
+            already_have += 1
+        elif state_record.get("status") == "completed":
             log.debug(f"Document already processed in checkpoint: {dest_filename}")
         else:
             process_queue.append({
@@ -480,7 +501,8 @@ def main():
                 "original_filename": original_filename
             })
             
-    log.info(f"Total documents in queue for processing: {len(process_queue):,}")
+    log.info(f"{len(all_records):,} catalogued | {already_have:,} already in S3 | "
+             f"{len(process_queue):,} to download")
     
     if not process_queue:
         log.info("All documents are already processed. Writing metadata...")

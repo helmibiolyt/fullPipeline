@@ -8,5 +8,12 @@ size_class: medium
 # Downloads raw PDFs for all MHRA products — a large, resumable crawl (checkpoint.json).
 # 0 = no time limit: never kill it while it's still making progress.
 timeout_min: 0
-mirror: true
+# INCREMENTAL. raw_metadata.csv catalogues 65,329 distinct documents but only
+# 43,218 were ever downloaded (~66%), so ~22,000 have never been fetched by any
+# run. hydrate restores the 4 MB index of what S3 already holds; the scraper
+# skips those and downloads only the gap, instead of re-fetching 21.4 GB.
+hydrate: [mhra_data/mhra_documents.csv]
+# MUST stay false: the run re-uploads only new PDFs, so a full-replace commit
+# would delete the 43,218 it skipped.
+mirror: false
 enabled: false
