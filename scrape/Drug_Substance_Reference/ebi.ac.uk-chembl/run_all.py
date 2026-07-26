@@ -43,9 +43,12 @@ TABLES = {
     "target_dictionary": ("chembl_targets.csv", [
         "tid", "chembl_id", "pref_name", "target_type", "organism",
     ]),
-    # accession is the UniProt id -> canonical Target key
+    # accession is the UniProt id -> canonical Target key.
+    # The column is component_type, not sequence_type (checked against
+    # schema_documentation.txt for ChEMBL 37). `sequence` itself is excluded:
+    # full protein sequences would bloat the CSV for no graph benefit.
     "component_sequences": ("chembl_target_components.csv", [
-        "component_id", "accession", "sequence_type", "description", "organism",
+        "component_id", "accession", "component_type", "description", "organism",
     ]),
     "target_components": ("chembl_target_component_map.csv", [
         "tid", "component_id", "homologue",
