@@ -896,7 +896,12 @@ def run_downloader(
         # attempts, so a retry after the API budget ran dry sees zero even
         # though the previous attempt left 8.7M records on disk uncommitted.
         # Judge the file, not the counter.
-        works_csv = Path(output_dir) / f"{file_prefix}_works.csv"
+        # Ask the writer where it put the file rather than rebuilding the name:
+        # file_prefix is already "openalex_works", so composing
+        # f"{file_prefix}_works.csv" looked right and pointed at a file that has
+        # never existed, which made this branch report "no output file" while
+        # 18.83 GB sat beside it.
+        works_csv = writer.works_file
         on_disk = works_csv.stat().st_size if works_csv.exists() else 0
         if on_disk <= 0:
             logger.error(
