@@ -6,4 +6,4 @@ output_subdirs: [europe_pmc]
 size_class: heavy              # full-text XML fetch + multi-LLM extraction; large/slow
 timeout_min: 360
 mirror: false                  # cursor-based resume + de-dup; additive/incremental
-enabled: true
+enabled: false

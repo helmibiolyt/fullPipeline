@@ -246,6 +246,15 @@ def main():
     else:
         start_offset = load_progress_state(progress_path, jsonl_path)
         file_mode = "a" if start_offset > 0 else "w"
+        # The progress file survives the pipeline's post-commit wipe but the CSV
+        # does not, so it is restored by the `hydrate` step. If it is absent we
+        # would append to nothing and emit a headerless, partial dataset — start
+        # over instead, which is slower but always correct.
+        if start_offset > 0 and not csv_path.exists():
+            log.warning("Resume offset %s but %s is missing — restarting from 0.",
+                        f"{start_offset:,}", csv_path.name)
+            start_offset = 0
+            file_mode = "w"
 
     target_total = min(args.limit, total_api_records) if args.limit is not None else total_api_records
 
@@ -408,9 +417,14 @@ def main():
     log.info(f"Session elapsed time           : {total_elapsed:.1f} seconds")
     log.info("=" * 70)
 
-    # A truncated run must fail loudly. Exiting 0 here made the orchestrator treat
-    # a partial dataset as a successful scrape and publish it over the live view.
-    if current_offset < target_total:
+    # The GSRS API gateway-times-out (504) on deep pagination, so a single run
+    # legitimately may not reach the end of 173k records. A run that ADVANCED is
+    # still publishable: the CSV is hydrated then appended to, so its output is a
+    # strict superset of what is live, and successive runs converge.
+    # A run that fetched nothing, however, is a real failure and must not be
+    # reported as success — that is what silently published a 621 KB dataset.
+    if records_downloaded_session == 0:
+        log.error("No records downloaded this session — failing so the run is retried.")
         sys.exit(1)
 
 if __name__ == "__main__":

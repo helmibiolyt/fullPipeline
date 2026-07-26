@@ -13,5 +13,5 @@ mirror: true
 # non-China IPs even through real headless Chromium, while the homepage returns
 # 200 — the WAF blocks the search path specifically. Expect this task to fail
 # until a China-based proxy is available; S3 already holds the Old_DataLake copy.
-enabled: true
+enabled: false
 xvfb: true                    # headful browser -> run under xvfb-run

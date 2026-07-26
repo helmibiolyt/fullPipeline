@@ -2,9 +2,15 @@ entrypoint: gsrs_downloader.py
 in_place: true
 output_subdirs: [gsrs_data]
 size_class: medium
-# 173k substance records. ~550 rec/min on the 2-CPU EC2 box => ~5 h, so the old
-# 180 limit killed the run around 60%. The crawl resumes from gsrs_progress.json,
-# which now survives the post-commit wipe.
+# 173k substance records at ~550-2000 rec/min depending on host, so a complete
+# pass takes hours; 180 min used to kill it around 60%.
 timeout_min: 480
+# The GSRS API 504s on deep pagination (observed at skip=25,000 after 5 retries),
+# so one run often cannot finish. hydrate restores the CSV that gsrs_progress.json
+# points into, letting the scraper append and converge across runs — without it
+# the resume offset would apply to a missing file and emit a partial dataset.
+hydrate: [gsrs_data/gsrs_substances.csv]
+# Safe as full-replace: each run outputs the hydrated CSV plus new rows, so the
+# result is always a superset of what is live.
 mirror: true
 enabled: true
