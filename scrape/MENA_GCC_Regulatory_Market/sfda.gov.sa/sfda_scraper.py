@@ -125,6 +125,15 @@ KNOWN_EMPTY_TITLES = {
     "hospitals that reported side effects",
 }
 
+
+def _scalar(v) -> str:
+    """Flatten one API field to a CSV cell, dropping nested structures."""
+    if v is None:
+        return ""
+    if isinstance(v, (str, int, float, bool)):
+        return str(v)
+    return json.dumps(v, ensure_ascii=False)
+
 # Datasets that require JavaScript rendering and cannot be scraped with plain HTTP.
 # Hospitals Side Effects is excluded — genuinely empty ("No results found").
 JS_DATASETS = [
@@ -144,9 +153,34 @@ JS_DATASETS = [
         "title":   "Drugs Under Studying List",
         "url":     "/en/underStudyingList",
     },
+    # "List of Registered Human/Herbal/Veterinary Drugs" is NOT here. Its pager is
+    # AJAX-driven: the next-page anchor carries no href and the numbered links are
+    # href="#", so deriving a next-page URL from the rendered pager cannot work and
+    # the crawl stopped after page 1 - 20 rows of a 9,005-row register. It is
+    # fetched from the JSON endpoint that pager calls instead; see API_DATASETS.
+]
+
+# Datasets backed by a JSON endpoint. Paging these over HTTP is both far more
+# reliable than driving a browser and much richer: the endpoint returns ~88
+# fields per drug where the rendered table shows six.
+API_DATASETS = [
     {
-        "title":   "List of Registered Human/Herbal/Veterinary Drugs",
-        "url":     "/en/drugs-list",
+        "title":    "List of Registered Human/Herbal/Veterinary Drugs",
+        "endpoint": "/GetDrugs.php",
+        "form":     {"TradeName": "", "scientificName": "", "Agent": "",
+                     "ManufacturerName": "", "RegNo": ""},
+        # Scalar columns worth keeping; the response also carries nested lists
+        # (drugAgents, drugPricing, ...) that do not belong in a flat CSV.
+        "columns": [
+            "registerNumber", "registerYear", "oldRegisterNumber", "referenceNumber",
+            "gtin", "certificateDate", "tradeName", "tradeNameAr", "scientificName",
+            "scientificNameAr", "atcCode1", "atcCode2", "packageSize", "size",
+            "strength", "shelfLife", "price", "wholesalePrice", "cifPrice",
+            "publicPricingDate", "domain", "drugType", "drugBranch", "packageType",
+            "sizeUnit", "strengthUnit", "administrationRoute", "pharmaceuticalForm",
+            "storageConditions", "marketingStatus", "legalStatus", "productControl",
+            "authorizationStatus", "distributionArea", "company", "secondaryPackaging",
+        ],
     },
 ]
 
@@ -696,6 +730,60 @@ class SFDAScraper:
 
     # ── CSV output ─────────────────────────────────────────────────────────
 
+    def scrape_api_dataset(self, ds: dict) -> bool:
+        """Page a JSON-backed dataset over HTTP rather than through the browser.
+
+        The response reports pageCount and rowCount, so the loop knows exactly
+        when it is done instead of guessing from the markup. Asking for a page
+        past the end returns the last page again rather than an error, which is
+        why the bound comes from pageCount and not from an empty result.
+        """
+        url = urljoin(BASE_URL, ds["endpoint"])
+        cols = ds["columns"]
+        log.info("─" * 58)
+        log.info("Dataset (API): %s", ds["title"])
+        log.info("Endpoint     : %s", url)
+
+        rows: List[List[str]] = []
+        page = 1
+        page_count = None
+        row_count = None
+
+        while True:
+            form = dict(ds["form"], page=str(page))
+            try:
+                r = self.session.post(
+                    url, data=form, timeout=60,
+                    headers={"X-Requested-With": "XMLHttpRequest"})
+                r.raise_for_status()
+                result = r.json()["data"]["result"]
+            except Exception as e:  # noqa: BLE001
+                log.error("  API page %d failed for '%s': %s", page, ds["title"], e)
+                break
+
+            if page_count is None:
+                page_count = int(result.get("pageCount") or 0)
+                row_count = int(result.get("rowCount") or 0)
+                log.info("  %s row(s) across %s page(s)", f"{row_count:,}", f"{page_count:,}")
+
+            for item in result.get("results") or []:
+                rows.append([_scalar(item.get(c)) for c in cols])
+
+            if not page_count or page >= page_count:
+                break
+            page += 1
+            time.sleep(self.delay)
+
+        self.write_csv(ds["title"], cols, rows, url)
+        if row_count and len(rows) < row_count:
+            # Short of what the endpoint itself said exists: real, and invisible
+            # to any check that only asks whether the file has rows.
+            log.error("  ✗ '%s' incomplete: %d of %d row(s) collected",
+                      ds["title"], len(rows), row_count)
+            self.failed_datasets.append(ds["title"])
+            return False
+        return True
+
     def write_csv(self, title: str, headers: List[str],
                   rows: List[List[str]], source_url: str) -> str:
         """
@@ -1104,6 +1192,19 @@ class SFDAScraper:
             attempted, saved = self.scrape_playwright_datasets(target_slug)
             total_found += attempted
             total_saved += saved
+
+        # JSON-backed datasets need no browser, so they run regardless of
+        # --playwright: the flag exists for the browser, not for these.
+        api_targets = API_DATASETS
+        if target_slug:
+            api_targets = [d for d in API_DATASETS
+                           if target_slug in d["endpoint"] or target_slug in d["title"].lower()]
+        if api_targets:
+            log.info("\n▶  Section: JSON API DATASETS")
+            for ds in api_targets:
+                total_found += 1
+                if self.scrape_api_dataset(ds):
+                    total_saved += 1
 
         log.info("\n" + "=" * 58)
         log.info("Done — %d/%d datasets saved to: %s",
