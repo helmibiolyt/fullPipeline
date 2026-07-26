@@ -6,6 +6,12 @@ import csv, io, os, sys, pathlib
 from collections import defaultdict
 import boto3
 
+# Windows console/file defaults to cp1252; scraped headers contain non-ASCII.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 # creds from automation/.env
 env = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "automation/.env")
 for line in env.read_text(encoding="utf-8").splitlines():

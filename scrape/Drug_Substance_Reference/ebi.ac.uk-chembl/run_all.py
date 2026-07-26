@@ -61,7 +61,21 @@ TABLES = {
         "molregno", "mesh_id", "mesh_heading", "efo_id", "efo_term", "max_phase_for_ind",
     ]),
     "molecule_atc_classification": ("chembl_atc.csv", ["molregno", "level5"]),
+    # Salt/ester form -> parent molecule, stated as fact rather than guessed by
+    # stripping "hydrochloride"/"sodium"/... off names. Salt-form confusion is a
+    # main way drug resolution goes wrong, so this drives Substance merging.
+    "molecule_hierarchy": ("chembl_molecule_hierarchy.csv", None),
+    # Small lookups that make derived nodes principled instead of ad hoc:
+    "action_type": ("chembl_action_types.csv", None),        # enriches Mechanism
+    "usan_stems": ("chembl_usan_stems.csv", None),           # -mab/-tide -> Modality
+    "component_synonyms": ("chembl_component_synonyms.csv", None),  # Target names
 }
+
+# Small companion file on the same FTP: ChEMBL target id -> UniProt accession,
+# which is the key our Target nodes use. Saved as CSV because the pipeline only
+# publishes CSV and documents - a .txt would be dropped by collect.
+UNIPROT_MAP_URL = ("https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/latest/"
+                   "chembl_uniprot_mapping.txt")
 
 CHUNK = 50_000
 
@@ -118,6 +132,33 @@ def export(db_path: Path) -> int:
     return written
 
 
+def fetch_uniprot_map() -> bool:
+    """Fetch the ChEMBL target -> UniProt mapping and store it as CSV."""
+    import urllib.request
+    out = DATA_DIR / "chembl_uniprot_mapping.csv"
+    try:
+        req = urllib.request.Request(UNIPROT_MAP_URL, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=120) as r:
+            text = r.read().decode("utf-8", errors="replace")
+    except Exception as e:  # noqa: BLE001 - a missing companion file must not fail the run
+        print(f"  [warn] could not fetch uniprot mapping: {e}", flush=True)
+        return False
+
+    rows = 0
+    with open(out, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["uniprot_accession", "chembl_target_id", "target_name", "target_type"])
+        for line in text.splitlines():
+            if not line.strip() or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 2:
+                w.writerow(parts[:4] + [""] * (4 - len(parts[:4])))
+                rows += 1
+    print(f"  [ok]   uniprot mapping{'':<24} -> {out.name:<34} {rows:>9,} rows", flush=True)
+    return rows > 0
+
+
 def main() -> None:
     print("=== chembl: download-db ===", flush=True)
     rc = subprocess.run([sys.executable, "chembl_downloader.py", "download-db"],
@@ -129,6 +170,8 @@ def main() -> None:
     print(f"\n=== chembl: exporting tables from {db.name} "
           f"({db.stat().st_size / 1e9:.1f} GB) ===", flush=True)
     written = export(db)
+    print("\n=== chembl: companion files ===", flush=True)
+    fetch_uniprot_map()
     if not written:
         sys.exit("no tables exported - refusing to report success with no CSV output")
 

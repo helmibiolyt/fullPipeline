@@ -10,8 +10,6 @@ timeout_min: 720
 mirror: true
 # Bulk-DB source: chembl_37_sqlite.tar.gz is 5.37 GB compressed and expands to
 # ~20 GB of SQLite before CSV extraction — expect ~30 GB peak disk.
-# Disabled for now: the CSV export path is in place (run_all.py) but the
-# ~30 GB download/extract has not been run. S3 still holds only the 55.9 KB of
-# sample queries, so Drug->TARGETS / HAS_MECHANISM / INDICATED_FOR will be thin
-# in the graph until this runs.
-enabled: false
+# Enabled: this is the last real data gap. Without it TARGETS, HAS_MECHANISM,
+# INDICATED_FOR and HAS_MODALITY rest on opentargets alone (6 therapeutic areas).
+enabled: true
