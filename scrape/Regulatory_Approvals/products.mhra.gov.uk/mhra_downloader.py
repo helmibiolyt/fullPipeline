@@ -257,6 +257,65 @@ def append_to_extracted_csv(output_dir: Path, row_data: dict):
                 writer.writeheader()
             writer.writerow(row_data)
 
+def normalise_index(output_dir: Path) -> None:
+    """Rewrite mhra_documents.csv under the canonical header if it carries another.
+
+    append_document_record opens the index in append mode and writes a header
+    only when the file is absent. hydrate restores the index from S3 before
+    every run, so the file is always present and its existing header is kept
+    whatever it says.
+
+    That silently corrupted the index once already. The bootstrap index was four
+    columns (local_pdf_path, file_size_bytes, doc_type, source) while this
+    scraper writes ALL_CSV_FIELDS, so a run appended 30,399 twenty-column rows
+    underneath a four-column header. Read back by name, local_pdf_path then
+    yields the record id - '39b0a80b' rather than 'pdfs/pil/....pdf' - and the
+    skip set silently loses every one of those documents, so the next run
+    re-downloads around 13 GB it already has.
+
+    Migrating costs one pass over a few MB and makes the index self-healing.
+    """
+    idx_path = output_dir / "mhra_documents.csv"
+    if not idx_path.exists():
+        return
+    with open(idx_path, newline="", encoding="utf-8", errors="replace") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+    if header is None or header == ALL_CSV_FIELDS:
+        return
+
+    log.warning("mhra_documents.csv has a foreign header (%d cols); migrating to "
+                "the canonical %d-column schema.", len(header), len(ALL_CSV_FIELDS))
+    # Rows may be a mix of schemas. Recover each by finding the field that looks
+    # like a document path, whatever column it sits in, rather than trusting the
+    # header that is already known to be wrong.
+    migrated = []
+    with open(idx_path, newline="", encoding="utf-8", errors="replace") as f:
+        for row in csv.reader(f):
+            if not row or row == header:
+                continue
+            named = dict(zip(header, row)) if len(row) == len(header) else {}
+            path = (named.get("local_pdf_path") or "").strip()
+            if not path.replace("\\", "/").startswith("pdfs/"):
+                path = next((c for c in row
+                             if c.replace("\\", "/").startswith("pdfs/")), "")
+            if not path:
+                continue
+            rec = {k: "" for k in ALL_CSV_FIELDS}
+            rec["local_pdf_path"] = path.replace("\\", "/")
+            rec["doc_type"] = named.get("doc_type") or ""
+            rec["metadata_storage_size"] = named.get("file_size_bytes") or ""
+            migrated.append(rec)
+
+    tmp = idx_path.with_suffix(".csv.tmp")
+    with open(tmp, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=ALL_CSV_FIELDS)
+        w.writeheader()
+        w.writerows(migrated)
+    tmp.replace(idx_path)
+    log.info("Migrated %d index row(s) to the canonical schema.", len(migrated))
+
+
 def write_metadata(output_dir: Path, records: list):
     """Writes raw and unified metadata to CSV and JSON files."""
     csv_file = output_dir / "raw_metadata.csv"
@@ -453,6 +512,7 @@ def main():
     # deterministic (sanitize_filename), so matching on the relative path is safe.
     published = set()
     idx_path = output_dir / "mhra_documents.csv"
+    normalise_index(output_dir)
     if idx_path.exists():
         with open(idx_path, newline="", encoding="utf-8", errors="replace") as f:
             for row in csv.DictReader(f):
