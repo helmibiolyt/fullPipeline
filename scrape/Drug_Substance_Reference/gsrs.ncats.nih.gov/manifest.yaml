@@ -2,6 +2,9 @@ entrypoint: gsrs_downloader.py
 in_place: true
 output_subdirs: [gsrs_data]
 size_class: medium
-timeout_min: 180
+# 173k substance records. ~550 rec/min on the 2-CPU EC2 box => ~5 h, so the old
+# 180 limit killed the run around 60%. The crawl resumes from gsrs_progress.json,
+# which now survives the post-commit wipe.
+timeout_min: 480
 mirror: true
 enabled: true
