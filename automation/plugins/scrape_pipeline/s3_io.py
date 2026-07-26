@@ -208,10 +208,17 @@ def commit(src: Source, run_id: str) -> None:
             )
 
     # 1) Copy new data into the live view (server-side, no re-download).
+    #
+    # s3.copy(), not s3.copy_object(): a single-part CopyObject is capped at 5 GB
+    # and fails with InvalidRequest above it. openalex_works.csv is 18.83 GB and
+    # was the first object to cross that line - the upload succeeded, the
+    # checksum verified, and the commit then could not move it into place.
+    # The managed copy splits anything oversized into a multipart copy itself,
+    # and is still server-side: nothing is downloaded through this host.
     for rel in sorted(new_rel):
-        s3.copy_object(
-            Bucket=S3_BUCKET,
+        s3.copy(
             CopySource={"Bucket": S3_BUCKET, "Key": f"{rp}/data/{rel}"},
+            Bucket=S3_BUCKET,
             Key=f"{src.s3_base}/{rel}",
         )
     log.info("[%s] copied %d objects into live view", src.slug, len(new_rel))
