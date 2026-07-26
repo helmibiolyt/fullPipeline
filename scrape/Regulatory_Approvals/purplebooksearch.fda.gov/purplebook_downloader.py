@@ -639,7 +639,24 @@ class PurpleBookDataUnifier:
             "associated_patents_count", "patent_numbers", "patent_expirations"
         ]
         
-        # 1. Write patent_list.csv from parsed patents data
+        # 1. Write the enriched product table. This is the file the whole
+        # unification exists to produce; without it the run publishes only the
+        # raw monthly dump and the patent/reference linking is thrown away.
+        with open(csv_output_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+            writer.writeheader()
+            for item in enriched_products:
+                linked = item.get("patents") or []
+                row = dict(item)
+                row["associated_patents_count"] = len(linked)
+                row["patent_numbers"] = "; ".join(
+                    p.get("patent_number", "") for p in linked if p.get("patent_number"))
+                row["patent_expirations"] = "; ".join(
+                    p.get("expiration_date", "") for p in linked if p.get("expiration_date"))
+                writer.writerow(row)
+        log.info(f"Wrote {len(enriched_products):,} enriched product rows to {csv_output_path.name}")
+
+        # 2. Write patent_list.csv from parsed patents data
         patent_csv_path = self.output_dir / "patent_list.csv"
         if patents:
             with open(patent_csv_path, 'w', newline='', encoding='utf-8') as f:
@@ -647,7 +664,7 @@ class PurpleBookDataUnifier:
                 writer.writeheader()
                 writer.writerows(patents)
                 
-        # 2. Write glossary.csv from parsed glossary definitions
+        # 3. Write glossary.csv from parsed glossary definitions
         glossary_csv_path = self.output_dir / "glossary.csv"
         with open(glossary_csv_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
@@ -655,7 +672,7 @@ class PurpleBookDataUnifier:
             for k, v in glossary.items():
                 writer.writerow([k, v])
 
-        # 3. Clean up temporary html and js files
+        # 4. Clean up temporary html and js files
         for filename in ["patent_list.html", "glossary.js"]:
             temp_file = self.output_dir / filename
             if temp_file.exists():
@@ -665,10 +682,11 @@ class PurpleBookDataUnifier:
                     pass
 
         log.info(f"Unification complete. Only CSV files kept in output directory:")
+        log.info(f"  Enriched products CSV: {csv_output_path}")
         log.info(f"  Monthly raw CSV: {self.csv_path}")
         log.info(f"  Patents CSV: {patent_csv_path}")
         log.info(f"  Glossary CSV: {glossary_csv_path}")
-        return self.csv_path
+        return csv_output_path
 
 # -- Main Entry Point & Orchestration -----------------------------------------
 def main():
