@@ -130,7 +130,7 @@ leg = [
  (None, "    AdverseEvent   ← open.fda FAERS 3.0 GB (drug_substance → reaction, seriousness, outcome)"),
  (None, "                       + vigiaccess (MedDRA System Organ Class)"),
  (None, "    Publication    ← europepmc / pubmed / openalex / biorxiv / medrxiv  (DOI, PMID, mesh_terms)"),
- (None, "                       also the citation bridge to the vector store"),
+ (None, "                       built from the literature CSVs, like every other node"),
 ]
 y = 7.0
 for col,txt in leg:

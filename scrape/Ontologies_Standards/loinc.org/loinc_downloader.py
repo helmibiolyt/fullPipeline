@@ -303,7 +303,9 @@ def run_crawler(output_dir: Path, codes_file: str, limit: int, delay: float):
             
         total = len(pending_codes)
         start_time = time.time()
-        
+        written = 0
+        errored = 0
+
         for idx, code in enumerate(pending_codes, 1):
             logger.info(f"[{idx}/{total}] ({(idx/total)*100:.1f}%) Crawling: {code}")
             
@@ -315,9 +317,11 @@ def run_crawler(output_dir: Path, codes_file: str, limit: int, delay: float):
                     writer.writerow(data)
                     f.flush()
                     progress[code] = "completed"
+                    written += 1
             except Exception as e:
                 logger.error(f"  Failed to crawl {code}: {e}")
                 progress[code] = "failed"
+                errored += 1
                 
             # Update progress file
             with open(progress_file, "w", encoding="utf-8") as pf:
@@ -333,7 +337,17 @@ def run_crawler(output_dir: Path, codes_file: str, limit: int, delay: float):
             if idx < total:
                 time.sleep(delay)
 
-    logger.info(f"Crawling complete. Data saved to: {csv_file}")
+    logger.info(f"Crawling complete: {written:,} written, {errored:,} errored "
+                f"out of {total:,} attempted. Data saved to: {csv_file}")
+
+    # Codes that error stay out of 'completed', so the next run retries them and
+    # the crawl self-heals. What must not pass silently is a session that wrote
+    # nothing at all - a block or a DNS failure looks exactly like success once
+    # the exit code is 0, and the pipeline would publish the run as complete.
+    if written == 0:
+        logger.error("No LOINC codes were crawled successfully this session - "
+                     "failing so the run is retried rather than published.")
+        sys.exit(1)
 
 # ---------------------------------------------------------------------------
 # Mode 2: Bulk Download Mode (Playwright-assisted auth zip download)
