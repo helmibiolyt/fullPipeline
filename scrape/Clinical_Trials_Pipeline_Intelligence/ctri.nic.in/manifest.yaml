@@ -4,4 +4,4 @@ output_subdirs: [ctri_trials]
 size_class: heavy
 timeout_min: 1200
 mirror: false
-enabled: true
+enabled: false

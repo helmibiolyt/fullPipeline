@@ -9,8 +9,12 @@ timeout_min: 480
 # so one run often cannot finish. hydrate restores the CSV that gsrs_progress.json
 # points into, letting the scraper append and converge across runs — without it
 # the resume offset would apply to a missing file and emit a partial dataset.
-hydrate: [gsrs_data/gsrs_substances.csv]
+# The progress file is hydrated alongside the CSV it indexes: the two must be
+# restored together or the resume offset points into a file that is not there.
+# S3 currently holds a complete crawl (completed: true, 173,081 records), so the
+# next run will see the target already reached and exit without re-crawling.
+hydrate: [gsrs_data/gsrs_substances.csv, gsrs_data/gsrs_progress.json]
 # Safe as full-replace: each run outputs the hydrated CSV plus new rows, so the
 # result is always a superset of what is live.
 mirror: true
-enabled: true
+enabled: false
