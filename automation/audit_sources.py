@@ -45,12 +45,21 @@ _IGNORE_HOSTS = {
     "www.w3.org", "localhost", "127.0.0.1", "amazonaws.com",
 }
 
+# Below this a CSV cannot hold a header plus a row, so it is empty in practice.
+EMPTY_CSV_BYTES = 50
+
 _CSV_LIT = re.compile(r"""["']([A-Za-z0-9_.\-/\\ ]+\.csv)["']""")
 _URL = re.compile(r"""https?://([A-Za-z0-9.\-]+)""")
 
 
+# Scripts that live beside a scraper but are not part of scraping. Their
+# filename literals are analysis inputs, not declared outputs, and treating
+# them as outputs produces flags nobody should act on.
+_NON_SCRAPER_SCRIPTS = {"__init__.py", "generate_report.py", "make_report.py"}
+
+
 def _py_files(d: Path):
-    return sorted(p for p in d.glob("*.py") if p.name != "__init__.py")
+    return sorted(p for p in d.glob("*.py") if p.name not in _NON_SCRAPER_SCRIPTS)
 
 
 def check_imports(src, root: Path, timeout: int = 90):
@@ -82,17 +91,18 @@ def declared_csvs(root: Path) -> set:
     return names
 
 
-def s3_csvs(s3, src) -> set:
-    names, token = set(), None
+def s3_csvs(s3, src) -> dict:
+    """Every object name under the source prefix, mapped to its size."""
+    sizes, token = {}, None
     while True:
         kw = {"Bucket": S3_BUCKET, "Prefix": f"{src.s3_base}/"}
         if token:
             kw["ContinuationToken"] = token
         r = s3.list_objects_v2(**kw)
         for o in r.get("Contents", []):
-            names.add(Path(o["Key"]).name)
+            sizes[Path(o["Key"]).name] = o["Size"]
         if not r.get("IsTruncated"):
-            return names
+            return sizes
         token = r["NextContinuationToken"]
 
 
@@ -111,9 +121,21 @@ def check_outputs(src, root: Path, s3):
     # literally reports those as missing when they are right there.
     present_ci = {n.lower() for n in present}
     missing = sorted(n for n in declared if n.lower() not in present_ci)
-    if not missing:
-        return "PASS", f"{len(declared)} declared, all present"
-    return "CHECK", f"declared but absent in S3: {', '.join(missing[:6])}"
+
+    # A CSV can be published and still be worthless. sfda has five at 5 bytes -
+    # a BOM and a newline, not even a header row - which every "does the file
+    # exist" check passes happily. Absence is loud; emptiness is silent.
+    empty = sorted(n for n, sz in present.items()
+                   if n.lower().endswith(".csv") and sz < EMPTY_CSV_BYTES)
+
+    if missing and empty:
+        return "CHECK", (f"absent: {', '.join(missing[:4])} | "
+                         f"empty ({len(empty)}): {', '.join(empty[:4])}")
+    if missing:
+        return "CHECK", f"declared but absent in S3: {', '.join(missing[:6])}"
+    if empty:
+        return "EMPTY", f"{len(empty)} published CSV(s) under {EMPTY_CSV_BYTES}B: {', '.join(empty[:5])}"
+    return "PASS", f"{len(declared)} declared, all present"
 
 
 def check_upstream(src, root: Path, timeout: int = 20):
