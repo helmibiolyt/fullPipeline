@@ -5,7 +5,17 @@ in_place: true
 output_subdirs: [openalex]
 size_class: medium             # slow multi-year API crawler over biomedical works
 timeout_min: 180
-# Rebuilt in full each run; full-replace keeps the completeness guard
-# active, which is the protection against publishing a short crawl.
-mirror: true
+# INCREMENTAL, and it has to be. The query matches ~52 million works and the
+# crawler sustains roughly 5,000 rows/min, so a complete pass needs about a
+# week - it can never finish inside one run. The scraper already keeps a cursor
+# in openalex_works_progress.json and knows how to continue from it; what was
+# missing is that nothing restored that cursor, so every run started at page 1,
+# ran to the timeout and committed nothing. hydrate brings back the CSV and the
+# cursor, and each run advances the crawl further.
+hydrate: [openalex/openalex_works.csv, openalex/openalex_works_progress.json]
+# MUST stay false. Under full-replace a run that is killed at the timeout
+# publishes only what it managed this session: 1.7 GB against the 2.38 GB
+# already in S3 is a 0.71 ratio, which clears MIN_COMPLETENESS_RATIO and would
+# have silently replaced the larger file with the smaller one.
+mirror: false
 enabled: true

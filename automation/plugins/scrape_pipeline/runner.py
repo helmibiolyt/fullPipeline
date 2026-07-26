@@ -38,12 +38,43 @@ def _collectable_suffixes() -> set:
     return PUBLISH_SUFFIXES | (TABULAR_SUFFIXES if CONVERT_XLSX else set())
 
 
+# Resume markers are published so `hydrate` can restore them; anything larger
+# than this is not a marker, it is data that happens to be named like one.
+STATE_PUBLISH_MAX_BYTES = 5 * 1024 * 1024
+
+
+def _is_publishable_state(p: Path) -> bool:
+    """Small resume markers (checkpoint.json, *_progress.json, ...) are worth publishing.
+
+    A scraper that can resume is useless if the pipeline throws away the file it
+    resumes from: .json is in STRUCTURED_DROPPED_SUFFIXES, so a cursor or progress
+    marker never reached S3, and `hydrate` cannot restore what was never
+    published. openalex is the clearest case - it keeps a cursor and knows how to
+    continue, but every run restarted from the beginning, ran until its timeout
+    and committed nothing.
+
+    Deliberately narrower than _is_state_file: SQLite working databases match
+    that test too and run to gigabytes (chembl's especially). Those are rebuilt
+    from published CSVs instead, so only small text markers are published here.
+    """
+    if p.suffix.lower() not in {".json", ".txt", ".jsonl"}:
+        return False
+    if not any(marker in p.name.lower() for marker in STATE_NAME_MARKERS):
+        return False
+    try:
+        return p.stat().st_size <= STATE_PUBLISH_MAX_BYTES
+    except OSError:
+        return False
+
+
 def _is_collectable(p: Path) -> bool:
     if not p.is_file():
         return False
-    if p.suffix.lower() not in _collectable_suffixes():
-        return False
     if any(part in ARTIFACT_EXCLUDE_DIRS for part in p.parts):
+        return False
+    if _is_publishable_state(p):
+        return True
+    if p.suffix.lower() not in _collectable_suffixes():
         return False
     return True
 
