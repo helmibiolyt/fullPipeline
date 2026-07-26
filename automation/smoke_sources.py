@@ -38,47 +38,51 @@ from pathlib import Path
 
 from scrape_pipeline.settings import SCRAPE_ROOT
 
-# slug suffix -> (topic/source dir, argv for a small slice, wrapper_bypassed)
-# argv[0] is the script to run, relative to the source directory.
+# slug suffix -> (topic/source dir, [step, ...], wrapper_bypassed)
+# Each step is an argv whose first element is a script in the source directory.
+# Several sources are genuinely multi-step - WHO ICTRP downloads XML in one
+# invocation and converts it to CSV in a second - and judging such a source on
+# its first step alone reports "wrote no CSV" for a scraper that is working.
 SMOKE = {
     "clinicaltrials_gov": (
         "Clinical_Trials_Pipeline_Intelligence/clinicaltrials.gov",
-        ["clinicaltrials_gov_downloader.py", "--limit", "25"], False),
+        [["clinicaltrials_gov_downloader.py", "--limit", "25"]], False),
     "jrct_mhlw_go_jp": (
         "Clinical_Trials_Pipeline_Intelligence/jrct.mhlw.go.jp",
-        ["jrct_downloader.py", "--max-trials", "15"], False),
+        [["jrct_downloader.py", "--max-trials", "15"]], False),
     "gsrs_ncats_nih_gov": (
         "Drug_Substance_Reference/gsrs.ncats.nih.gov",
-        ["gsrs_downloader.py", "--limit", "25"], False),
+        [["gsrs_downloader.py", "--limit", "25"]], False),
     "atcddd_fhi_no": (
         "Drug_Substance_Reference/atcddd.fhi.no",
         # --limit-branch takes a Level-1 ATC code; V is the smallest branch.
-        ["atc_ddd_downloader.py", "--limit-branch", "V"], False),
+        [["atc_ddd_downloader.py", "--limit-branch", "V"]], False),
     "pubmed_ncbi_nlm_nih_gov": (
         "Literature_Evidence/pubmed.ncbi.nlm.nih.gov",
-        ["pubmed_downloader.py", "--threads", "3", "--limit", "25"], False),
+        [["pubmed_downloader.py", "--threads", "3", "--limit", "25"]], False),
     "icd_who_int": (
         "Ontologies_Standards/icd.who.int",
-        ["who_icd_downloader.py", "--limit", "25"], False),
+        [["who_icd_downloader.py", "--limit", "25"]], False),
     "open_fda_gov": (
         "Regulatory_Approvals/open.fda.gov",
-        ["openfda_downloader.py", "api-harvest", "--limit", "25"], False),
+        [["openfda_downloader.py", "api-harvest", "--limit", "25"]], False),
     "pmda_go_jp": (
         "Regulatory_Approvals/pmda.go.jp",
-        ["pmda_collector.py", "--limit", "10"], False),
+        [["pmda_collector.py", "--limit", "10"]], False),
     # run_all.py wrappers carry no argparse, so the slice runs the inner script.
     "clinicaltrialsregister_eu": (
         "Clinical_Trials_Pipeline_Intelligence/clinicaltrialsregister.eu",
-        ["eu_ctr_downloader.py", "--limit", "25"], True),
+        [["eu_ctr_downloader.py", "--limit", "25"]], True),
     "trialsearch_who_int": (
         "Clinical_Trials_Pipeline_Intelligence/trialsearch.who.int",
-        ["who_collector.py", "--limit", "25"], True),
+        [["who_collector.py", "--limit", "25"],
+         ["who_collector.py", "--csv-only", "--csv-dir", "who_trials_csv"]], True),
     "europepmc_org": (
         "Literature_Evidence/europepmc.org",
-        ["europe_pmc_downloader.py", "--limit", "25"], True),
+        [["europe_pmc_downloader.py", "--limit", "25"]], True),
     "dailymed_nlm_nih_gov": (
         "Drug_Substance_Reference/dailymed.nlm.nih.gov",
-        ["dailymed_downloader.py", "download-mappings"], True),
+        [["dailymed_downloader.py", "download-mappings"]], True),
 }
 
 MIN_CSV_BYTES = 50
@@ -98,7 +102,7 @@ def csv_report(root: Path):
     return out
 
 
-def smoke(slug: str, rel: str, argv: list, timeout: int) -> tuple:
+def smoke(slug: str, rel: str, steps: list, timeout: int) -> tuple:
     src_dir = Path(SCRAPE_ROOT) / rel
     if not src_dir.exists():
         return "FAIL", f"source dir missing: {rel}", []
@@ -112,33 +116,41 @@ def smoke(slug: str, rel: str, argv: list, timeout: int) -> tuple:
                         ignore=shutil.ignore_patterns(
                             "*.csv", "*.pdf", "*.db", "*.db-*", "*.json",
                             "__pycache__", "*.log", "*.zip", "*.xlsx"))
-        script = run_dir / argv[0]
-        if not script.exists():
-            return "FAIL", f"script not found: {argv[0]}", []
+        for argv in steps:
+            if not (run_dir / argv[0]).exists():
+                return "FAIL", f"script not found: {argv[0]}", []
 
         t0 = time.time()
-        try:
-            p = subprocess.run([sys.executable, *argv], cwd=str(run_dir),
-                               capture_output=True, text=True, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            found = csv_report(run_dir)
-            real = [c for c in found if c[1] >= MIN_CSV_BYTES and c[2] > 0]
-            # A slice that is still going but has already written real rows is
-            # working; it is the slice limit that was too generous, not the code.
-            if real:
-                return "SLOW", f"still running at {timeout}s but {len(real)} CSV(s) already have rows", real
-            return "FAIL", f"no output after {timeout}s", found
+        for i, argv in enumerate(steps, 1):
+            try:
+                p = subprocess.run([sys.executable, *argv], cwd=str(run_dir),
+                                   capture_output=True, text=True, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                found = csv_report(run_dir)
+                real = [c for c in found if c[1] >= MIN_CSV_BYTES and c[2] > 0]
+                # A slice still going but already writing real rows is working;
+                # the slice limit was too generous, not the code.
+                if real:
+                    return "SLOW", (f"step {i}/{len(steps)} still running at {timeout}s, "
+                                    f"{len(real)} CSV(s) already have rows"), real
+                return "FAIL", f"step {i}/{len(steps)} produced nothing in {timeout}s", found
+            if p.returncode != 0:
+                tail = (p.stderr or p.stdout or "").strip().splitlines()
+                return "FAIL", (f"step {i}/{len(steps)} ({argv[0]}) exit {p.returncode}: "
+                                f"{tail[-1][:110] if tail else ''}"), csv_report(run_dir)
 
         elapsed = time.time() - t0
         found = csv_report(run_dir)
         real = [c for c in found if c[1] >= MIN_CSV_BYTES and c[2] > 0]
         empty = [c for c in found if c[1] < MIN_CSV_BYTES or c[2] == 0]
 
-        if p.returncode != 0:
-            tail = (p.stderr or p.stdout or "").strip().splitlines()
-            return "FAIL", f"exit {p.returncode}: {tail[-1][:120] if tail else ''}", found
         if not found:
-            return "FAIL", f"exit 0 in {elapsed:.0f}s but wrote no CSV at all", []
+            # Say what DID appear: a multi-step source whose first step writes
+            # XML has no CSV yet, and calling that "wrote nothing" is wrong.
+            other = sorted({p.suffix or "(no ext)" for p in run_dir.rglob("*")
+                            if p.is_file() and p.suffix != ".py"})
+            return "FAIL", (f"exit 0 in {elapsed:.0f}s, no CSV"
+                            f"{'; non-CSV output: ' + ', '.join(other[:5]) if other else ' and no output at all'}"), []
         if not real:
             return "EMPTY", f"exit 0 in {elapsed:.0f}s, {len(found)} CSV(s), all empty", found
         note = f"{len(real)} CSV(s) with rows in {elapsed:.0f}s"
@@ -161,8 +173,8 @@ def main():
         targets = {k: v for k, v in targets.items() if any(w in k for w in wants)}
 
     results = []
-    for slug, (rel, argv, bypass) in targets.items():
-        status, note, csvs = smoke(slug, rel, argv, a.timeout)
+    for slug, (rel, steps, bypass) in targets.items():
+        status, note, csvs = smoke(slug, rel, steps, a.timeout)
         results.append((slug, status, note, csvs, bypass))
         flag = " [wrapper bypassed]" if bypass else ""
         print(f"{slug:28} {status:6} {note}{flag}", flush=True)
