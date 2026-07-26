@@ -4,4 +4,4 @@ output_subdirs: [CDISC/data]
 size_class: medium
 timeout_min: 120
 mirror: false   # tracker.json skips already-completed standards; incremental unless --force
-enabled: true
+enabled: false
