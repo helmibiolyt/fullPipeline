@@ -34,7 +34,7 @@ from collections import Counter
 from pathlib import Path
 
 from scrape_pipeline.registry import load_sources
-from scrape_pipeline.settings import S3_BUCKET
+from scrape_pipeline.settings import S3_BUCKET, SCRAPE_ROOT
 
 # Filenames appearing in code that are inputs or noise rather than declared output.
 _IGNORE_NAMES = {"requirements.txt", "manifest.yaml", "readme.md"}
@@ -154,7 +154,9 @@ def main():
         import boto3
         s3 = boto3.client("s3")
 
-    scrape_root = Path(__file__).resolve().parent.parent / "scrape"
+    # Same root the registry discovered these sources from, so this works
+    # whether it runs on a laptop or inside the Airflow container.
+    scrape_root = Path(SCRAPE_ROOT)
     rows = []
     for s in sorted(srcs, key=lambda x: x.slug):
         root = scrape_root / s.topic / s.source
