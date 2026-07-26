@@ -1,6 +1,7 @@
 # Knowledge Graph Build Plan
 
-Target schema: 14 entity types, 18 relationship types (`graph/stucture.jpg`).
+Target schema: 15 entity types, 19 relationship types (see `SCHEMA.md`; `Drug`
+is split into `Substance` + `Product`).
 Built from the 433 CSVs in `s3://moine-data`, 49 sources, 8 categories.
 Derived from an actual column-level profile of every CSV (`graph/csv_profile.txt`),
 not from source names.
@@ -13,14 +14,14 @@ The assumption "resolve drugs on InChIKey/UNII" does not survive contact with th
 
 | key | where it actually exists |
 |---|---|
-| **InChIKey** | pubchem only (`pubchem_properties`, `pubchem_search_results`) |
+| **InChIKey** | **chembl `chembl_structures.csv` (~2.4M molecules)**, pubchem |
 | **UNII** | gsrs only (`gsrs_substances`, 173k rows) |
 | **CAS** | gsrs only |
 | **RxCUI** | dailymed `master_mapping`, rxnav, openfda |
-| **ChEMBL ID** | chembl only — and chembl holds 55.9 KB of sample queries |
+| **ChEMBL ID** | chembl `chembl_molecules.csv` (~2.4M) — now populated |
 | **ATC** | atcddd (full hierarchy), ema (`atc_code_human`), canada (`ther.TC_ATC`) |
 | **UniProt** | uniprot (`Entry`), genenames (`uniprot_ids`) |
-| **MeSH** | meshb (`descriptor_ui`), ema (`therapeutic_area_mesh`), openalex (`mesh_terms`) |
+| **MeSH** | meshb (`descriptor_ui`), **chembl `chembl_indications.csv` (with EFO on the same row)**, ema, openalex |
 | **EFO** | opentargets (`disease_id`) |
 
 None of the regulatory sources — ema, mhra, pmda, canada, orangebook — carry a
@@ -51,8 +52,11 @@ a substance authority with synonym coverage at scale.
 substances and supplies `RxCUI` identifiers.
 
 **2.4 Attach structures.**
-pubchem (`CID`, `InChIKey`, `InChI`) by name → adds InChIKey where available.
-Coverage will be partial; treat InChIKey as an enrichment, not the primary key.
+chembl `chembl_structures.csv` gives `standard_inchi_key` + SMILES for ~2.4M
+molecules keyed on `molregno`, joined to names via `chembl_molecules.csv`;
+pubchem adds `CID`. **`chembl_molecule_hierarchy.csv` maps each salt/ester form
+to its parent molecule as fact**, which replaces guessing at salt stripping and
+is the most reliable merge signal available.
 
 **2.5 Products → substances.**
 Each regulatory product row resolves to one or more spine substances by
@@ -71,7 +75,9 @@ crosswalks symbol ↔ UniProt. opentargets uses `target_symbol` / `target_id`
 **2.7 Diseases.**
 `mesh_descriptors` (`descriptor_ui`, `name`, `tree_numbers`, `synonyms`) is
 canonical. opentargets supplies EFO (`disease_id`, `disease_name`); icd supplies
-ICD-11. EFO↔MeSH has **no crosswalk in the lake** — see gaps.
+ICD-11. **`chembl_indications.csv` carries `mesh_id` and `efo_id` on the same
+row**, so it is the EFO↔MeSH crosswalk — load it before the disease-scoped
+opentargets files so their EFO ids attach to existing MeSH nodes.
 
 **2.8 Trials.**
 Native registry ID per source; `who_trials` (`TrialID`) is the cross-registry
@@ -81,7 +87,7 @@ bridge for de-duplicating the same study across ctgov / eu_ctr / ctri / etc.
 No registry identifier anywhere. Normalise names (strip Inc/Ltd/GmbH/PLC/SA,
 case, punctuation) and cluster. Expect this to be the least accurate node type.
 
-## 3. Relationship → source map (all 18)
+## 3. Relationship → source map (all 19)
 
 | edge | source | notes |
 |---|---|---|
@@ -90,13 +96,13 @@ case, punctuation) and cluster. Expect this to be the least accurate node type.
 | `ClinicalTrial STUDIES Disease` | ctgov `conditions`, chictr `hc_freetext`/`hc_code`, ctri, who, anzctr | free text → map to MeSH |
 | `ClinicalTrial CONDUCTED_IN Country` | anzctr `RECRUITMENT COUNTRY`, chictr `countries`, ctri `countries_of_recruitment`, isrctn, who, ctgov locations | ISO-3166 normalise |
 | `Drug TESTED_IN ClinicalTrial` | ctgov `interventions`, chictr `i_freetext`/`i_code`, anzctr `INTERVENTIONS` | free text → spine |
-| `Drug INDICATED_FOR Disease` | **opentargets `known_drugs`** (`indication_id`,`indication_name`), ema `therapeutic_area_mesh` + `therapeutic_indication` | see gaps |
-| `Drug TARGETS Target` | **opentargets `known_drugs`** (`target_symbol`), uniprot `drug_target_proteins` | chembl would have been primary |
+| `Substance INDICATED_FOR Disease` | **chembl `chembl_indications.csv`** (`mesh_id`+`efo_id`), opentargets `known_drugs`, ema | structured, no text extraction |
+| `Substance TARGETS Target` | **chembl `chembl_mechanisms.csv`** (`molregno`→`tid`), opentargets, uniprot | chembl is primary, pan-therapeutic |
 | `Target ASSOCIATED_WITH Disease` | **opentargets `Disease_Associations/*.csv`** (`disease_id`,`target_id`,`overall_score`) | 6 files, scored |
 | `Disease SUBTYPE_OF Disease` | **meshb `tree_numbers`** | MeSH tree encodes the hierarchy directly |
-| `Drug HAS_MECHANISM Mechanism` | **opentargets `known_drugs.mechanism`** | |
+| `Substance HAS_MECHANISM Mechanism` | **chembl `chembl_mechanisms.csv`** (`mechanism_of_action`, `action_type`), opentargets | |
 | `Drug IN_CLASS DrugClass` | atcddd (`atc_code`,`parent_code`), ema `atc_code_human`, canada `ther.TC_ATC` | ATC is the class vocabulary |
-| `Drug HAS_MODALITY Modality` | opentargets `known_drugs.type` + `target_tractability.modality`, ema `biosimilar`/`advanced_therapy` flags | 8 values, derived |
+| `Substance HAS_MODALITY Modality` | **chembl `chembl_usan_stems.csv`** + `molecule_type`, opentargets | 8 values, derived |
 | `Drug HAS_ROUTE Route` | canada `route.csv`, atcddd `adm_route`, orangebook `Dosage_Form_Route` | |
 | `Drug HAS_IDENTIFIER Identifier` | gsrs (UNII, CAS), rxnav (RxCUI), pubchem (CID, InChIKey), dailymed (setid, NDC), mhra (`pl_number`), canada (DIN), ema (`ema_product_number`) | one node per id value |
 | `Drug HAS_APPROVAL Approval` | orangebook (`Appl_No`,`Approval_Date`), ema (`marketing_authorisation_date`), canada (`status`), pmda (`approval_date`,`approval_type`), mhra | Approval = event node |
@@ -104,22 +110,27 @@ case, punctuation) and cluster. Expect this to be the least accurate node type.
 | `Approval ISSUED_BY Agency` | same | |
 | `Drug APPROVED_IN Region` | derived from agency → jurisdiction | |
 
-**opentargets is the linchpin.** `known_drugs.csv` alone supplies `TARGETS`,
-`HAS_MECHANISM`, `INDICATED_FOR` and `Modality`; `Disease_Associations/` supplies
-`ASSOCIATED_WITH`. It substantially compensates for the missing chembl — but it
-is **scoped to 6 therapeutic areas** (Alzheimer, Cancer, Cardiovascular,
-Diabetes, Infectious, Respiratory), so those four edges will be dense inside
-those areas and sparse outside.
+**chembl is the pharmacology backbone** (as of 2026-07-26): `chembl_mechanisms`
+supplies `TARGETS` + `HAS_MECHANISM`, `chembl_indications` supplies
+`INDICATED_FOR` with MeSH ids, `chembl_usan_stems` supplies `Modality` — all
+pan-therapeutic.
+
+**opentargets enriches rather than carries.** `Disease_Associations/*.csv` is
+the only source for `ASSOCIATED_WITH` and adds scored evidence, but its files
+are **scoped to 6 therapeutic areas** (Alzheimer, Cancer, Cardiovascular,
+Diabetes, Infectious, Respiratory), so that one edge stays dense inside those
+areas and sparse outside.
 
 ## 4. Gaps and risks
 
-1. **chembl is empty (55.9 KB).** It was the one source with InChIKey ↔ ChEMBL ↔
-   UniProt ↔ MeSH in a single schema, plus a `drug_indication` table. Its absence
-   is why `TARGETS`/`HAS_MECHANISM`/`INDICATED_FOR` now rest entirely on
-   opentargets. The export path exists (`run_all.py`) if it is ever run.
-2. **No EFO ↔ MeSH crosswalk in the lake.** opentargets diseases are EFO, meshb
-   is MeSH. Joining them needs name matching or an external crosswalk file.
-   Until then `Disease` risks splitting into two disconnected populations.
+1. ~~chembl is empty~~ **RESOLVED 2026-07-26.** chembl now holds 14 CSVs /
+   493.8 MB: InChIKey ↔ ChEMBL ↔ UniProt ↔ MeSH in one schema, plus
+   `drug_mechanism` and `drug_indication`. `TARGETS`, `HAS_MECHANISM`,
+   `INDICATED_FOR` and `HAS_MODALITY` are now pan-therapeutic rather than
+   limited to opentargets' 6 areas.
+2. ~~No EFO ↔ MeSH crosswalk~~ **RESOLVED.** `chembl_indications.csv` carries
+   `mesh_id` and `efo_id` on the same row, joining opentargets' EFO diseases to
+   meshb's MeSH descriptors directly.
 3. **Company resolution has no identifier.** Name clustering only.
 4. **Free-text edges.** `STUDIES`, `TESTED_IN`, `INDICATED_FOR` come largely from
    prose (`conditions`, `interventions`, `therapeutic_indication`). Deterministic

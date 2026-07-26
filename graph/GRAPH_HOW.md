@@ -4,9 +4,13 @@ Companion to `GRAPH_PLAN.md`. That document says *what connects to what*; this
 one says *how to actually do it*.
 
 Different sources use different drug IDs. That is not a problem to solve — it is
-what the `Identifier` node type is for. **One `Drug` node per substance, with
-every source's ID hanging off it as an `Identifier`.** Nothing has to agree on a
-single key; things only have to agree on *which substance they mean*.
+what the `Identifier` node type is for. **One `Substance` node per molecule, one
+`Product` node per marketed item, and every source's ID hangs off them as an
+`Identifier`.** Nothing has to agree on a single key; things only have to agree
+on *which substance they mean*.
+
+`Product` never needs cross-source resolution at all — its key is the agency's
+own id (`MHRA:PL12345`, `CA:DIN02241497`). Only `Substance` is resolved.
 
 ---
 
@@ -21,11 +25,12 @@ graph/
     vocab.py             Country, Region, Agency, Route, DrugClass, Modality
     disease.py           meshb, icd, opentargets EFO
     target.py            uniprot, genenames
-    drug.py              gsrs spine, atc, rxnav, pubchem
+    substance.py         gsrs spine, chembl, atc, rxnav, pubchem
+    product.py           ema, mhra, canada, orangebook, pmda, dailymed
     trial.py             ctgov, who, eu_ctr, ctri, chictr, anzctr, isrctn, jrct, ctis
     company.py           name clustering
     approval.py          orangebook, ema, canada, pmda, mhra
-    edges.py             the 18 relationships
+    edges.py             the 19 relationships
 ```
 
 ## 1. Schema first — constraints before any load
@@ -34,7 +39,8 @@ Uniqueness constraints make `MERGE` fast and idempotent. Without them every
 `MERGE` is a full scan and the load will crawl.
 
 ```cypher
-CREATE CONSTRAINT drug_key      IF NOT EXISTS FOR (d:Drug)            REQUIRE d.key         IS UNIQUE;
+CREATE CONSTRAINT subst_key     IF NOT EXISTS FOR (s:Substance)       REQUIRE s.key         IS UNIQUE;
+CREATE CONSTRAINT prod_key      IF NOT EXISTS FOR (p:Product)         REQUIRE p.key         IS UNIQUE;
 CREATE CONSTRAINT ident_key     IF NOT EXISTS FOR (i:Identifier)      REQUIRE (i.scheme, i.value) IS NODE KEY;
 CREATE CONSTRAINT target_key    IF NOT EXISTS FOR (t:Target)          REQUIRE t.uniprot     IS UNIQUE;
 CREATE CONSTRAINT disease_key   IF NOT EXISTS FOR (d:Disease)         REQUIRE d.key         IS UNIQUE;
@@ -99,6 +105,12 @@ Provisional `NAME:` keys are normal and expected — a later source that carries
 both the name and a UNII will let them be merged (§7). **Never drop a row
 because it did not resolve.**
 
+**Salt forms: use chembl, not string stripping.** The `SALTS` list above is a
+fallback. `chembl_molecule_hierarchy.csv` states `molregno → parent_molregno`
+directly, so atorvastatin calcium is linked to atorvastatin as fact rather than
+by guessing which trailing tokens are salts. Load it and prefer it; fall back to
+the token list only for substances chembl does not cover.
+
 ## 4. Batched MERGE — the loading pattern
 
 Every loader uses the same shape. Never one query per row.
@@ -109,11 +121,11 @@ BATCH = 5_000
 def run_batch(tx, cypher, rows):
     tx.run(cypher, rows=rows)
 
-CY_DRUG = """
+CY_SUBSTANCE = """
 UNWIND $rows AS r
-MERGE (d:Drug {key: r.key})
-  ON CREATE SET d.name = r.name, d.norm_name = r.norm_name, d.created_at = r.ts
-SET d.source = r.source, d.run_id = r.run_id, d.committed_at = r.ts
+MERGE (s:Substance {key: r.key})
+  ON CREATE SET s.name = r.name, s.norm_name = r.norm_name, s.created_at = r.ts
+SET s.source = r.source, s.run_id = r.run_id, s.committed_at = r.ts
 """
 ```
 
@@ -124,7 +136,7 @@ multi-GB (ctgov 2.7 GB, who 4.6 GB, openalex 2.2 GB) and the box has 7 GB RAM:
 body = s3.get_object(Bucket=B, Key=k)["Body"]
 reader = csv.DictReader(io.TextIOWrapper(body, encoding="utf-8", errors="replace"))
 for chunk in chunked(reader, BATCH):
-    session.execute_write(run_batch, CY_DRUG, [to_row(r) for r in chunk])
+    session.execute_write(run_batch, CY_SUBSTANCE, [to_row(r) for r in chunk])
 ```
 
 ## 5. Identifiers — how multi-source IDs are handled
@@ -134,9 +146,9 @@ per (scheme, value) and attach it:
 
 ```cypher
 UNWIND $rows AS r
-MATCH (d:Drug {key: r.drug_key})
+MATCH (n) WHERE n.key = r.node_key AND (n:Substance OR n:Product)
 MERGE (i:Identifier {scheme: r.scheme, value: r.value})
-MERGE (d)-[:HAS_IDENTIFIER]->(i)
+MERGE (n)-[:HAS_IDENTIFIER]->(i)
 ```
 
 | scheme | source column |
@@ -144,7 +156,8 @@ MERGE (d)-[:HAS_IDENTIFIER]->(i)
 | `UNII` | gsrs `unii` |
 | `CAS` | gsrs `cas_number` |
 | `RXCUI` | rxnav / dailymed `rxcui` |
-| `INCHIKEY` | pubchem `InChIKey` |
+| `INCHIKEY` | chembl `chembl_structures.csv`, pubchem |
+| `CHEMBL_ID` | chembl `chembl_molecules.csv` |
 | `PUBCHEM_CID` | pubchem `CID` |
 | `SPL_SETID` | dailymed `setid` |
 | `NDC` | dailymed `ndc_list` (explode the list) |
@@ -154,8 +167,9 @@ MERGE (d)-[:HAS_IDENTIFIER]->(i)
 | `FDA_APPL_NO` | orangebook `Appl_No` |
 | `ATC` | atcddd / ema `atc_code_human` |
 
-An Identifier is shared: two Drug nodes pointing at the same `RXCUI` is the
-signal that they are the same substance and should be merged (§7).
+An Identifier is shared: two `Substance` nodes pointing at the same `RXCUI` is
+the signal that they are the same substance and should be merged (§7). The
+first six schemes attach to `Substance`, the rest to `Product`.
 
 ## 6. Loading each entity — concretely
 
@@ -200,12 +214,13 @@ reversible.)
 
 ## 7. Merging provisional drugs (the second pass)
 
-After all sources load, any two Drug nodes sharing a strong Identifier are the
-same substance:
+After all sources load, any two `Substance` nodes sharing a strong Identifier
+are the same substance:
 
 ```cypher
-MATCH (a:Drug)-[:HAS_IDENTIFIER]->(i:Identifier)<-[:HAS_IDENTIFIER]-(b:Drug)
-WHERE i.scheme IN ['UNII','INCHIKEY','RXCUI'] AND a.key STARTS WITH 'NAME:' AND a <> b
+MATCH (a:Substance)-[:HAS_IDENTIFIER]->(i:Identifier)<-[:HAS_IDENTIFIER]-(b:Substance)
+WHERE i.scheme IN ['UNII','INCHIKEY','RXCUI','CHEMBL_ID']
+  AND a.key STARTS WITH 'NAME:' AND a <> b
 RETURN a.key, b.key, i.scheme, i.value
 ```
 
@@ -246,7 +261,8 @@ source's `_LATEST.json`). All writes are `MERGE`. Consequences:
 2  vocab                               Country, Region, Agency, Route, DrugClass, Modality
 3  disease                             meshb -> SUBTYPE_OF -> icd, EFO
 4  target                              uniprot + genenames
-5  drug spine                          gsrs -> atc -> rxnav -> pubchem
+5  substance spine                     gsrs -> chembl (+ molecule_hierarchy) -> atc -> rxnav -> pubchem
+5b product                             ema, mhra, canada, orangebook, pmda -> CONTAINS
 6  identifiers                         all schemes
 7  trials                              registries -> who de-dup
 8  companies                           name clustering
@@ -254,7 +270,8 @@ source's `_LATEST.json`). All writes are `MERGE`. Consequences:
 10 structured edges                    ASSOCIATED_WITH, IN_CLASS, HAS_ROUTE, TARGETS,
                                        HAS_MECHANISM, approval chain
 11 free-text edges                     STUDIES, TESTED_IN, INDICATED_FOR
-12 merge pass                          provisional NAME: -> UNII:
+12 merge pass                          provisional NAME: -> UNII:, via shared Identifiers
+                                       and chembl_molecule_hierarchy parents
 ```
 
 Steps 2-9 are independent per source and can be re-run individually. Step 12 is

@@ -13,11 +13,11 @@ marketed, approved item). Everything else is unchanged. Rationale in §4.
 
 | # | label | key | key properties | built from |
 |---|---|---|---|---|
-| 1 | **Substance** | `UNII:<unii>` or `NAME:<norm_name>` | `name`, `norm_name`, `substance_class`, `status` | gsrs `gsrs_substances` (173k), atcddd `atc_substances`, pubchem, rxnav |
+| 1 | **Substance** | `UNII:<unii>` or `NAME:<norm_name>` | `name`, `norm_name`, `substance_class`, `status`, `max_phase` | gsrs `gsrs_substances` (173k), **chembl `chembl_molecules.csv` (~2.4M) + `chembl_structures.csv` (InChIKey)**, atcddd, pubchem, rxnav |
 | 2 | **Product** | `<AGENCY>:<local_id>` e.g. `MHRA:PL12345` | `name`, `brand_name`, `agency`, `status`, `form`, `strength` | ema `ema_medicines`, mhra `raw_metadata`, canada `drug.csv`, orangebook `orange_book_unified`, pmda `pmda_metadata`, dailymed `dailymed_catalog` |
 | 3 | **ClinicalTrial** | `<REGISTRY>:<id>` e.g. `NCT:NCT01234567` | `title`, `status`, `phase`, `study_type`, `enrollment`, `start_date` | ctgov, who, eu_ctr, ctri, chictr, anzctr, isrctn, jrct, ctis |
 | 4 | **Company** | `norm(name)` | `name`, `raw_names[]` | ctgov `lead_sponsor`, ema MAH, orangebook `Applicant`, canada `comp.COMPANY_NAME`, all registries |
-| 5 | **Disease** | `MESH:<descriptor_ui>` (also `EFO:`, `ICD:`) | `name`, `synonyms[]`, `tree_numbers[]` | meshb `mesh_descriptors`, icd `icd11_codes`, opentargets `disease_id` |
+| 5 | **Disease** | `MESH:<descriptor_ui>` (also `EFO:`, `ICD:`) | `name`, `synonyms[]`, `tree_numbers[]` | meshb `mesh_descriptors`, icd `icd11_codes`, opentargets `disease_id`; **chembl `chembl_indications.csv` bridges EFO↔MeSH** |
 | 6 | **Target** | `<uniprot_accession>` | `symbol`, `name`, `organism`, `ec_number` | uniprot `Entry`, genenames `uniprot_ids`/`symbol` |
 | 7 | **Country** | `<iso2>` | `name` | ISO-3166 vocab; values from trial registries |
 | 8 | **Region** | `<name>` | `name` | derived from agency jurisdiction |
@@ -25,8 +25,8 @@ marketed, approved item). Everything else is unchanged. Rationale in §4.
 | 10 | **Approval** | `<AGENCY>:<appl_no>:<date>` | `date`, `type`, `status` | orangebook, ema, canada `status.csv`, pmda, mhra |
 | 11 | **Identifier** | `(scheme, value)` node key | `scheme`, `value` | see §3 |
 | 12 | **DrugClass** | `<atc_code>` | `name`, `level` | atcddd `atc_ddd_full` / `atc_classes` |
-| 13 | **Mechanism** | `<name>` | `name` | opentargets `known_drugs.mechanism` |
-| 14 | **Modality** | `<name>` | `name` | opentargets `known_drugs.type`, `target_tractability.modality` |
+| 13 | **Mechanism** | `<name>` | `name`, `action_type` | **chembl `chembl_mechanisms.csv` + `chembl_action_types.csv`**, opentargets |
+| 14 | **Modality** | `<name>` | `name` | **chembl `chembl_usan_stems.csv` + `molecule_type`**, opentargets |
 | 15 | **Route** | `<name>` | `name` | canada `route.csv`, atcddd `adm_route`, orangebook `Dosage_Form_Route` |
 
 ## 2. Relationships
@@ -39,13 +39,13 @@ marketed, approved item). Everything else is unchanged. Rationale in §4.
 | 4 | `(ClinicalTrial)-[:STUDIES]->(Disease)` | ctgov `conditions`, chictr `hc_freetext`, ctri, who | dictionary |
 | 5 | `(ClinicalTrial)-[:CONDUCTED_IN]->(Country)` | anzctr, chictr `countries`, ctri, isrctn, who, ctgov | structured |
 | 6 | `(Substance)-[:TESTED_IN]->(ClinicalTrial)` | ctgov `interventions`, chictr `i_freetext`, anzctr | dictionary |
-| 7 | `(Substance)-[:INDICATED_FOR]->(Disease)` | opentargets `known_drugs.indication_id/name`, ema `therapeutic_area_mesh` | structured + dictionary |
-| 8 | `(Substance)-[:TARGETS]->(Target)` | opentargets `known_drugs.target_symbol`, uniprot `drug_target_proteins` | structured |
+| 7 | `(Substance)-[:INDICATED_FOR]->(Disease)` | **chembl `chembl_indications.csv`** (`mesh_id`+`efo_id`), opentargets `known_drugs`, ema `therapeutic_area_mesh` | structured |
+| 8 | `(Substance)-[:TARGETS]->(Target)` | **chembl `chembl_mechanisms.csv`** (`molregno`→`tid`), opentargets, uniprot | structured |
 | 9 | `(Target)-[:ASSOCIATED_WITH]->(Disease)` | opentargets `Disease_Associations/*.csv` (+`overall_score`) | structured |
 | 10 | `(Disease)-[:SUBTYPE_OF]->(Disease)` | meshb `tree_numbers` | computed |
-| 11 | `(Substance)-[:HAS_MECHANISM]->(Mechanism)` | opentargets `known_drugs.mechanism` | structured |
+| 11 | `(Substance)-[:HAS_MECHANISM]->(Mechanism)` | **chembl `chembl_mechanisms.csv`** (`mechanism_of_action` + `action_type`), opentargets | structured |
 | 12 | `(Substance)-[:IN_CLASS]->(DrugClass)` | atcddd, ema `atc_code_human`, canada `ther.TC_ATC` | structured |
-| 13 | `(Substance)-[:HAS_MODALITY]->(Modality)` | opentargets `known_drugs.type` | structured |
+| 13 | `(Substance)-[:HAS_MODALITY]->(Modality)` | **chembl `chembl_usan_stems.csv`** (-mab/-tide/-ciclib) + `molecule_type`, opentargets `known_drugs.type` | derived |
 | 14 | `(Product)-[:HAS_ROUTE]->(Route)` | canada `route.csv`, orangebook `Dosage_Form_Route` | structured |
 | 15 | `(Substance\|Product)-[:HAS_IDENTIFIER]->(Identifier)` | see §3 | structured |
 | 16 | `(Product)-[:HAS_APPROVAL]->(Approval)` | orangebook, ema, canada, pmda, mhra | structured |
@@ -67,7 +67,9 @@ measurable.
 |---|---|---|
 | `UNII` | Substance | gsrs `unii` |
 | `CAS` | Substance | gsrs `cas_number` |
-| `INCHIKEY` | Substance | pubchem `InChIKey` |
+| `INCHIKEY` | Substance | **chembl `chembl_structures.csv` (~2.4M)**, pubchem `InChIKey` |
+| `CHEMBL_ID` | Substance | chembl `chembl_molecules.csv` |
+| `CHEMBL_TARGET` | Target | chembl `chembl_uniprot_mapping.csv` |
 | `PUBCHEM_CID` | Substance | pubchem `CID` |
 | `RXCUI` | Substance | rxnav `ingredient_rxcui` |
 | `ATC` | Substance | atcddd `atc_code` |
@@ -106,11 +108,27 @@ There is also a practical win: **`Product` never needs cross-source resolution**
 
 ## 5. Known limits at build time
 
-- `TARGETS`, `HAS_MECHANISM`, `INDICATED_FOR`, `HAS_MODALITY` come from
-  opentargets, which covers 6 therapeutic areas (Alzheimer, Cancer,
-  Cardiovascular, Diabetes, Infectious, Respiratory). Dense inside those,
-  sparse outside. chembl would have been the general source; it holds 55.9 KB.
+*Updated 2026-07-26: chembl now holds 14 CSVs / 493.8 MB (was 55.9 KB of sample
+queries). Two of the three risks previously listed here are resolved.*
+
+**Resolved**
+
+- `TARGETS`, `HAS_MECHANISM`, `INDICATED_FOR`, `HAS_MODALITY` are no longer
+  opentargets-only. chembl supplies them pan-therapeutically:
+  `chembl_mechanisms.csv` (drug → target + mechanism + action type),
+  `chembl_indications.csv` (drug → MeSH), `chembl_usan_stems.csv` (Modality).
+  opentargets remains a second source with association scores.
+- **EFO ↔ MeSH crosswalk.** `chembl_indications.csv` carries `mesh_id` **and**
+  `efo_id` on the same row, so opentargets' EFO diseases and meshb's MeSH
+  descriptors join directly instead of splitting into two populations.
+
+**Still open**
+
 - `Company` is name-clustered — no registry identifier exists in any source.
-- `Disease` may split into MeSH and EFO populations; no crosswalk in the lake.
+  Expect this to be the least accurate node type.
+- opentargets and uniprot remain disease-scoped; chembl does not have that
+  limitation, so use chembl as the base and opentargets as enrichment.
 - `purplebook_raw_monthly.csv` has a report title as its header row; excluded
   until its parser is fixed.
+- Cross-registry trial duplication: the same study appears in several
+  registries. `who_trials` must drive `SAME_STUDY_AS` or trial counts inflate.
