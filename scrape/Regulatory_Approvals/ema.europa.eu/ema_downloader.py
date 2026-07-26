@@ -593,7 +593,33 @@ class EMADataCollector:
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="Crawler") as executor:
             futures = [executor.submit(worker) for _ in range(max_workers)]
             concurrent.futures.wait(futures)
-            
+
+        # Retry pass. EMA rate-limits (429) under concurrency, and a medicine
+        # whose EPAR page is dropped contributes no documents at all - roughly
+        # 10 per medicine. A 3% page-failure rate is therefore a 3% hole in the
+        # corpus, and losing them silently is how half the catalogue went missing
+        # in the first place. Retry single-threaded so the second attempt is not
+        # competing with itself.
+        failed = self.db.query(
+            "SELECT ema_product_number, name_of_medicine, medicine_url FROM medicines "
+            "WHERE scrape_status = 'failed';")
+        if failed:
+            log.info(f"Retrying {len(failed)} medicine page(s) that failed "
+                     f"(usually 429 rate-limiting), single-threaded...")
+            recovered = 0
+            for prod_num, name, url in failed:
+                if not url:
+                    continue
+                time.sleep(2.0)
+                try:
+                    if self.crawl_medicine_page(prod_num, name, url):
+                        recovered += 1
+                except Exception as e:  # noqa: BLE001 - a retry failing is not fatal
+                    log.warning(f"Retry failed for {name}: {e}")
+            still = self.db.query(
+                "SELECT COUNT(*) FROM medicines WHERE scrape_status = 'failed';")[0][0]
+            log.info(f"Retry pass recovered {recovered}; {still} medicine(s) still failing.")
+
         log.info("EPAR page crawling finished.")
 
 # -- In-Memory PDF Streaming & Raw Storage ------------------------------------
