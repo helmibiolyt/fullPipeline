@@ -212,6 +212,8 @@ class SFDAScraper:
         self.delay = delay
         self.session = requests.Session()
         self.session.headers.update(HTTP_HEADERS)
+        # Datasets that produced neither headers nor rows: scrape failures.
+        self.failed_datasets: List[str] = []
         os.makedirs(output_dir, exist_ok=True)
 
     # ── HTTP ─────────────────────────────────────────────────────────────────
@@ -698,6 +700,17 @@ class SFDAScraper:
                             max(len(r) for r in rows) if rows else 0
                         )])
 
+        # No rows AND no headers means the scrape of this dataset failed, not
+        # that the dataset is empty - an empty dataset still has a header row.
+        # What lands on disk is a BOM and a newline: five bytes, which every
+        # "did the file get written" check passes. Five such files reached S3
+        # this way, including the registered-drugs list, and because this source
+        # is mirror:true they replaced the real ones.
+        if not rows and not full_headers:
+            log.error("  ✗ FAILED to scrape '%s' - no headers and no rows (%s)",
+                      title, source_url)
+            self.failed_datasets.append(title)
+
         with open(path, "w", newline="", encoding="utf-8-sig") as fh:
             w = csv.writer(fh)
             w.writerow(full_headers)
@@ -1129,10 +1142,22 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = _build_parser().parse_args()
-    SFDAScraper(output_dir=args.output_dir, delay=args.delay).run(
+    scraper = SFDAScraper(output_dir=args.output_dir, delay=args.delay)
+    scraper.run(
         target_slug=args.dataset,
         use_playwright=args.playwright,
     )
+
+    # This source is mirror:true, so whatever it produces replaces what is in
+    # S3. Publishing five-byte placeholders over real tables is worse than
+    # publishing nothing, and the completeness guard cannot catch it: the file
+    # count is unchanged, only the contents are gone. Fail instead.
+    if scraper.failed_datasets:
+        log.error(
+            "%d dataset(s) produced no headers and no rows: %s. Failing so the "
+            "run is not published over the existing data.",
+            len(scraper.failed_datasets), ", ".join(scraper.failed_datasets))
+        sys.exit(1)
 
 
 if __name__ == "__main__":

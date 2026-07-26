@@ -4,7 +4,17 @@ entrypoint: sfda_scraper.py
 in_place: false
 output_subdirs: []
 size_class: small
-timeout_min: 90
+# Playwright needs longer than plain HTTP for the three JS datasets.
+timeout_min: 150
 mirror: true
-args: --output-dir {run_dir}
+# --playwright is REQUIRED, not optional. Three datasets are JavaScript-rendered
+# and unreachable over plain HTTP: Released Vaccines, Drugs Under Studying List
+# and the List of Registered Human/Herbal/Veterinary Drugs - the last being the
+# most valuable table this source publishes. Without the flag the scraper still
+# writes those files, as a BOM and a newline: five bytes each. Five such
+# placeholders are in S3 right now, and since this source is mirror:true they
+# replaced the real tables. The scraper now exits non-zero rather than
+# publishing them, so leaving this flag off turns the run into a hard failure
+# instead of silent data loss.
+args: --output-dir {run_dir} --playwright
 enabled: false
