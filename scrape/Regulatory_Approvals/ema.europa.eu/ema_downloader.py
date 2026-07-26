@@ -594,33 +594,73 @@ class EMADataCollector:
             futures = [executor.submit(worker) for _ in range(max_workers)]
             concurrent.futures.wait(futures)
 
-        # Retry pass. EMA rate-limits (429) under concurrency, and a medicine
-        # whose EPAR page is dropped contributes no documents at all - roughly
-        # 10 per medicine. A 3% page-failure rate is therefore a 3% hole in the
-        # corpus, and losing them silently is how half the catalogue went missing
-        # in the first place. Retry single-threaded so the second attempt is not
-        # competing with itself.
-        failed = self.db.query(
-            "SELECT ema_product_number, name_of_medicine, medicine_url FROM medicines "
-            "WHERE scrape_status = 'failed';")
-        if failed:
-            log.info(f"Retrying {len(failed)} medicine page(s) that failed "
-                     f"(usually 429 rate-limiting), single-threaded...")
-            recovered = 0
-            for prod_num, name, url in failed:
-                if not url:
-                    continue
-                time.sleep(2.0)
-                try:
-                    if self.crawl_medicine_page(prod_num, name, url):
-                        recovered += 1
-                except Exception as e:  # noqa: BLE001 - a retry failing is not fatal
-                    log.warning(f"Retry failed for {name}: {e}")
-            still = self.db.query(
-                "SELECT COUNT(*) FROM medicines WHERE scrape_status = 'failed';")[0][0]
-            log.info(f"Retry pass recovered {recovered}; {still} medicine(s) still failing.")
+        self.retry_failed_medicines()
 
         log.info("EPAR page crawling finished.")
+
+    def retry_failed_medicines(self, rounds: int = 2, cooldown_s: int = 300):
+        """Re-crawls medicines dropped by rate limiting, after letting the throttle lapse.
+
+        A medicine whose EPAR page is lost contributes no documents at all -
+        around ten each - so dropped pages are a proportional hole in the
+        corpus, and losing them silently is how half the catalogue went missing
+        in the first place.
+
+        Two details make the naive version counterproductive. First, 429 is in
+        the session's status_forcelist with backoff_factor 2.0, so each of these
+        medicines has already burned roughly a minute of exponential backoff and
+        still came back 429; retrying on the same session would re-burn that
+        minute per medicine for a mostly futile result. This pass therefore uses
+        its own session that fails fast. Second, the observed failure rate climbs
+        as the run proceeds, which points at a throttle that tightens under
+        sustained load - so the retry waits for it to lapse rather than
+        immediately adding more.
+        """
+        failed = self.db.query(
+            "SELECT ema_product_number, name_of_medicine, medicine_url FROM medicines "
+            "WHERE scrape_status = 'failed' AND medicine_url IS NOT NULL "
+            "AND medicine_url != '';")
+        if not failed:
+            return
+
+        log.info(f"{len(failed)} medicine page(s) failed during the concurrent crawl; "
+                 f"retrying single-threaded after a {cooldown_s}s cooldown.")
+
+        original_session = self.session
+        # max_retries=1: a hard 429 costs ~2s here instead of ~62s.
+        self.session = build_session(max_retries=1)
+        try:
+            for rnd in range(1, rounds + 1):
+                if not failed:
+                    break
+                time.sleep(cooldown_s)
+                log.info(f"Retry round {rnd}/{rounds} over {len(failed)} medicine(s)...")
+                recovered = 0
+                for prod_num, name, url in failed:
+                    try:
+                        if self.crawl_medicine_page(prod_num, name, url):
+                            recovered += 1
+                    except Exception as e:  # noqa: BLE001 - a retry failing is not fatal
+                        log.warning(f"Retry failed for {name}: {e}")
+                    time.sleep(1.5)
+                log.info(f"Retry round {rnd} recovered {recovered} of {len(failed)}.")
+                if recovered == 0:
+                    log.info("Retry round recovered nothing; not trying again this run.")
+                    break
+                failed = self.db.query(
+                    "SELECT ema_product_number, name_of_medicine, medicine_url FROM medicines "
+                    "WHERE scrape_status = 'failed' AND medicine_url IS NOT NULL "
+                    "AND medicine_url != '';")
+        finally:
+            self.session = original_session
+
+        still = self.db.query(
+            "SELECT COUNT(*) FROM medicines WHERE scrape_status = 'failed';")[0][0]
+        if still:
+            # Not fatal: every run re-crawls all medicines, so these are retried
+            # next time. Stated loudly so a growing number is visible.
+            log.warning(f"{still} medicine page(s) still failing after retries - "
+                        f"their documents are missing from this run.")
 
 # -- In-Memory PDF Streaming & Raw Storage ------------------------------------
 class EMAPDFProcessor:
