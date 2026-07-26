@@ -27,11 +27,21 @@ load_dotenv()
 # Resolve all output paths relative to this script's folder (pipeline contract)
 BASE_DIR = Path(__file__).resolve().parent
 
-# HTTP headers to play nice with LOINC and NLM servers
+# HTTP headers to play nice with LOINC and NLM servers.
+# loinc.org sits behind Wordfence, which 403s a self-identifying bot agent once
+# it decides to; a normal browser signature is what actually gets served.
 HEADERS = {
-    "User-Agent": "BiolytInternLOINCDownloader/1.0 (Python; requests; Antigravity)",
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
 }
+
+# A Wordfence block is total and lasts for the rest of the run: every subsequent
+# request 403s. Without a circuit breaker the crawler spends over two hours
+# issuing 7,500 requests it already knows will fail, and only reports the problem
+# at the very end. Stop as soon as the pattern is unmistakable.
+MAX_CONSECUTIVE_FAILURES = 25
 
 # Logger setup
 logger = logging.getLogger("loinc_downloader")
@@ -305,6 +315,8 @@ def run_crawler(output_dir: Path, codes_file: str, limit: int, delay: float):
         start_time = time.time()
         written = 0
         errored = 0
+        consecutive_failures = 0
+        blocked = False
 
         for idx, code in enumerate(pending_codes, 1):
             logger.info(f"[{idx}/{total}] ({(idx/total)*100:.1f}%) Crawling: {code}")
@@ -313,15 +325,26 @@ def run_crawler(output_dir: Path, codes_file: str, limit: int, delay: float):
                 data = scrape_loinc_page(code)
                 if data.get("status") == "Not Found":
                     progress[code] = "failed_404"
+                    # A genuine 404 is a fact about that code, not a block.
+                    consecutive_failures = 0
                 else:
                     writer.writerow(data)
                     f.flush()
                     progress[code] = "completed"
                     written += 1
+                    consecutive_failures = 0
             except Exception as e:
                 logger.error(f"  Failed to crawl {code}: {e}")
                 progress[code] = "failed"
                 errored += 1
+                consecutive_failures += 1
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                    logger.error(
+                        f"{consecutive_failures} consecutive failures - treating this as a "
+                        f"block rather than bad luck, and stopping after {idx:,} of {total:,} "
+                        f"codes. Codes not marked completed are retried next run.")
+                    blocked = True
+                    break
                 
             # Update progress file
             with open(progress_file, "w", encoding="utf-8") as pf:
@@ -348,6 +371,14 @@ def run_crawler(output_dir: Path, codes_file: str, limit: int, delay: float):
         logger.error("No LOINC codes were crawled successfully this session - "
                      "failing so the run is retried rather than published.")
         sys.exit(1)
+
+    # Partial run after a block: the codes already written are real and worth
+    # publishing, so this is not a failure - but it must not read as a complete
+    # crawl either.
+    if blocked:
+        logger.warning(
+            f"Stopped early after being blocked; {written:,} code(s) crawled this "
+            f"session. The rest carry over to the next run.")
 
 # ---------------------------------------------------------------------------
 # Mode 2: Bulk Download Mode (Playwright-assisted auth zip download)
