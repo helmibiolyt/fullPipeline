@@ -117,6 +117,14 @@ SOURCE_SECTIONS = {
     },
 }
 
+# Datasets SFDA publishes with no rows at all. These produce a headerless CSV
+# every run, which is correct rather than a scrape failure, so the empty-output
+# guard has to let them through - otherwise a source that is working fails on
+# every run because one page upstream has nothing on it.
+KNOWN_EMPTY_TITLES = {
+    "hospitals that reported side effects",
+}
+
 # Datasets that require JavaScript rendering and cannot be scraped with plain HTTP.
 # Hospitals Side Effects is excluded — genuinely empty ("No results found").
 JS_DATASETS = [
@@ -707,9 +715,12 @@ class SFDAScraper:
         # this way, including the registered-drugs list, and because this source
         # is mirror:true they replaced the real ones.
         if not rows and not full_headers:
-            log.error("  ✗ FAILED to scrape '%s' - no headers and no rows (%s)",
-                      title, source_url)
-            self.failed_datasets.append(title)
+            if title.strip().lower() in KNOWN_EMPTY_TITLES:
+                log.info("  - '%s' is empty upstream by design; not a failure.", title)
+            else:
+                log.error("  ✗ FAILED to scrape '%s' - no headers and no rows (%s)",
+                          title, source_url)
+                self.failed_datasets.append(title)
 
         with open(path, "w", newline="", encoding="utf-8-sig") as fh:
             w = csv.writer(fh)

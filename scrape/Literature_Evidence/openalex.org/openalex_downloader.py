@@ -881,8 +881,28 @@ def run_downloader(
             f"Parsed & saved so far: {global_counter.value}"
         )
         logger.info("=" * 60)
-        # Non-zero exit keeps the pipeline from publishing a partial harvest.
-        sys.exit(1)
+        # An aborted partition used to fail the run outright, from when this
+        # source was mirror:true and a short crawl would have REPLACED the data
+        # already in S3. It is now mirror:false with hydrate, so a commit is
+        # additive and cannot destroy anything, and the query is far too large
+        # to finish in one run anyway - partial by design.
+        #
+        # Failing here therefore threw away real work. A session that harvested
+        # 8.7 million records before every API key hit its budget exited 1, so
+        # nothing was committed and the next run had to redo it. Keep whatever
+        # the session earned; only a session that earned nothing is a failure.
+        if global_counter.value == 0:
+            logger.error(
+                "   Nothing was harvested this session, so there is nothing to "
+                "publish - failing so the run is retried rather than committed."
+            )
+            sys.exit(1)
+        logger.warning(
+            f"   Committing the {global_counter.value:,} record(s) this session did "
+            f"harvest; the {partition_failures} unfinished partition(s) resume from "
+            f"their saved cursors on the next run."
+        )
+        return
     logger.info(f"   HARVEST PROCESS COMPLETE. Total parsed & saved records: {global_counter.value}")
     logger.info("=" * 60)
 
