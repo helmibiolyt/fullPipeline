@@ -1,4 +1,8 @@
-entrypoint: chembl_downloader.py
+# run_all.py = download-db, then export the graph-relevant tables to CSV.
+# chembl_downloader.py alone only writes a ~20 GB SQLite file, which is not a
+# publishable artifact, so the run failed at collect with "produced no
+# artifacts" — the reason the only ChEMBL data in S3 is 55.9 KB of samples.
+entrypoint: run_all.py
 in_place: true
 output_subdirs: [chembl_data]
 size_class: heavy
