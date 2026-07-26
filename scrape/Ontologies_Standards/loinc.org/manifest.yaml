@@ -9,6 +9,13 @@ size_class: medium
 # which all but touched the old 180 limit. 360 leaves headroom; the crawl is
 # resumable via loinc_progress.json, so a kill only ever costs the current code.
 timeout_min: 360
-mirror: false   # crawl mode resumes/appends via progress file (loinc_progress.json)
+# Restored before scraping: loinc_progress.json marks which codes are already
+# crawled, so the CSV those codes live in has to come back with it — otherwise
+# the run emits a near-empty file over the existing one.
+hydrate: [loinc_data/loinc_crawled_codes.csv]
+# Additive, and it must stay that way: the 1 GB LOINC bulk release also lives
+# under loinc_data/ and a full-replace commit would delete all 74 of those files,
+# since a crawl-mode run never reproduces them.
+mirror: false
 enabled: false
 xvfb: true                    # headful browser -> run under xvfb-run

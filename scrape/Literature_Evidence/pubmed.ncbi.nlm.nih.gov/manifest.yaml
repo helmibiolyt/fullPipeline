@@ -4,5 +4,9 @@ in_place: true
 output_subdirs: [pubmed]
 size_class: medium
 timeout_min: 120
+# Restored before scraping: de-duplicates against the previous crawl.
+# Without it the scraper's surviving state points at files that are gone,
+# and it would publish a partial dataset over a good one.
+hydrate: [pubmed/pubmed_metadata.csv]
 mirror: false
 enabled: false

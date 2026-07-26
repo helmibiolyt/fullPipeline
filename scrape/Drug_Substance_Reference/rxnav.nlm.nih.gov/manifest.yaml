@@ -3,5 +3,7 @@ in_place: true
 output_subdirs: [rxnorm_data]
 size_class: medium
 timeout_min: 180
-mirror: false
+# Rebuilt in full each run; full-replace keeps the completeness guard
+# active, which is the protection against publishing a short crawl.
+mirror: true
 enabled: false

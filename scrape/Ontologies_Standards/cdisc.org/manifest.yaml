@@ -3,5 +3,9 @@ in_place: true
 output_subdirs: [CDISC/data]
 size_class: medium
 timeout_min: 120
+# Restored before scraping: tracker.json skips completed standards, so their CSVs must come back.
+# Without it the scraper's surviving state points at files that are gone,
+# and it would publish a partial dataset over a good one.
+hydrate: [CDISC/data/]
 mirror: false   # tracker.json skips already-completed standards; incremental unless --force
 enabled: false

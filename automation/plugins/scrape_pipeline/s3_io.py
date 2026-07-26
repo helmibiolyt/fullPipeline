@@ -78,18 +78,47 @@ def hydrate(src: Source, run_id: str) -> None:
     s3 = _client()
     wd = workdir(src)
     fetched = missing = 0
-    for rel in src.hydrate:
-        key = f"{src.s3_base}/{rel}"
+    total = 0
+
+    def _get(rel: str) -> bool:
+        nonlocal total
         dest = wd / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        s3.download_file(S3_BUCKET, f"{src.s3_base}/{rel}", str(dest))
+        total += dest.stat().st_size
+        return True
+
+    for entry in src.hydrate:
         try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            s3.download_file(S3_BUCKET, key, str(dest))
-            fetched += 1
-            log.info("[%s] hydrated %s (%.1f KB)", src.slug, rel, dest.stat().st_size / 1e3)
+            if entry.endswith("/"):
+                # Prefix form: restore every object beneath it (cdisc's 10
+                # terminology CSVs, europepmc's three, ...).
+                got = 0
+                for page in s3.get_paginator("list_objects_v2").paginate(
+                    Bucket=S3_BUCKET, Prefix=f"{src.s3_base}/{entry}"
+                ):
+                    for o in page.get("Contents", []):
+                        rel = o["Key"][len(src.s3_base) + 1:]
+                        if rel.endswith("/"):
+                            continue
+                        _get(rel)
+                        got += 1
+                if got:
+                    fetched += got
+                    log.info("[%s] hydrated %d object(s) under %s", src.slug, got, entry)
+                else:
+                    missing += 1
+                    log.info("[%s] nothing under %s in S3 — continuing", src.slug, entry)
+            else:
+                _get(entry)
+                fetched += 1
+                log.info("[%s] hydrated %s", src.slug, entry)
         except Exception as e:  # noqa: BLE001 - absence is normal, not fatal
             missing += 1
-            log.info("[%s] no prior %s in S3 (%s) — continuing", src.slug, rel, type(e).__name__)
-    log.info("[%s] hydrate complete: %d restored, %d absent", src.slug, fetched, missing)
+            log.info("[%s] no prior %s in S3 (%s) — continuing",
+                     src.slug, entry, type(e).__name__)
+    log.info("[%s] hydrate complete: %d restored (%.1f MB), %d absent",
+             src.slug, fetched, total / 1e6, missing)
 
 
 # --------------------------------------------------------------------------- #

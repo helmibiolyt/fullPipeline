@@ -5,5 +5,7 @@ in_place: true
 output_subdirs: [openalex]
 size_class: medium             # slow multi-year API crawler over biomedical works
 timeout_min: 180
-mirror: false                  # cursor-based resume + de-dup; additive/incremental
+# Rebuilt in full each run; full-replace keeps the completeness guard
+# active, which is the protection against publishing a short crawl.
+mirror: true
 enabled: false

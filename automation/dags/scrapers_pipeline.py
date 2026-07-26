@@ -11,6 +11,7 @@ Live S3 data is only ever mutated in `commit`, after S3 verification passes.
 from __future__ import annotations
 
 import pendulum
+from airflow.datasets import Dataset
 from airflow.models.dag import DAG
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
@@ -20,6 +21,7 @@ from airflow.utils.trigger_rule import TriggerRule
 from scrape_pipeline import load_sources
 from scrape_pipeline.callbacks import on_task_failure
 from scrape_pipeline.registry import Source
+from scrape_pipeline.settings import S3_BUCKET
 from scrape_pipeline import runner, s3_io, validation
 
 # size_class -> Airflow pool (create these pools in the UI/CLI; default pool
@@ -102,9 +104,14 @@ with DAG(
                 "verify_run", lambda src, run_id: s3_io.verify_run(src, run_id),
                 src, tg, dag, retries=2,
             )
+            # The pointer flip inside commit IS the publish event, so the task
+            # emits a per-source Dataset. Downstream DAGs (graph load, vector
+            # indexing) schedule on these and therefore wake only for the
+            # sources that actually changed, instead of polling all 49.
             commit = _py(
                 "commit", lambda src, run_id: s3_io.commit(src, run_id),
                 src, tg, dag,
+                outlets=[Dataset(f"s3://{S3_BUCKET}/{src.s3_base}")],
             )
             prune = _py(
                 "prune_runs", lambda src, run_id: s3_io.prune_runs(src),

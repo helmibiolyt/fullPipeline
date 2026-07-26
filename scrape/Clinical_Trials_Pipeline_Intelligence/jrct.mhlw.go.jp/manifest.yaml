@@ -10,6 +10,10 @@ in_place: true
 output_subdirs: [jrct_trials]
 size_class: medium
 timeout_min: 360
+# Restored before scraping: jrct_ids.txt is the completed-ID list.
+# Without it the scraper's surviving state points at files that are gone,
+# and it would publish a partial dataset over a good one.
+hydrate: [jrct_trials/]
 mirror: false
 # Verified reachable without a proxy (the old 403 was datacenter-IP only).
 enabled: false
