@@ -106,7 +106,11 @@ def check_outputs(src, root: Path, s3):
         return "WARN", f"S3 list failed: {e}"
     if not present:
         return "WARN", "nothing in S3 for this source"
-    missing = sorted(declared - present)
+    # Case-insensitive: several scrapers lowercase filenames on the way out, so
+    # the code says Neoplasm_Core.csv and S3 holds neoplasm_core.csv. Comparing
+    # literally reports those as missing when they are right there.
+    present_ci = {n.lower() for n in present}
+    missing = sorted(n for n in declared if n.lower() not in present_ci)
     if not missing:
         return "PASS", f"{len(declared)} declared, all present"
     return "CHECK", f"declared but absent in S3: {', '.join(missing[:6])}"
