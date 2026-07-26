@@ -785,6 +785,65 @@ def download_all_additional_tables(session: requests.Session, output_dir: Path,
     log.info("Additional regulatory tables processing complete.")
 
 # -- Documents Metadata Exporter ---------------------------------------------
+def seed_from_previous_index(db: DatabaseManager, output_dir: Path) -> int:
+    """Mark documents already published to S3 as done, so they are not re-fetched.
+
+    The pipeline's `hydrate` step restores ema_documents.csv, which records every
+    document a previous run downloaded and committed. The checkpoint DB does not
+    travel with it, so on a fresh host every document looks pending and the run
+    would re-download the whole corpus.
+
+    Seeding the index into `documents` + `downloads` means the crawl still visits
+    every medicine in the catalogue - which is the point, since the previous run
+    only covered half of them - but only genuinely new documents are downloaded.
+    Requires mirror:false, or the commit would delete the PDFs being skipped.
+    """
+    idx = output_dir / "ema_documents.csv"
+    if not idx.exists():
+        log.info("No previous ema_documents.csv found - treating this as a first run.")
+        return 0
+
+    # The collector normally creates these, but it is constructed after this
+    # point; create them here so seeding does not depend on call order.
+    db.initialize_fixed_tables()
+
+    docs, dls = [], []
+    with open(idx, newline="", encoding="utf-8", errors="replace") as f:
+        for row in csv.DictReader(f):
+            url = (row.get("document_url") or "").strip()
+            if not url or (row.get("download_status") or "").strip() != "completed":
+                continue
+            docs.append((url, row.get("ema_product_number"), row.get("medicine_name"),
+                         row.get("document_title"), row.get("language"),
+                         row.get("document_type"), row.get("scraped_at") or ""))
+            try:
+                size = int(row.get("file_size_bytes") or 0)
+            except ValueError:
+                size = 0
+            dls.append((url, row.get("local_path"), "completed", size))
+
+    if not docs:
+        log.warning("Previous index held no completed documents - nothing to seed.")
+        return 0
+
+    # One connection, two executemany calls: per-row execute() would open 26k
+    # separate transactions.
+    with sqlite3.connect(db.db_path, timeout=60.0) as conn:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.executemany(
+            "INSERT OR IGNORE INTO documents (document_url, ema_product_number, "
+            "medicine_name, document_title, language, document_type, scraped_at) "
+            "VALUES (?,?,?,?,?,?,?)", docs)
+        conn.executemany(
+            "INSERT OR IGNORE INTO downloads (document_url, local_path, status, file_size) "
+            "VALUES (?,?,?,?)", dls)
+        conn.commit()
+
+    log.info(f"Seeded {len(docs):,} already-downloaded documents from {idx.name}; "
+             f"only new documents will be fetched.")
+    return len(docs)
+
+
 def export_documents_metadata(db: DatabaseManager, output_dir: Path):
     """Exports scraped documents metadata from SQLite to a clean CSV file."""
     log.info("Exporting documents metadata to CSV...")
@@ -890,6 +949,9 @@ def main():
             
     db = DatabaseManager(db_path)
     session = build_session(args.max_retries)
+
+    # Step 0: carry forward what a previous run already published to S3.
+    already = seed_from_previous_index(db, output_dir)
 
     # Step 1: Download & Parse Master Excel (writes local CSV; pipeline handles S3)
     collector = EMADataCollector(db, session, output_dir, langs)
