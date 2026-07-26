@@ -8,6 +8,7 @@ output_subdirs:
 - Drug Control
 - Policies
 - Guidelines
+- Index
 size_class: medium
 timeout_min: 120
 mirror: true

@@ -21,7 +21,6 @@ from bs4 import BeautifulSoup
 import pandas as pd
 
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -507,5 +506,44 @@ def main():
         xlsxs = list(folder.glob("*.xlsx")) + list(folder.glob("*.xls"))
         log.info(f"  {folder.name}: {len(csvs)} CSV, {len(pdfs)} PDF, {len(xlsxs)} Excel")
 
+
+# -- Document index -----------------------------------------------------------
+def write_document_index():
+    """Catalogue every artifact this run produced, so completeness is auditable.
+
+    Without an index there is no way to distinguish a complete run from a
+    truncated one. That blind spot hid ~22,000 missing MHRA documents and half
+    the EMA catalogue; sources that publish an index (pmda, moh) could be proven
+    complete in seconds.
+    """
+    exts = {".pdf", ".doc", ".docx", ".dotx", ".ppt", ".pptx",
+            ".xlsx", ".xls", ".xlsm", ".csv"}
+    out_dir = BASE_DIR / "Index"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    idx = out_dir / "dha_documents.csv"
+
+    rows = []
+    for p in sorted(BASE_DIR.rglob("*")):
+        if not p.is_file() or p.suffix.lower() not in exts:
+            continue
+        if p.name in {"requirements.txt", "manifest.yaml"}:
+            continue
+        if "__pycache__" in p.parts or p.parent.name == "Index":
+            continue
+        rel = p.relative_to(BASE_DIR).as_posix()
+        rows.append({"category": rel.split("/")[0], "file_name": p.name,
+                     "local_path": rel, "ext": p.suffix.lower().lstrip("."),
+                     "size_bytes": p.stat().st_size})
+
+    with open(idx, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["category", "file_name", "local_path",
+                                          "ext", "size_bytes"])
+        w.writeheader()
+        w.writerows(rows)
+    docs = sum(1 for r in rows if r["ext"] != "csv")
+    print(f"index: {len(rows)} artifact(s) ({docs} document(s)) -> {idx.name}", flush=True)
+
+
 if __name__ == "__main__":
     main()
+    write_document_index()
