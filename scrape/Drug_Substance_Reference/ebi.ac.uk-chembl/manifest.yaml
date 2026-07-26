@@ -10,6 +10,6 @@ timeout_min: 720
 mirror: true
 # Bulk-DB source: chembl_37_sqlite.tar.gz is 5.37 GB compressed and expands to
 # ~20 GB of SQLite before CSV extraction — expect ~30 GB peak disk.
-# Enabled: this is the last real data gap. Without it TARGETS, HAS_MECHANISM,
-# INDICATED_FOR and HAS_MODALITY rest on opentargets alone (6 therapeutic areas).
-enabled: true
+# Ran 2026-07-26: 14 CSVs / 493.8 MB committed. Off until the next refresh -
+# re-running costs a 5.4 GB download and ~30 GB peak disk.
+enabled: false
