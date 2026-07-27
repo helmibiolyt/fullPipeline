@@ -16,9 +16,11 @@ from config import TOP_K, FINAL_K
 
 
 def retrieve(query: str, molecule_id: str = None, section: str = None,
-             language: str = None, top_k: int = TOP_K, final_k: int = FINAL_K):
+             language: str = None, doc_type: str = None, section_code: str = None,
+             top_k: int = TOP_K, final_k: int = FINAL_K):
     q_emb = embed.embed_query(query)
-    flt = {"molecule_id": molecule_id, "section": section, "language": language}
+    flt = {"molecule_id": molecule_id, "section": section, "language": language,
+           "doc_type": doc_type, "section_code": section_code}
     flt = {k: v for k, v in flt.items() if v}
     hits = qdrant_store.hybrid_search(q_emb, top_k=top_k, flt=flt or None)
     if not hits:
@@ -33,7 +35,14 @@ def retrieve(query: str, molecule_id: str = None, section: str = None,
         "source": h.payload["source"],
         "s3_key": h.payload["s3_key"],
         "page": h.payload.get("page"),
+        "page_to": h.payload.get("page_to"),
         "section": h.payload.get("section"),
+        # These were in the payload but never surfaced, so a caller could filter
+        # on them yet not see them in the result - and a citation could not say
+        # which SPC section it came from.
+        "section_code": h.payload.get("section_code"),
+        "doc_type": h.payload.get("doc_type"),
+        "chunk_path": h.payload.get("chunk_path"),
     } for h, s in ranked]
 
 

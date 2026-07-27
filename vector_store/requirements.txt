@@ -1,5 +1,18 @@
 # Embeddings + rerank (bge-m3 dense+sparse, bge-reranker-v2-m3)
-FlagEmbedding>=1.2.10
+#
+# BOTH pins are required, and they are a matched pair. Left unpinned, pip takes
+# the latest of each and the two halves break in opposite directions:
+#
+#   transformers >= 4.50 with older FlagEmbedding
+#       -> rerank dies: XLMRobertaTokenizer has no attribute prepare_for_model
+#   FlagEmbedding latest with transformers <= 4.51
+#       -> embed dies: XLMRobertaModel.__init__() got an unexpected kwarg 'dtype'
+#
+# Either way embedding or retrieval fails at one end while the other looks fine,
+# which is exactly the kind of half-working state that wastes a paid GPU hour.
+# Verified working pairs: (1.3.4, 4.49.0) and (1.3.5, 4.51.3).
+FlagEmbedding==1.3.5
+transformers==4.51.3
 torch>=2.1
 
 # Vector DB
