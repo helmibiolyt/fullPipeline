@@ -16,4 +16,4 @@ hydrate: [mhra_data/mhra_documents.csv]
 # MUST stay false: the run re-uploads only new PDFs, so a full-replace commit
 # would delete the 43,218 it skipped.
 mirror: false
-enabled: true
+enabled: false
