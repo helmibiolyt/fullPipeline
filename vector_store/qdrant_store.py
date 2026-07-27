@@ -61,8 +61,16 @@ def ensure_collection():
         c.create_payload_index(COLLECTION, field, models.PayloadSchemaType.KEYWORD)
 
 
-def upsert(chunks: list[Chunk], embeddings: list[dict]):
-    """Idempotent: point id = chunk_id, so re-ingest overwrites, never duplicates."""
+def upsert(chunks: list[Chunk], embeddings: list[dict], wait: bool = False):
+    """Idempotent: point id = chunk_id, so re-ingest overwrites, never duplicates.
+
+    wait=False by default. With wait=True every batch blocks until Qdrant has
+    finished indexing it, and over a network hop to a disk-backed collection that
+    became the whole pipeline's bottleneck: 96 CPU workers and a 4090 both idle,
+    throughput identical at 48 and 96 workers because neither was the constraint.
+    Qdrant queues the write and indexes asynchronously; durability is unchanged,
+    only the acknowledgement is deferred.
+    """
     points = [
         models.PointStruct(
             id=ch.chunk_id,
@@ -76,7 +84,7 @@ def upsert(chunks: list[Chunk], embeddings: list[dict]):
         )
         for ch, emb in zip(chunks, embeddings)
     ]
-    client().upsert(COLLECTION, points=points, wait=True)
+    client().upsert(COLLECTION, points=points, wait=wait)
 
 
 def delete_by_s3_keys(keys: list[str], batch: int = 200):
