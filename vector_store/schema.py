@@ -18,11 +18,18 @@ class Chunk:
     source: str                   # e.g. "ema.europa.eu"
     doc_id: str                   # stable per document (e.g. s3 key stem)
     s3_key: str                   # exact object in moine-data
-    page: int | None = None
+    page: int | None = None       # first page this chunk covers
+    page_to: int | None = None    # last page; a section can span several
     offset: int = 0               # chunk index within the document
     # --- filter metadata (scopes retrieval) ---
     section: str | None = None    # e.g. "contraindications", "indications"
+    section_code: str | None = None  # EU SPC number, e.g. "4.8" — None off the SPC path
     language: str = "en"
+    # Which branch of the chunking cascade produced this: spc | pil | heading |
+    # semantic | fixed. Recorded so the distribution can be measured after a
+    # run. If SPC template detection breaks, everything still looks healthy -
+    # same chunk counts, working retrieval - and only section filters go quiet.
+    chunk_path: str = "fixed"
     molecule_id: str | None = None  # filled later when the graph links a fact
 
     def payload(self) -> dict:
