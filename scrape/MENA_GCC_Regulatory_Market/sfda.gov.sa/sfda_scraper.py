@@ -166,6 +166,9 @@ JS_DATASETS = [
 API_DATASETS = [
     {
         "title":    "List of Registered Human/Herbal/Veterinary Drugs",
+        # The page this endpoint backs. The HTML pass must skip it, or it writes
+        # an empty CSV for a dataset the API pass is already fetching properly.
+        "page":     "/en/drugs-list",
         "endpoint": "/GetDrugs.php",
         "form":     {"TradeName": "", "scientificName": "", "Agent": "",
                      "ManufacturerName": "", "RegNo": ""},
@@ -1172,6 +1175,12 @@ class SFDAScraper:
                 log.info("   → %d datasets discovered\n", len(categories))
 
             js_paths = {ds["url"].rstrip("/") for ds in JS_DATASETS}
+            # The API pass owns these too. Without this, moving drugs-list out of
+            # JS_DATASETS made the HTML pass start scraping it again: the page is
+            # JavaScript-rendered, so plain HTTP found nothing and wrote a
+            # five-byte file under the old name, beside the real 33 MB one from
+            # the API. Two files for one dataset, one of them empty.
+            api_paths = {ds["page"].rstrip("/") for ds in API_DATASETS if ds.get("page")}
             for cat in categories:
                 slug = cat["url"].rstrip("/").split("/")[-1]
                 if target_slug and target_slug.lower() not in (
@@ -1181,6 +1190,9 @@ class SFDAScraper:
                 # Skip URLs handled by the Playwright pass to avoid empty duplicates
                 if cat["url"].rstrip("/") in js_paths and use_playwright and HAS_PLAYWRIGHT:
                     log.info("  Skipping %s — handled by Playwright pass", cat["title"])
+                    continue
+                if cat["url"].rstrip("/") in api_paths:
+                    log.info("  Skipping %s — handled by the JSON API pass", cat["title"])
                     continue
                 total_found += 1
                 if self.scrape_dataset(cat["title"], cat["url"]):
