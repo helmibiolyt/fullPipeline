@@ -19,7 +19,7 @@ evidence for them, and the four changes still needed.
 | MHRA SPC | 23,071 | 25% | 16.5 | 31,058 | 4/4 | **yes — EU SPC** |
 | EMA | 22,150 | 24% | 2.5 | 4,848 | 4/4 | **mixed** (1/4 sampled) |
 | MHRA PAR | 11,228 | 12% | 13.5 | 21,100 | 4/4 | no |
-| PMDA | 547 | 0.6% | 62.2 | 178,357 | 4/4 | yes, Japanese |
+| PMDA | 547 | 0.6% | 62.2 | 178,357 | 4/4 | no (English, see below) |
 
 **~731,000 pages · ~1.98B chars · ~495M tokens · ~1.15M chunks.**
 
@@ -150,7 +150,7 @@ everything, which costs under a dollar of GPU time.
 The model, store and approach are right. Four defects would hurt in production:
 
 1. **`_ntok()` counts whitespace-separated words, not tokens** (`chunk.py`).
-   Japanese has no spaces, so a PMDA page returns ~1 and each page becomes one
+   Arabic and CJK break whitespace counting and each page becomes one
    enormous chunk. Arabic is affected too. Use bge-m3's own tokenizer.
 2. **Chunking resets per page.** The buffer is rebuilt for each page, so a
    section spanning pages is cut regardless of the section logic — and SPCs
@@ -168,3 +168,40 @@ template detection is broken — and nothing in the output would reveal that
 otherwise. This is the same failure mode that hid purplebook, sfda and openalex
 for months: a run that completes and looks healthy while producing the wrong
 thing.
+
+
+---
+
+## 10. Corrections from the 500-document trial (2026-07-27)
+
+**PMDA is not Japanese.** Asserted repeatedly earlier in the design on the
+assumption that Japan's regulator publishes in Japanese. Measured: six PMDA
+documents totalling ~1.4M characters contain **0.0% CJK** - they are English
+review reports. A 500-document trial sampling 60 PMDA files produced 7,529
+chunks and zero Japanese.
+
+This weakens but does not void the multilingual argument for bge-m3: Arabic is
+genuinely present (224 chunks from MENA sources), and the tokenizer fix is
+still required, since whitespace counting breaks on Arabic exactly as it would
+on CJK.
+
+**Trial results, 500 documents, 0 failures, 21,104 chunks:**
+
+| source | chunks | cascade |
+|---|---|---|
+| mhra-spc | 6,729 | spc 100% |
+| mhra-pil | 2,744 | pil 100% |
+| pmda | 7,529 | heading 52%, semantic 46% |
+| ema | 2,888 | spc 44%, heading 33%, semantic 23% |
+| mhra-par | 767 | semantic 98% |
+| mena | 333 | semantic 95% |
+
+Two open items:
+
+* **20.7% of chunks are under 60 tokens.** Largely short SPC sections - name,
+  pharmaceutical form, shelf life - which are legitimately one line. Whether
+  those are precision or noise depends on retrieval: a query filtered to
+  `section=shelf_life` wants exactly that chunk. Revisit with retrieval
+  results, not before.
+* **2 of 500 documents yielded no text** (0.4%), consistent with the ~5% scan
+  rate estimated earlier. These are the OCR candidates.
