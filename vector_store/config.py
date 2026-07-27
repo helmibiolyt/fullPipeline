@@ -41,6 +41,17 @@ SEMANTIC_MODE = os.environ.get("SEMANTIC_MODE", "embedding")
 # Cut at distances above this percentile of the document's own distribution.
 # Percentile rather than an absolute threshold, because cosine distances differ
 # per document and a fixed number would over-cut some and under-cut others.
+#
+# 88 is measured, not guessed. Swept 75/80/85/88/92/95 over five real documents
+# (3 MHRA PARs, 2 EMA, 9-38 pages) with bge-m3 on CPU. Adjacent-sentence cosine
+# distance was strikingly stable across all of them - median ~0.42, p90 ~0.55,
+# max ~0.70 - which is what makes a percentile behave predictably here.
+# Resulting average chunk size: 75 -> ~267 tok, 88 -> ~345, 95 -> ~436. No
+# threshold degenerated: none produced chunks that all hit the 512 budget
+# (semantic cutting doing nothing) and none collapsed into fragments.
+#
+# What this does NOT establish is that the cuts land at meaningful topic
+# changes - only that the sizes are sane. Retrieval quality is the real test.
 SEMANTIC_PERCENTILE = float(os.environ.get("SEMANTIC_PERCENTILE", "88"))
 
 # --- Retrieval ---
