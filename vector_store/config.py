@@ -31,6 +31,18 @@ CHUNK_TOKENS = int(os.environ.get("CHUNK_TOKENS", "512"))     # target chunk siz
 CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "64"))    # token overlap
 SEMANTIC_SPLIT = os.environ.get("SEMANTIC_SPLIT", "1").lower() not in ("0", "false", "no")
 
+# How the semantic branch (documents with no heading structure) picks its cuts:
+#   "embedding" - embed each sentence with EMBED_MODEL, cut where meaning shifts.
+#                 Needs the model, so it only runs where the GPU is.
+#   "paragraph" - cut on blank lines. Deterministic, no model, no GPU.
+# Falls back to "paragraph" automatically when the model cannot be loaded, so
+# chunking still works on a CPU-only box.
+SEMANTIC_MODE = os.environ.get("SEMANTIC_MODE", "embedding")
+# Cut at distances above this percentile of the document's own distribution.
+# Percentile rather than an absolute threshold, because cosine distances differ
+# per document and a fixed number would over-cut some and under-cut others.
+SEMANTIC_PERCENTILE = float(os.environ.get("SEMANTIC_PERCENTILE", "88"))
+
 # --- Retrieval ---
 TOP_K = int(os.environ.get("TOP_K", "50"))       # candidates before rerank
 FINAL_K = int(os.environ.get("FINAL_K", "5"))    # after rerank

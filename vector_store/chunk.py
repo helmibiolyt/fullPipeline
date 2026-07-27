@@ -22,7 +22,8 @@ from __future__ import annotations
 import re
 from functools import lru_cache
 
-from config import CHUNK_TOKENS, CHUNK_OVERLAP, EMBED_MODEL, SEMANTIC_SPLIT
+from config import (CHUNK_TOKENS, CHUNK_OVERLAP, EMBED_MODEL, SEMANTIC_SPLIT,
+                    SEMANTIC_MODE, SEMANTIC_PERCENTILE)
 from schema import Chunk
 
 # --- EU SPC template ---------------------------------------------------------
@@ -227,6 +228,98 @@ def layout_for(pages: list[str], doc_type: str | None) -> str:
     return hinted
 
 
+_SENT = re.compile(r"(?<=[.!?。！？])\s+|\n{2,}")
+
+
+def _sentences(text: str) -> list[str]:
+    """Sentence-ish units. Includes CJK stops so Japanese splits at all."""
+    parts = [s.strip() for s in _SENT.split(text) if s and s.strip()]
+    return [p for p in parts if p]
+
+
+def _semantic_breakpoints(units: list[str]) -> set[int]:
+    """Indices after which meaning shifts enough to justify a cut.
+
+    Embeds each unit with the same model used for retrieval, measures cosine
+    distance between neighbours, and cuts where the distance sits above
+    SEMANTIC_PERCENTILE of this document's own distribution.
+
+    Returns an empty set when the model is unavailable, so the caller falls
+    back to paragraph boundaries rather than failing.
+    """
+    if len(units) < 3:
+        return set()
+    try:
+        import numpy as np
+        from embed import embed_passages
+        vecs = np.array([e["dense"] for e in embed_passages(units)], dtype="float32")
+    except Exception as e:  # noqa: BLE001 - no model here is a fallback, not an error
+        log_once(f"semantic embedding unavailable ({type(e).__name__}); "
+                 f"using paragraph boundaries")
+        return set()
+
+    vecs /= (np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-9)
+    sims = (vecs[:-1] * vecs[1:]).sum(axis=1)
+    dists = 1.0 - sims
+    cutoff = float(np.percentile(dists, SEMANTIC_PERCENTILE))
+    return {i for i, d in enumerate(dists) if d >= cutoff}
+
+
+_warned: set[str] = set()
+
+
+def log_once(msg: str) -> None:
+    if msg not in _warned:
+        _warned.add(msg)
+        print(f"[chunk] {msg}")
+
+
+def _chunk_embedding_semantic(blocks, source, doc_id, s3_key, lang, layout):
+    """Cut where the embedding says the topic changed, bounded by the budget."""
+    text = "\n".join(t for _, t in blocks)
+    units = _sentences(text)
+    cuts = _semantic_breakpoints(units)
+    if not cuts:
+        return None                      # caller falls back to paragraphs
+
+    # Map each unit to the page it started on, so citations stay resolvable.
+    page_of, pos = [], 0
+    spans = []
+    for p, t in blocks:
+        spans.append((pos, pos + len(t), p))
+        pos += len(t) + 1
+    cur = 0
+    for u in units:
+        i = text.find(u, cur)
+        cur = i + len(u) if i >= 0 else cur
+        page_of.append(next((p for a, b, p in spans if a <= i < b), blocks[0][0]))
+
+    chunks, buf, buf_tok, offset = [], [], 0, 0
+    start_page = page_of[0] if page_of else blocks[0][0]
+
+    def flush(end_page):
+        nonlocal buf, buf_tok, offset, start_page
+        body = " ".join(buf).strip()
+        if body:
+            chunks.append(Chunk.new(
+                body, source, doc_id, s3_key, offset,
+                page=start_page, page_to=end_page, section=None,
+                section_code=None, language=lang, chunk_path=layout))
+            offset += 1
+        buf, buf_tok = [], 0
+        start_page = end_page
+
+    for i, u in enumerate(units):
+        buf.append(u)
+        buf_tok += _ntok(u)
+        # Cut at a topic shift, or when the budget is reached - whichever first.
+        if (i in cuts and buf_tok >= CHUNK_TOKENS // 4) or buf_tok >= CHUNK_TOKENS:
+            flush(page_of[i])
+    if buf:
+        flush(page_of[-1] if page_of else blocks[-1][0])
+    return chunks
+
+
 def _paragraphs(lines: list[str]) -> list[list[str]]:
     """Group lines into paragraphs on blank lines."""
     paras, cur = [], []
@@ -321,6 +414,10 @@ def chunk_document(blocks, source, doc_id, s3_key, doc_type=None) -> list[Chunk]
     # tokens blindly. Before this, "semantic" and "fixed" did exactly the same
     # thing - the branch existed in name only.
     if layout in ("semantic", "fixed"):
+        if layout == "semantic" and SEMANTIC_MODE == "embedding":
+            got = _chunk_embedding_semantic(blocks, source, doc_id, s3_key, lang, layout)
+            if got is not None:
+                return got
         return _chunk_semantic(blocks, source, doc_id, s3_key, lang, layout)
 
     chunks: list[Chunk] = []
