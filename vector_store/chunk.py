@@ -281,7 +281,7 @@ def log_once(msg: str) -> None:
         print(f"[chunk] {msg}")
 
 
-def _chunk_embedding_semantic(blocks, source, doc_id, s3_key, lang, layout):
+def _chunk_embedding_semantic(blocks, source, doc_id, s3_key, lang, layout, doc_type=None):
     """Cut where the embedding says the topic changed, bounded by the budget."""
     text = "\n".join(t for _, t in blocks)
     units = _sentences(text)
@@ -311,7 +311,8 @@ def _chunk_embedding_semantic(blocks, source, doc_id, s3_key, lang, layout):
             chunks.append(Chunk.new(
                 body, source, doc_id, s3_key, offset,
                 page=start_page, page_to=end_page, section=None,
-                section_code=None, language=lang, chunk_path=layout))
+                section_code=None, language=lang, chunk_path=layout,
+                doc_type=doc_type))
             offset += 1
         buf, buf_tok = [], 0
         start_page = end_page
@@ -341,7 +342,7 @@ def _paragraphs(lines: list[str]) -> list[list[str]]:
     return paras
 
 
-def _chunk_semantic(blocks, source, doc_id, s3_key, lang, layout) -> list[Chunk]:
+def _chunk_semantic(blocks, source, doc_id, s3_key, lang, layout, doc_type=None) -> list[Chunk]:
     """Boundary-aware splitting for documents with no template.
 
     Cuts only between paragraphs, never inside one, and fills up to the token
@@ -369,7 +370,8 @@ def _chunk_semantic(blocks, source, doc_id, s3_key, lang, layout) -> list[Chunk]
             chunks.append(Chunk.new(
                 text, source, doc_id, s3_key, offset,
                 page=page_from, page_to=page_to, section=None,
-                section_code=None, language=lang, chunk_path=layout))
+                section_code=None, language=lang, chunk_path=layout,
+                doc_type=doc_type))
             offset += 1
         buf, buf_tok = [], 0
         page_from = page_to
@@ -422,10 +424,10 @@ def chunk_document(blocks, source, doc_id, s3_key, doc_type=None) -> list[Chunk]
     # thing - the branch existed in name only.
     if layout in ("semantic", "fixed"):
         if layout == "semantic" and SEMANTIC_MODE == "embedding":
-            got = _chunk_embedding_semantic(blocks, source, doc_id, s3_key, lang, layout)
+            got = _chunk_embedding_semantic(blocks, source, doc_id, s3_key, lang, layout, doc_type)
             if got is not None:
                 return got
-        return _chunk_semantic(blocks, source, doc_id, s3_key, lang, layout)
+        return _chunk_semantic(blocks, source, doc_id, s3_key, lang, layout, doc_type)
 
     chunks: list[Chunk] = []
     buf: list[str] = []
@@ -442,7 +444,7 @@ def chunk_document(blocks, source, doc_id, s3_key, doc_type=None) -> list[Chunk]
                 text, source, doc_id, s3_key, offset,
                 page=state["page_from"], page_to=state["page_to"],
                 section=state["section"], section_code=state["code"],
-                language=lang, chunk_path=layout))
+                language=lang, chunk_path=layout, doc_type=doc_type))
             offset += 1
         buf, buf_tok = [], 0
         state["page_from"] = state["page_to"]

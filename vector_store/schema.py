@@ -24,6 +24,7 @@ class Chunk:
     # --- filter metadata (scopes retrieval) ---
     section: str | None = None    # e.g. "contraindications", "indications"
     section_code: str | None = None  # EU SPC number, e.g. "4.8" — None off the SPC path
+    doc_type: str | None = None   # spc | pil | par | epar — from the S3 path, not inferred
     language: str = "en"
     # Which branch of the chunking cascade produced this: spc | pil | heading |
     # semantic | fixed. Recorded so the distribution can be measured after a

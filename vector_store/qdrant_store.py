@@ -18,18 +18,43 @@ def client() -> QdrantClient:
 
 
 def ensure_collection():
+    """Create the collection sized for ~3.9M chunks on a shared 15 GB box.
+
+    Three settings do the work, and without them this does not fit:
+
+    * int8 scalar quantization - 3.9M x 1024 dims as float32 is ~16 GB of RAM.
+      Quantized to one byte per dimension it is ~4 GB, which is the difference
+      between running and being OOM-killed alongside Airflow, the search API and
+      (later) Neo4j. Recall loss at this scale is negligible.
+    * on_disk vectors - full-precision copies stay on disk and are read only for
+      rescoring; the quantized ones live in RAM. always_ram=True on the
+      quantized side is what keeps search fast.
+    * on_disk_payload - chunk text averages ~1.3 KB, so 3.9M payloads is ~6 GB.
+      That belongs on disk, not in memory; it is fetched only for the handful of
+      results actually returned.
+    """
     c = client()
     if c.collection_exists(COLLECTION):
         return
     c.create_collection(
         collection_name=COLLECTION,
         vectors_config={"dense": models.VectorParams(
-            size=EMBED_DIM, distance=models.Distance.COSINE)},
+            size=EMBED_DIM,
+            distance=models.Distance.COSINE,
+            on_disk=True)},
         sparse_vectors_config={"sparse": models.SparseVectorParams(
-            index=models.SparseIndexParams())},
+            index=models.SparseIndexParams(on_disk=True))},
+        quantization_config=models.ScalarQuantization(
+            scalar=models.ScalarQuantizationConfig(
+                type=models.ScalarType.INT8,
+                always_ram=True)),
+        on_disk_payload=True,
     )
-    # payload indexes for fast filtering
-    for field in ("source", "doc_id", "section", "language", "molecule_id"):
+    # Payload indexes for the fields retrieval filters on. Filtering happens
+    # before search, so "adverse effects of drug X" narrows to a handful of
+    # chunks rather than scanning millions.
+    for field in ("source", "doc_id", "doc_type", "section", "section_code",
+                  "chunk_path", "language", "molecule_id"):
         c.create_payload_index(COLLECTION, field, models.PayloadSchemaType.KEYWORD)
 
 
