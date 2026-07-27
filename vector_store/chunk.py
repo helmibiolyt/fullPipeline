@@ -198,7 +198,13 @@ def detect_layout(pages: list[str]) -> str:
     if len(dotted) >= 2:
         return "spc"
 
-    if any(_keyword_section(l) for l in lines):
+    # Two distinct headings, matching the evidence SPC and PIL each require. One
+    # match used to be enough, which sent a 75-page PMDA document down the
+    # heading path on the strength of a single stray line; it then had nothing
+    # to cut on and ended 82% of its chunks at the token budget - fixed-size
+    # splitting wearing a different label. The semantic path handles such a
+    # document properly.
+    if len({t for l in lines if (t := _keyword_section(l))}) >= 2:
         return "heading"
     return "semantic" if SEMANTIC_SPLIT else "fixed"
 
@@ -222,7 +228,8 @@ def layout_for(pages: list[str], doc_type: str | None) -> str:
     if hinted is None:                  # known to be untemplated -> skip PIL/SPC
         lines = join_split_headings(
             [l.strip() for p in pages[:6] for l in p.split("\n")])
-        if any(_keyword_section(l) for l in lines):
+        # Same two-heading bar as detect_layout: one match is not structure.
+        if len({t for l in lines if (t := _keyword_section(l))}) >= 2:
             return "heading"
         return "semantic" if SEMANTIC_SPLIT else "fixed"
     return hinted
