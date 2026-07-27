@@ -1,6 +1,7 @@
 """Qdrant collection with hybrid (dense + sparse) vectors and metadata filtering."""
 from __future__ import annotations
 
+import time
 from functools import lru_cache
 
 from qdrant_client import QdrantClient, models
@@ -13,7 +14,9 @@ from schema import Chunk
 def client() -> QdrantClient:
     # Server mode if a URL is given (Docker/Cloud); else embedded local — no Docker.
     if QDRANT_URL:
-        return QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+        # The client default is a 5 s timeout, which a multi-MB upsert to a
+        # 2 vCPU box exceeds routinely.
+        return QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=120)
     return QdrantClient(path=QDRANT_PATH)
 
 
@@ -61,6 +64,34 @@ def ensure_collection():
         c.create_payload_index(COLLECTION, field, models.PayloadSchemaType.KEYWORD)
 
 
+# One HTTP request per this many points. A 1024-point batch carries 1024 dense
+# floats + sparse + ~1.3 KB of text each - roughly 20 MB of JSON, which a 2 vCPU
+# Qdrant takes long enough to serve that the connection gets dropped mid-request.
+UPSERT_BATCH = 256
+UPSERT_RETRIES = 5
+
+
+def _upsert_batch(points, wait):
+    """Upsert one sub-batch, retrying on transport failures.
+
+    Qdrant closed the connection mid-upsert during the backfill
+    ("Server disconnected without sending a response") and the exception
+    unwound the whole run. Retries are safe because point ids are chunk_ids:
+    replaying a batch that did land is an overwrite, not a duplicate. The
+    cached client is dropped between attempts so a poisoned keep-alive
+    connection is not reused.
+    """
+    for attempt in range(UPSERT_RETRIES):
+        try:
+            client().upsert(COLLECTION, points=points, wait=wait)
+            return
+        except Exception:
+            if attempt == UPSERT_RETRIES - 1:
+                raise
+            client.cache_clear()
+            time.sleep(2 ** attempt)
+
+
 def upsert(chunks: list[Chunk], embeddings: list[dict], wait: bool = False):
     """Idempotent: point id = chunk_id, so re-ingest overwrites, never duplicates.
 
@@ -84,7 +115,8 @@ def upsert(chunks: list[Chunk], embeddings: list[dict], wait: bool = False):
         )
         for ch, emb in zip(chunks, embeddings)
     ]
-    client().upsert(COLLECTION, points=points, wait=wait)
+    for i in range(0, len(points), UPSERT_BATCH):
+        _upsert_batch(points[i:i + UPSERT_BATCH], wait)
 
 
 def delete_by_s3_keys(keys: list[str], batch: int = 200):

@@ -23,8 +23,24 @@ before a worker is handed anything.
 from __future__ import annotations
 
 import argparse
+import multiprocessing
 import os
 import time
+
+# A spawned worker is identifiable by its process name, which multiprocessing
+# sets while unpacking the parent's state - before it imports this module, so
+# the check is already valid here. (sys.argv is not usable for this: spawn
+# overwrites the child's argv with the parent's during that same step.)
+# Each worker loads a HuggingFace fast tokenizer, whose Rust rayon pool sizes
+# itself to the machine - 120 threads here, times 64 workers, is ~7,700 threads and thread creation starts
+# failing with EAGAIN. Workers only tokenize to measure chunk length, so one
+# thread each is plenty. The parent is left alone deliberately: it tokenizes
+# 1024-passage batches for the GPU, where multi-threading is worth real time.
+if multiprocessing.current_process().name != "MainProcess":
+    for _v in ("RAYON_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS",
+               "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ[_v] = "1"
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -96,18 +112,35 @@ def main():
 
     import embed                                  # loads bge-m3 on the GPU, once
     t0 = time.time()
-    pending, n_chunks, failed, done = [], 0, 0, 0
+    pending, n_chunks, failed, done, lost = [], 0, 0, 0, 0
     paths = Counter()
 
     def flush(batch):
-        nonlocal n_chunks
+        # A batch that cannot be written after all retries must not unwind a
+        # multi-hour backfill. It is skipped and counted: because the skip test
+        # is "is this document's ETag already in Qdrant", the next run simply
+        # picks these documents up again.
+        nonlocal n_chunks, lost
         if not batch:
             return
         embs = embed.embed_passages([c.text for c in batch])
-        qdrant_store.upsert(batch, embs)
-        n_chunks += len(batch)
+        try:
+            qdrant_store.upsert(batch, embs)
+            n_chunks += len(batch)
+        except Exception as e:
+            lost += len(batch)
+            print(f"  upsert failed for {len(batch)} chunks ({lost:,} lost "
+                  f"so far): {type(e).__name__}: {e}", flush=True)
 
-    with ProcessPoolExecutor(max_workers=a.workers, initializer=_worker_init) as ex:
+    # spawn, not fork. ProcessPoolExecutor creates workers lazily, so the first
+    # few fork cleanly and then the first embed call initialises CUDA in the
+    # parent - after which every newly forked worker inherits a broken CUDA
+    # context and deadlocks. Observed exactly that: ~19,500 chunks ingested,
+    # then 3 processes alive instead of 64 and the parent stuck in
+    # futex_wait_queue. spawn starts each worker from a clean interpreter.
+    ctx = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=a.workers, initializer=_worker_init,
+                             mp_context=ctx) as ex:
         futures = {ex.submit(_process, t): t[0] for t in todo}
         for fut in as_completed(futures):
             chunks, err = fut.result()
@@ -122,7 +155,7 @@ def main():
             while len(pending) >= a.embed_batch:
                 flush(pending[:a.embed_batch])
                 pending = pending[a.embed_batch:]
-            if done % 2000 == 0:
+            if done % 500 == 0:
                 el = time.time() - t0
                 rate = done / el
                 eta = (len(todo) - done) / rate / 60 if rate else 0
