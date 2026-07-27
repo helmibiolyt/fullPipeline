@@ -21,7 +21,9 @@ evidence for them, and the four changes still needed.
 | MHRA PAR | 11,228 | 12% | 13.5 | 21,100 | 4/4 | no |
 | PMDA | 547 | 0.6% | 62.2 | 178,357 | 4/4 | no (English, see below) |
 
-**~731,000 pages · ~1.98B chars · ~495M tokens · ~1.15M chunks.**
+**~731,000 pages · ~1.98B chars · ~495M tokens.** Chunk count measured at
+42.2 per document in the 500-document trial, so **~3.9M chunks** — not the
+~1.15M first estimated from average document sizes.
 
 Two measurements drive the design:
 
@@ -69,7 +71,7 @@ embeds sentences and infers where topics change. In an SPC those boundaries are
 already written down. Three consequences:
 
 1. **A structure chunk carries a label.** `section_code = "4.8"` lets a query
-   about side effects filter to ~20 chunks instead of searching 1.15M. Semantic
+   about side effects filter to ~20 chunks instead of searching 3.9M. Semantic
    chunks are anonymous.
 2. **4.3 Contraindications and 4.4 Warnings read almost identically** — both are
    risk language. Similarity-based splitting merges them. They are legally
@@ -91,13 +93,14 @@ mid-sentence.
 
 ### 2.4 Embedding — BAAI/bge-m3, fp16, dense + sparse
 - **8,192-token context** — a whole SPC section fits in one vector.
-- **Multilingual** — PMDA is Japanese, MENA carries Arabic.
+- **Multilingual** — MENA carries Arabic. (PMDA was assumed Japanese during
+  design; measured at 0.0% CJK — see §10.)
 - **Sparse vectors alongside dense** — regulatory queries hit exact identifiers
   (`PLGB 04416-1656`, ATC `B05CB01`). Pure dense retrieval misses those.
 - 568M params — runs on modest hardware.
 
 Rejected: `Qwen3-Embedding-4B` (higher English scores, ~7x larger, weaker on the
-Japanese/Arabic tail); `PubMedBERT` (biomedical but 512-token cap, which would
+non-English tail); `PubMedBERT` (biomedical but 512-token cap, which would
 split the very sections we work to keep whole).
 
 ### 2.5 Reranking — BAAI/bge-reranker-v2-m3
@@ -106,8 +109,10 @@ reranking is the largest single quality gain available once retrieval works.
 
 ### 2.6 Store — Qdrant, hybrid, int8 quantized
 Native dense+sparse in one query, matching what bge-m3 emits. Payload filtering
-applied **before** search. Quantization takes the index from ~4.7 GB to
-**~1.2 GB** — a single node, no cluster.
+applied **before** search. Quantization takes the index from ~16 GB to
+**~4 GB** — still a single node, but tighter against the EC2's 5 GB of free
+RAM than first estimated; mmap from disk, and move to Qdrant Cloud if it
+strains.
 
 ### 2.7 Payload — the join to the graph
 ```
@@ -135,7 +140,7 @@ everything, which costs under a dollar of GPU time.
 | **Embedding + rerank** | **RunPod GPU** | the only GPU-bound stage |
 | **Qdrant** | **EC2 or Qdrant Cloud** | must outlive an ephemeral pod |
 
-**RunPod is a burst resource** — ~25–40 min for 1.15M chunks. Therefore:
+**RunPod is a burst resource** — roughly 75–90 min for ~3.9M chunks. Therefore:
 - A **4090 (24 GB)** is sufficient; the job is throughput-bound, not
   memory-bound. bge-m3 in fp16 needs ~8 GB.
 - Put the model cache on a **network volume**, or every pod start re-downloads
@@ -145,13 +150,15 @@ everything, which costs under a dollar of GPU time.
 
 ---
 
-## 4. Changes still needed in the existing code
+## 4. Defects found and fixed in the existing code
 
-The model, store and approach are right. Four defects would hurt in production:
+All of the below are now fixed and verified; kept as the record of what was
+wrong. Three more surfaced only by running the chunker against real PDFs — see
+the git history for chunk.py.
 
 1. **`_ntok()` counts whitespace-separated words, not tokens** (`chunk.py`).
-   Arabic and CJK break whitespace counting and each page becomes one
-   enormous chunk. Arabic is affected too. Use bge-m3's own tokenizer.
+   Whitespace counting breaks on Arabic and would break on any CJK ingested
+   later. Use bge-m3's own tokenizer.
 2. **Chunking resets per page.** The buffer is rebuilt for each page, so a
    section spanning pages is cut regardless of the section logic — and SPCs
    average 16.5 pages. Buffer across the document; record a page range.
