@@ -54,7 +54,10 @@ def ensure_collection():
     # before search, so "adverse effects of drug X" narrows to a handful of
     # chunks rather than scanning millions.
     for field in ("source", "doc_id", "doc_type", "section", "section_code",
-                  "chunk_path", "language", "molecule_id"):
+                  "chunk_path", "language", "molecule_id",
+                  # s3_key and etag drive incremental sync: the skip check
+                  # scrolls them, and prune filters on s3_key.
+                  "s3_key", "etag"):
         c.create_payload_index(COLLECTION, field, models.PayloadSchemaType.KEYWORD)
 
 
@@ -74,6 +77,25 @@ def upsert(chunks: list[Chunk], embeddings: list[dict]):
         for ch, emb in zip(chunks, embeddings)
     ]
     client().upsert(COLLECTION, points=points, wait=True)
+
+
+def delete_by_s3_keys(keys: list[str], batch: int = 200):
+    """Remove every chunk belonging to these documents.
+
+    Needed for mirror:true sources, where a run legitimately deletes files. With
+    no prune, their vectors survive and retrieval keeps citing documents that are
+    no longer in the bucket - stale answers that look perfectly well sourced.
+    """
+    c = client()
+    for i in range(0, len(keys), batch):
+        c.delete(
+            collection_name=COLLECTION,
+            points_selector=models.FilterSelector(filter=models.Filter(
+                should=[models.FieldCondition(key="s3_key",
+                                              match=models.MatchValue(value=k))
+                        for k in keys[i:i + batch]])),
+            wait=True,
+        )
 
 
 def hybrid_search(q_emb: dict, top_k: int, flt: dict | None = None):

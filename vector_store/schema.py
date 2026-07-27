@@ -18,6 +18,7 @@ class Chunk:
     source: str                   # e.g. "ema.europa.eu"
     doc_id: str                   # stable per document (e.g. s3 key stem)
     s3_key: str                   # exact object in moine-data
+    etag: str = ""                # S3 ETag at ingest time; unchanged means skip
     page: int | None = None       # first page this chunk covers
     page_to: int | None = None    # last page; a section can span several
     offset: int = 0               # chunk index within the document
