@@ -227,6 +227,81 @@ def layout_for(pages: list[str], doc_type: str | None) -> str:
     return hinted
 
 
+def _paragraphs(lines: list[str]) -> list[list[str]]:
+    """Group lines into paragraphs on blank lines."""
+    paras, cur = [], []
+    for l in lines:
+        if l.strip():
+            cur.append(l)
+        elif cur:
+            paras.append(cur)
+            cur = []
+    if cur:
+        paras.append(cur)
+    return paras
+
+
+def _chunk_semantic(blocks, source, doc_id, s3_key, lang, layout) -> list[Chunk]:
+    """Boundary-aware splitting for documents with no template.
+
+    Cuts only between paragraphs, never inside one, and fills up to the token
+    budget. A paragraph is the smallest unit that reliably holds one idea in an
+    assessment report, so this keeps a finding intact where a pure token count
+    would slice it mid-sentence.
+
+    This is deliberately NOT embedding-breakpoint chunking. That would mean
+    embedding every paragraph, comparing neighbours and cutting at similarity
+    troughs - a second pass over the corpus to infer boundaries that blank
+    lines already mark. It is worth revisiting only if retrieval on PARs and
+    PMDA proves weak; the payload records chunk_path so that is measurable.
+    """
+    chunks: list[Chunk] = []
+    buf: list[str] = []
+    buf_tok = 0
+    offset = 0
+    page_from = blocks[0][0]
+    page_to = blocks[0][0]
+
+    def flush():
+        nonlocal buf, buf_tok, offset, page_from
+        text = "\n".join(buf).strip()
+        if text:
+            chunks.append(Chunk.new(
+                text, source, doc_id, s3_key, offset,
+                page=page_from, page_to=page_to, section=None,
+                section_code=None, language=lang, chunk_path=layout))
+            offset += 1
+        buf, buf_tok = [], 0
+        page_from = page_to
+
+    for page, text in blocks:
+        page_to = page
+        for para in _paragraphs(text.split("\n")):
+            ptok = sum(_ntok(l) for l in para)
+            # A paragraph larger than the budget has to be split, but only
+            # then - and on line boundaries rather than mid-line.
+            if ptok > CHUNK_TOKENS:
+                if buf:
+                    flush()
+                for l in para:
+                    buf.append(l)
+                    buf_tok += _ntok(l)
+                    if buf_tok >= CHUNK_TOKENS:
+                        flush()
+                continue
+            if buf_tok + ptok > CHUNK_TOKENS and buf:
+                carry = buf[-2:] if CHUNK_OVERLAP else []
+                flush()
+                buf = list(carry)
+                buf_tok = sum(_ntok(l) for l in buf)
+            buf.extend(para)
+            buf_tok += ptok
+
+    if buf:
+        flush()
+    return chunks
+
+
 def chunk_document(blocks, source, doc_id, s3_key, doc_type=None) -> list[Chunk]:
     """blocks: list[(page, text)] from extract.extract_blocks -> list[Chunk].
 
@@ -241,6 +316,12 @@ def chunk_document(blocks, source, doc_id, s3_key, doc_type=None) -> list[Chunk]
     pages = [t for _, t in blocks]
     layout = layout_for(pages, doc_type)
     lang = _language("\n".join(pages[:3]))
+
+    # No headings to follow: split on paragraph boundaries instead of counting
+    # tokens blindly. Before this, "semantic" and "fixed" did exactly the same
+    # thing - the branch existed in name only.
+    if layout in ("semantic", "fixed"):
+        return _chunk_semantic(blocks, source, doc_id, s3_key, lang, layout)
 
     chunks: list[Chunk] = []
     buf: list[str] = []
