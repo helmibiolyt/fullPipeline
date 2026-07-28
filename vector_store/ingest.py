@@ -19,6 +19,7 @@ import os
 import tempfile
 from collections import Counter
 
+from qdrant_client import models
 from tqdm import tqdm
 
 import s3_docs
@@ -32,17 +33,27 @@ from config import COLLECTION
 def indexed_etags() -> dict[str, str]:
     """s3_key -> etag for everything already in the collection.
 
-    One scroll over the payloads. At a few million chunks this is seconds and a
-    few hundred MB of dict, against hours of re-embedding avoided.
+    Reads only the first chunk of each document. The map holds one answer per
+    document, but a document averages ~34 chunks, so an unfiltered scroll
+    fetched 3.2M payloads to learn 93k facts - and with on_disk_payload that is
+    3.2M disk reads on a 2 vCPU box. Measured at ~14 minutes, longer than the
+    OCR work it was there to protect. Every chunker numbers offsets from 0
+    within a document, so offset == 0 selects exactly one chunk per document.
+
+    A document whose offset-0 chunk is missing reads as not indexed and gets
+    re-ingested. That is the safe direction to fail: redundant work rather than
+    silent omission.
     """
     out: dict[str, str] = {}
     client = qdrant_store.client()
     if not client.collection_exists(COLLECTION):
         return out
+    first_chunk = models.Filter(must=[models.FieldCondition(
+        key="offset", match=models.MatchValue(value=0))])
     offset = None
     while True:
         points, offset = client.scroll(
-            COLLECTION, limit=10_000, offset=offset,
+            COLLECTION, scroll_filter=first_chunk, limit=10_000, offset=offset,
             with_payload=["s3_key", "etag"], with_vectors=False)
         for p in points:
             k = (p.payload or {}).get("s3_key")

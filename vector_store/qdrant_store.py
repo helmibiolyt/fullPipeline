@@ -37,8 +37,12 @@ def ensure_collection():
       results actually returned.
     """
     c = client()
-    if c.collection_exists(COLLECTION):
-        return
+    if not c.collection_exists(COLLECTION):
+        _create(c)
+    _ensure_indexes(c)
+
+
+def _create(c):
     c.create_collection(
         collection_name=COLLECTION,
         vectors_config={"dense": models.VectorParams(
@@ -53,15 +57,37 @@ def ensure_collection():
                 always_ram=True)),
         on_disk_payload=True,
     )
-    # Payload indexes for the fields retrieval filters on. Filtering happens
-    # before search, so "adverse effects of drug X" narrows to a handful of
-    # chunks rather than scanning millions.
-    for field in ("source", "doc_id", "doc_type", "section", "section_code",
-                  "chunk_path", "language", "molecule_id",
-                  # s3_key and etag drive incremental sync: the skip check
-                  # scrolls them, and prune filters on s3_key.
-                  "s3_key", "etag"):
-        c.create_payload_index(COLLECTION, field, models.PayloadSchemaType.KEYWORD)
+
+# Payload indexes for the fields retrieval filters on. Filtering happens before
+# search, so "adverse effects of drug X" narrows to a handful of chunks rather
+# than scanning millions.
+KEYWORD_INDEXES = (
+    "source", "doc_id", "doc_type", "section", "section_code",
+    "chunk_path", "language", "molecule_id",
+    # s3_key and etag drive incremental sync: the skip check reads them, and
+    # prune filters on s3_key.
+    "s3_key", "etag",
+)
+
+
+def _ensure_indexes(c):
+    """Create any missing payload index, on existing collections too.
+
+    This used to run only on creation, so an index added later never reached a
+    collection already holding data - and the sync path that needs `offset`
+    indexed is exactly that case. Existing indexes are left alone rather than
+    recreated, which on a few million points is not free.
+    """
+    existing = set((c.get_collection(COLLECTION).payload_schema or {}).keys())
+    for field in KEYWORD_INDEXES:
+        if field not in existing:
+            c.create_payload_index(COLLECTION, field,
+                                   models.PayloadSchemaType.KEYWORD)
+    # Integer, not keyword: indexed_etags() filters on offset == 0 to read one
+    # chunk per document instead of all of them.
+    if "offset" not in existing:
+        c.create_payload_index(COLLECTION, "offset",
+                               models.PayloadSchemaType.INTEGER)
 
 
 # One HTTP request per this many points. A 1024-point batch carries 1024 dense
