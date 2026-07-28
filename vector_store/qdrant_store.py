@@ -164,6 +164,17 @@ def delete_by_s3_keys(keys: list[str], batch: int = 200):
         )
 
 
+# Search the int8 vectors that quantization keeps in RAM, and skip rescoring
+# against the full-precision copies - those are on_disk, so rescoring turns
+# every query into ~100 random EBS reads. Measured over 10 queries: 1.7-3.5 s
+# for a cold query against 23 ms with rescoring off, and 23-48 ms once the page
+# cache happened to be warm. The warm case is what makes this easy to miss - a
+# query you have run before looks fine, and a real user asking something new
+# waits seconds. Results did not change: top-10 overlap was 100%.
+NO_RESCORE = models.SearchParams(
+    quantization=models.QuantizationSearchParams(rescore=False))
+
+
 def hybrid_search(q_emb: dict, top_k: int, flt: dict | None = None):
     """Fuse dense + sparse results (RRF). `flt` = {field: value} exact filters."""
     qfilter = None
@@ -175,12 +186,13 @@ def hybrid_search(q_emb: dict, top_k: int, flt: dict | None = None):
     res = client().query_points(
         collection_name=COLLECTION,
         prefetch=[
-            models.Prefetch(query=q_emb["dense"], using="dense", limit=top_k, filter=qfilter),
+            models.Prefetch(query=q_emb["dense"], using="dense", limit=top_k,
+                            filter=qfilter, params=NO_RESCORE),
             models.Prefetch(
                 query=models.SparseVector(
                     indices=list(q_emb["sparse"].keys()),
                     values=list(q_emb["sparse"].values())),
-                using="sparse", limit=top_k, filter=qfilter),
+                using="sparse", limit=top_k, filter=qfilter, params=NO_RESCORE),
         ],
         query=models.FusionQuery(fusion=models.Fusion.RRF),
         limit=top_k, with_payload=True,

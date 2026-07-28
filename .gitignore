@@ -36,3 +36,6 @@ vector_store/*.bin
 # raw docs pulled by scrapers (they live in S3, not git)
 **/pdfs/
 **/*.pdf
+
+# Personal permission rules; contains machine-specific absolute paths
+.claude/settings.local.json
