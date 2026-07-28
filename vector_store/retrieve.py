@@ -12,7 +12,7 @@ import json
 
 import embed
 import qdrant_store
-from config import TOP_K, FINAL_K
+from config import TOP_K, FINAL_K, RERANK
 
 
 def retrieve(query: str, molecule_id: str = None, section: str = None,
@@ -25,10 +25,17 @@ def retrieve(query: str, molecule_id: str = None, section: str = None,
     hits = qdrant_store.hybrid_search(q_emb, top_k=top_k, flt=flt or None)
     if not hits:
         return []
-    # rerank the candidates for precision
-    passages = [h.payload["text"] for h in hits]
-    scores = embed.rerank(query, passages)
-    ranked = sorted(zip(hits, scores), key=lambda x: x[1], reverse=True)[:final_k]
+    if RERANK:
+        # Cross-encoder: reads query and passage together, so it orders far
+        # better than fusion does - and costs a forward pass per candidate.
+        passages = [h.payload["text"] for h in hits]
+        scores = embed.rerank(query, passages)
+        ranked = sorted(zip(hits, scores), key=lambda x: x[1], reverse=True)[:final_k]
+    else:
+        # Fusion order. Note the score is RRF (1/rank), so it says where a
+        # chunk placed, not how well it matched - identical values come back
+        # for a perfect hit and for nonsense. Do not threshold on it.
+        ranked = [(h, h.score) for h in hits[:final_k]]
     return [{
         "score": float(s),
         "text": h.payload["text"],

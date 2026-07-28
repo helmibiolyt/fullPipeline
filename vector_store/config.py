@@ -57,3 +57,22 @@ SEMANTIC_PERCENTILE = float(os.environ.get("SEMANTIC_PERCENTILE", "88"))
 # --- Retrieval ---
 TOP_K = int(os.environ.get("TOP_K", "50"))       # candidates before rerank
 FINAL_K = int(os.environ.get("FINAL_K", "5"))    # after rerank
+
+# Cross-encoder reranking, OFF by default.
+#
+# The reranker scores the query jointly with each candidate, so top_k=50 means
+# 50 forward passes of a 568M-parameter model rather than the single pass that
+# embeds the query. Measured on the 2 vCPU host:
+#
+#     embed  ~200 ms | search ~20-57 ms | rerank 122,000 ms
+#
+# and shrinking the candidate set does not rescue it - reranking just 5 still
+# took 15.6 s, because the cost is per passage, not overhead. That is 60-500x
+# the rest of the pipeline combined, so it is disabled here rather than left
+# on as a trap. Keeping the model unloaded also leaves ~2.3 GB free, which is
+# what stops the kernel paging out Qdrant's quantized vectors.
+#
+# Set RERANK=1 when there is a GPU in front of it (~300 ms there). Turning it
+# off costs ordering quality, not recall: the same chunks are retrieved, they
+# are just returned in fusion order instead of cross-encoder order.
+RERANK = os.environ.get("RERANK", "0").lower() not in ("0", "false", "no")
