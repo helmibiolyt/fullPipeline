@@ -164,13 +164,17 @@ def delete_by_s3_keys(keys: list[str], batch: int = 200):
         )
 
 
-# Search the int8 vectors that quantization keeps in RAM, and skip rescoring
-# against the full-precision copies - those are on_disk, so rescoring turns
-# every query into ~100 random EBS reads. Measured over 10 queries: 1.7-3.5 s
-# for a cold query against 23 ms with rescoring off, and 23-48 ms once the page
-# cache happened to be warm. The warm case is what makes this easy to miss - a
-# query you have run before looks fine, and a real user asking something new
-# waits seconds. Results did not change: top-10 overlap was 100%.
+# Search the int8 vectors quantization keeps in RAM and skip rescoring against
+# the full-precision copies, which are on_disk. Worth ~20% (35 ms -> 28 ms
+# median over 6 fresh queries each way) with identical results: top-10 overlap
+# was 100%.
+#
+# It is a small win, and it is NOT what makes queries fast. Search latency here
+# is governed by whether Qdrant's quantized vectors are actually resident:
+# with ~1.9 GB of them paged into swap, dense search took 1.5 s; with the same
+# collection fully resident it takes 74 ms. always_ram=True is a request, not a
+# guarantee - the kernel will page it out under pressure. Keep vm.swappiness
+# low and leave the box enough headroom, or none of this matters.
 NO_RESCORE = models.SearchParams(
     quantization=models.QuantizationSearchParams(rescore=False))
 
