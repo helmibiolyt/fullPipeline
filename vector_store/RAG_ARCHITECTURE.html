@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Biolyt Retrieval Platform — Technical Architecture Overview</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 16mm 16mm; }
+  :root{
+    --ink:#14181d; --muted:#5b6673; --line:#d9dee5; --accent:#0b5fa5;
+    --soft:#f4f7fa; --code:#eef2f6;
+  }
+  *{ box-sizing:border-box; }
+  body{
+    font:11pt/1.55 "Segoe UI","Helvetica Neue",Arial,sans-serif;
+    color:var(--ink); margin:0; padding:0;
+    -webkit-print-color-adjust:exact; print-color-adjust:exact;
+  }
+  h1{ font-size:23pt; margin:0 0 4pt; letter-spacing:-.4pt; }
+  h2{
+    font-size:14pt; margin:22pt 0 8pt; padding-bottom:4pt;
+    border-bottom:2px solid var(--accent); color:var(--accent);
+    page-break-after:avoid;
+  }
+  h3{ font-size:11.5pt; margin:14pt 0 5pt; color:#1f2a36; page-break-after:avoid; }
+  p{ margin:0 0 8pt; }
+  ul,ol{ margin:0 0 9pt; padding-left:18pt; }
+  li{ margin:0 0 3pt; }
+  code{ font-family:"Cascadia Mono",Consolas,monospace; font-size:9.5pt;
+        background:var(--code); padding:1px 4px; border-radius:3px; }
+  table{ width:100%; border-collapse:collapse; margin:8pt 0 12pt; font-size:9.8pt;
+         page-break-inside:avoid; }
+  th{ background:var(--soft); text-align:left; font-weight:600; color:#243040;
+      border-bottom:1.5px solid var(--line); padding:5pt 7pt; }
+  td{ border-bottom:1px solid var(--line); padding:5pt 7pt; vertical-align:top; }
+  tbody tr:nth-child(even){ background:#fbfcfd; }
+  .cover{ border-bottom:3px solid var(--accent); padding-bottom:14pt; margin-bottom:6pt; }
+  .sub{ color:var(--muted); font-size:11.5pt; margin-top:2pt; }
+  .meta{ color:var(--muted); font-size:9pt; margin-top:10pt; }
+  .kpis{ display:flex; gap:8pt; margin:14pt 0 4pt; }
+  .kpi{ flex:1; background:var(--soft); border:1px solid var(--line);
+        border-radius:5px; padding:9pt 10pt; }
+  .kpi b{ display:block; font-size:15pt; color:var(--accent); letter-spacing:-.3pt; }
+  .kpi span{ font-size:8.5pt; color:var(--muted); text-transform:uppercase;
+             letter-spacing:.4pt; }
+  .note{ background:var(--soft); border-left:3px solid var(--accent);
+         padding:8pt 11pt; margin:10pt 0; font-size:10pt; }
+  .mermaid{ text-align:center; margin:12pt 0; page-break-inside:avoid; }
+  .brk{ page-break-before:always; }
+  footer{ margin-top:20pt; padding-top:8pt; border-top:1px solid var(--line);
+          color:var(--muted); font-size:8.5pt; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <h1>Biolyt Retrieval Platform</h1>
+  <div class="sub">Technical Architecture Overview — Retrieval-Augmented Generation Layer</div>
+  <div class="meta">Internal Engineering Documentation · Revision 1.0</div>
+</div>
+
+<div class="kpis">
+  <div class="kpi"><b>93,435</b><span>Source documents</span></div>
+  <div class="kpi"><b>3,240,756</b><span>Indexed chunks</span></div>
+  <div class="kpi"><b>1,024-d</b><span>Dense + sparse vectors</span></div>
+  <div class="kpi"><b>~300 ms</b><span>Median query latency</span></div>
+</div>
+
+<h2>1. Introduction</h2>
+
+<p>The Biolyt Retrieval Platform is the semantic knowledge layer of the main
+platform. Its sole consumer is the <strong>researcher agent</strong>, which
+answers regulatory and clinical questions on behalf of end users. The platform
+converts a natural-language question into a ranked, fully attributed set of
+source passages that the agent uses as grounding context.</p>
+
+<h3>Business problem</h3>
+
+<p>Pharmaceutical regulatory intelligence is distributed across tens of
+thousands of authority-published PDFs — Summaries of Product Characteristics,
+Patient Information Leaflets, Public Assessment Reports and agency assessment
+dossiers. The information is authoritative but unsearchable in any practical
+sense: keyword search over PDFs cannot connect <em>"is this safe while
+breastfeeding"</em> to a section headed <em>"Fertility, pregnancy and
+lactation"</em>, and an analyst cannot read 93,000 documents.</p>
+
+<p>The platform closes that gap. Every answer the researcher agent produces is
+traceable to an exact document, page and regulatory section — a requirement in
+this domain, where an unsourced claim carries no weight.</p>
+
+<h3>Architecture at a glance</h3>
+
+<div class="mermaid">
+flowchart LR
+  subgraph ING["Ingestion — automated, scheduled"]
+    A[Authority sources] --> B[Airflow scrapers]
+    B --> C[(S3 data lake)]
+    C --> D[Extract & chunk]
+    D --> E[Embed]
+  end
+  subgraph SRV["Serving — always on"]
+    F[(Qdrant<br/>vector database)]
+    G[Search API]
+  end
+  E --> F
+  H[Researcher agent] -->|question| G
+  G -->|ranked passages<br/>+ provenance| H
+  G <--> F
+</div>
+
+<p>Two independent planes. The <strong>ingestion plane</strong> runs on a
+schedule and keeps the index aligned with the authorities' published state. The
+<strong>serving plane</strong> runs continuously and answers queries in
+milliseconds. Neither blocks the other: indexing new material never interrupts
+retrieval.</p>
+
+<h2>2. Document Corpus</h2>
+
+<p>The knowledge base is assembled from eight curated domains, each mapped to a
+dedicated prefix in the S3 data lake and populated by its own scraper.</p>
+
+<table>
+  <thead><tr><th style="width:38%">Domain</th><th>Content</th></tr></thead>
+  <tbody>
+    <tr><td>Regulatory Approvals</td><td>SPCs, PILs and Public Assessment Reports from the EMA and MHRA</td></tr>
+    <tr><td>Clinical Trials &amp; Pipeline Intelligence</td><td>Registry records, protocols and pipeline disclosures</td></tr>
+    <tr><td>Safety &amp; Pharmacovigilance</td><td>Signal detection, adverse-event and post-marketing surveillance material</td></tr>
+    <tr><td>Drug Substance Reference</td><td>Chemical, structural and formulation reference data</td></tr>
+    <tr><td>Targets, Genomics &amp; Biomarkers</td><td>Target validation, variant and biomarker evidence</td></tr>
+    <tr><td>Literature Evidence</td><td>Indexed scientific literature and bibliographic metadata</td></tr>
+    <tr><td>MENA &amp; GCC Regulatory Market</td><td>Regional authority filings and market authorisations</td></tr>
+    <tr><td>Ontologies &amp; Standards</td><td>Controlled vocabularies and terminology standards</td></tr>
+  </tbody>
+</table>
+
+<p>Document acquisition is fully automated. Each source is defined by a
+declarative manifest and executed as a task group inside an Apache Airflow DAG.
+Scrapers publish through an <strong>atomic commit protocol</strong>: output is
+staged under a run-scoped prefix, verified byte-for-byte and by SHA-256
+checksum, promoted to the live view only on success, and finally advertised by
+flipping a <code>_LATEST</code> pointer. A failed or partial run is therefore
+invisible to downstream consumers — the index never observes a half-written
+source.</p>
+
+<p>Completed scraper runs emit an Airflow <strong>Dataset</strong> signal. The
+indexing DAG subscribes to those signals, so new documents flow into the vector
+store without a human trigger and without a fixed coupling between scraping and
+indexing schedules.</p>
+
+<h2>3. Initial Corpus Processing</h2>
+
+<p>Bringing an empty index to full coverage is a fundamentally different
+workload from keeping it current: <strong>93,435 documents</strong> had to be
+downloaded, parsed, segmented and embedded once. This was executed as a
+discrete, one-time initialisation.</p>
+
+<p>The bottleneck is asymmetric. Text extraction and segmentation are CPU-bound
+and highly parallel; embedding generation is GPU-bound and benefits from large
+batches. The initialisation pipeline separates the two so neither waits on the
+other:</p>
+
+<div class="mermaid">
+flowchart LR
+  S[(S3 corpus<br/>93,435 docs)] --> W1[Worker pool<br/>64 processes]
+  W1 --> Q[Chunk queue]
+  Q --> G[GPU embedding<br/>batched]
+  G --> V[(Qdrant)]
+</div>
+
+<p>Sixty-four worker processes handled download, PDF text extraction and
+segmentation in parallel, streaming chunks to a single GPU process that embedded
+them in large batches and wrote to the vector database asynchronously.</p>
+
+<table>
+  <thead><tr><th style="width:34%">Parameter</th><th>Value</th></tr></thead>
+  <tbody>
+    <tr><td>Compute</td><td>RunPod GPU instance — NVIDIA RTX 4090, 120 vCPU</td></tr>
+    <tr><td>Parallelism</td><td>64 extraction workers, 1 GPU embedding process</td></tr>
+    <tr><td>Documents processed</td><td>93,435</td></tr>
+    <tr><td>Chunks generated</td><td>3,240,756</td></tr>
+    <tr><td>Wall-clock duration</td><td>3 h 47 min</td></tr>
+    <tr><td>Model</td><td>BAAI/bge-m3, FP16</td></tr>
+  </tbody>
+</table>
+
+<p>GPU capacity is treated as a <strong>burst resource</strong>. The instance is
+provisioned for the duration of the job and released on completion, so the
+platform carries no standing GPU cost. Steady-state operation — incremental
+indexing and all query serving — runs on standard compute.</p>
+
+<div class="note">
+  <strong>Idempotent by construction.</strong> Every chunk's primary key is
+  derived deterministically from its document identity and position, so
+  re-processing a document overwrites rather than duplicates. Initialisation is
+  therefore safely resumable: an interrupted run continues from where it stopped
+  instead of restarting.
+</div>
+
+<h2 class="brk">4. Chunking Strategy</h2>
+
+<p>Segmentation determines the ceiling on retrieval quality. A chunk that
+straddles two regulatory sections dilutes both; a chunk that splits a
+contraindication mid-sentence retrieves as neither.</p>
+
+<p>Fixed-size chunking was rejected because it discards the single most valuable
+property of this corpus: <strong>regulatory documents are highly
+structured</strong>. An EU Summary of Product Characteristics follows a
+mandated numbering scheme — 4.3 Contraindications, 4.5 Interactions, 4.8
+Undesirable effects — that is consistent across every product and every national
+authority. Cutting at a fixed token count destroys that structure; cutting
+<em>along</em> it preserves a natural, semantically coherent unit and yields
+precise metadata for free.</p>
+
+<p>The platform therefore applies a <strong>structure-aware cascade</strong>,
+selecting the most specific strategy each document supports and degrading
+gracefully when structure is absent:</p>
+
+<div class="mermaid">
+flowchart TD
+  D[Document] --> T{Regulatory<br/>template?}
+  T -->|SPC| S["Section-boundary split<br/>numbered EU scheme"]
+  T -->|PIL| P["Leaflet-section split<br/>patient headings"]
+  T -->|no| H{Headings<br/>detected?}
+  H -->|yes| HS[Heading-boundary split]
+  H -->|no| SEM["Semantic split<br/>embedding distance"]
+  S --> O[Chunk + metadata]
+  P --> O
+  HS --> O
+  SEM --> O
+</div>
+
+<h3>Semantic splitting</h3>
+
+<p>Where a document carries no usable structure — narrative assessment reports,
+scanned filings, unformatted submissions — the platform falls back to
+<strong>semantic segmentation</strong>. Consecutive sentences are embedded and
+the cosine distance between neighbours is measured; boundaries are placed where
+that distance spikes, marking a genuine shift in subject matter.</p>
+
+<p>The cut-off is expressed as a <strong>percentile of each document's own
+distance distribution</strong> rather than an absolute constant, because
+distance scales differ between documents. A fixed value over-cuts some documents
+into fragments and under-cuts others into monoliths; a percentile adapts to each
+document automatically. The operating percentile was selected empirically by
+sweeping candidate values across representative documents and measuring the
+resulting size distributions.</p>
+
+<h3>Overlap and context preservation</h3>
+
+<p>Chunks carry a configurable token overlap at their boundaries. A statement
+whose meaning depends on the sentence preceding it — a dose qualified by the
+patient population named just above it — remains interpretable in isolation,
+because the qualifying context travels with the chunk. Overlap is applied where
+boundaries are inferred rather than mandated; a chunk cut on a regulatory
+section boundary is already a complete semantic unit and needs no bleed from its
+neighbour.</p>
+
+<h3>Outcome</h3>
+
+<table>
+  <thead><tr><th style="width:34%">Strategy applied</th><th>Chunks</th><th>Share</th></tr></thead>
+  <tbody>
+    <tr><td>SPC section boundaries</td><td>1,471,939</td><td>45.4%</td></tr>
+    <tr><td>PIL leaflet sections</td><td>778,565</td><td>24.0%</td></tr>
+    <tr><td>Semantic boundaries</td><td>548,509</td><td>16.9%</td></tr>
+    <tr><td>Heading boundaries</td><td>441,743</td><td>13.6%</td></tr>
+    <tr><th>Total</th><th>3,240,756</th><th>100%</th></tr>
+  </tbody>
+</table>
+
+<p><strong>Every chunk in the corpus was produced by a deliberate structural or
+semantic decision.</strong> The strategy that produced each chunk is recorded in
+its payload, making segmentation behaviour measurable across the whole index
+rather than assumed.</p>
+
+<h2>5. Embedding Pipeline</h2>
+
+<p>The platform standardises on <strong>BAAI/bge-m3</strong> for all embedding
+generation. Queries and documents pass through the same model, guaranteeing that
+both occupy the same vector space.</p>
+
+<table>
+  <thead><tr><th style="width:30%">Property</th><th>Value</th></tr></thead>
+  <tbody>
+    <tr><td>Model</td><td>BAAI/bge-m3</td></tr>
+    <tr><td>Dense dimension</td><td>1,024</td></tr>
+    <tr><td>Sparse representation</td><td>Learned lexical weights, emitted in the same pass</td></tr>
+    <tr><td>Context window</td><td>8,192 tokens</td></tr>
+    <tr><td>Distance metric</td><td>Cosine</td></tr>
+    <tr><td>Precision</td><td>FP16 on GPU</td></tr>
+  </tbody>
+</table>
+
+<h3>Why bge-m3</h3>
+
+<ul>
+  <li><strong>Dual representation from a single forward pass.</strong> bge-m3
+      emits a dense semantic vector <em>and</em> a sparse lexical vector
+      together. Most embedding models provide only the dense half, requiring a
+      separate lexical index to be built, stored and kept in sync. Here one model
+      and one pass produce both.</li>
+  <li><strong>Lexical precision where it matters.</strong> Dense vectors
+      generalise well but blur rare tokens — molecule names, licence numbers,
+      ATC codes. The sparse component matches those exactly, which is essential
+      in a corpus where <code>PL 20092/0008</code> identifies a specific
+      authorisation.</li>
+  <li><strong>Multilingual capability.</strong> The model is trained across
+      100+ languages in a shared space, allowing regional filings to be indexed
+      alongside English-language material without a separate pipeline.</li>
+  <li><strong>Long context.</strong> An 8,192-token window accommodates
+      full regulatory sections without forced truncation.</li>
+</ul>
+
+<h2>6. Vector Database</h2>
+
+<p><strong>Qdrant</strong> serves as the vector database, chosen for native
+support of the two properties this workload depends on: hybrid dense-plus-sparse
+vectors in a single collection, and rich payload filtering applied
+<em>before</em> the vector search rather than after it.</p>
+
+<h3>Storage and indexing</h3>
+
+<table>
+  <thead><tr><th style="width:30%">Mechanism</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td>HNSW graph index</td><td>Approximate nearest-neighbour search at millions-of-vectors scale</td></tr>
+    <tr><td>INT8 scalar quantization</td><td>Compresses the searchable representation ~4×, pinned in RAM for fast traversal</td></tr>
+    <tr><td>Full-precision on disk</td><td>Originals retained on disk, keeping the memory footprint independent of corpus size</td></tr>
+    <tr><td>On-disk payloads</td><td>Chunk text stored on disk and fetched only for returned results</td></tr>
+    <tr><td>Named vectors</td><td>Dense and sparse vectors co-located on every point</td></tr>
+  </tbody>
+</table>
+
+<p>The result is a 3.2-million-vector index that serves sub-second queries from
+commodity hardware, with memory consumption driven by the quantized
+representation rather than the raw corpus.</p>
+
+<h3>Payload metadata and filtering</h3>
+
+<p>Every chunk carries structured metadata, each field independently indexed so
+filters narrow the candidate space before any vector comparison occurs:</p>
+
+<table>
+  <thead><tr><th style="width:26%">Field</th><th>Role</th></tr></thead>
+  <tbody>
+    <tr><td><code>section</code>, <code>section_code</code></td><td>Regulatory section and its EU number (e.g. <code>4.8</code>) — scope a query to contraindications, posology or adverse effects</td></tr>
+    <tr><td><code>doc_type</code></td><td>SPC, PIL or assessment report</td></tr>
+    <tr><td><code>source</code>, <code>s3_key</code>, <code>page</code></td><td>Full provenance for citation</td></tr>
+    <tr><td><code>chunk_path</code></td><td>Segmentation strategy that produced the chunk</td></tr>
+    <tr><td><code>etag</code>, <code>offset</code></td><td>Change detection and incremental sync</td></tr>
+    <tr><td><code>molecule_id</code>, <code>language</code></td><td>Entity scoping and language selection</td></tr>
+  </tbody>
+</table>
+
+<p>This is what elevates the platform above generic semantic search. A question
+such as <em>"what are the contraindications in hepatic impairment"</em> is not
+answered by similarity alone — it is scoped to section 4.3 across the entire
+corpus, then ranked by meaning within that scope.</p>
+
+<h2 class="brk">7. Retrieval Pipeline</h2>
+
+<p>Retrieval is a staged narrowing: from 3.2 million chunks to a handful of
+passages, with each stage cheaper per candidate than the one before it.</p>
+
+<div class="mermaid">
+flowchart TD
+  Q[Question] --> E[Embed query<br/>dense + sparse]
+  E --> F[Apply metadata filters]
+  F --> D[Dense ANN search]
+  F --> S[Sparse lexical search]
+  D --> C[Candidate pool]
+  S --> C
+  C --> R[Rank by cosine similarity]
+  R --> G{Relevance<br/>threshold}
+  G -->|below| N[Return empty —<br/>no supported answer]
+  G -->|above| DD[Collapse duplicates<br/>by meaning]
+  DD --> K[Top-K passages<br/>+ provenance]
+</div>
+
+<table>
+  <thead><tr><th style="width:24%">Stage</th><th>Function</th></tr></thead>
+  <tbody>
+    <tr><td>Query embedding</td><td>The question is encoded by the same model used at index time, producing dense and sparse vectors in one pass.</td></tr>
+    <tr><td>Filtering</td><td>Any supplied metadata constraint is applied first, reducing the search space before vector comparison.</td></tr>
+    <tr><td>Hybrid candidate retrieval</td><td>Dense and sparse searches run in parallel. Dense contributes conceptual matches; sparse contributes exact-term matches the dense space would blur.</td></tr>
+    <tr><td>Similarity ranking</td><td>All candidates, regardless of which search surfaced them, are scored by cosine similarity against the query vector — one comparable measure across the whole pool.</td></tr>
+    <tr><td>Relevance gating</td><td>A calibrated similarity floor determines whether the corpus supports an answer at all. Below it, the API returns nothing rather than weak matches.</td></tr>
+    <tr><td>Duplicate collapse</td><td>Passages conveying the same fact are merged, with the additional sources retained as corroborating citations.</td></tr>
+    <tr><td>Context assembly</td><td>The surviving passages are returned with full provenance, ready for grounding.</td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <strong>Corroboration as signal.</strong> Regulatory text is intentionally
+  duplicated — generic medicines are legally required to reproduce the
+  originator's wording, so a single contraindication may appear across dozens of
+  authorisations. Rather than discarding those copies, the platform collapses
+  them and returns the additional sources alongside. <em>"Consistent across
+  every UK authorisation"</em> is a stronger evidentiary statement than a single
+  citation.
+</div>
+
+<h2>8. Similarity Search</h2>
+
+<p>Ranking is performed by <strong>cosine similarity</strong> — the cosine of
+the angle between the query vector and a chunk vector, independent of their
+magnitudes.</p>
+
+<p>That independence is the reason it suits dense retrieval. Embedding magnitude
+correlates with incidental properties such as passage length; direction encodes
+meaning. Cosine compares direction alone, so a concise contraindication and a
+lengthy assessment paragraph expressing the same concept score comparably. The
+collection is configured with cosine distance natively, and vectors are
+normalised so the metric is applied consistently at index and query time.</p>
+
+<p>Because cosine produces a bounded, comparable score for every candidate, it
+also underpins two capabilities beyond ordering: a calibrated
+<strong>relevance floor</strong> that distinguishes a supported question from an
+unsupported one, and <strong>duplicate detection</strong>, where near-identical
+passages are identified by the similarity of their vectors rather than their
+literal text.</p>
+
+<h2>9. Reranking</h2>
+
+<p>The platform includes a <strong>cross-encoder reranking</strong> stage,
+available as a precision enhancement over the retrieved candidate set.</p>
+
+<table>
+  <thead><tr><th style="width:30%">Property</th><th>Value</th></tr></thead>
+  <tbody>
+    <tr><td>Model</td><td>BAAI/bge-reranker-v2-m3</td></tr>
+    <tr><td>Architecture</td><td>Cross-encoder</td></tr>
+    <tr><td>Input</td><td>Query and candidate passage jointly</td></tr>
+    <tr><td>Placement</td><td>After candidate retrieval, before context assembly</td></tr>
+    <tr><td>Execution</td><td>GPU-accelerated; enabled per deployment</td></tr>
+  </tbody>
+</table>
+
+<h3>Why reranking raises precision</h3>
+
+<p>The retrieval model is a <em>bi-encoder</em>: query and passage are encoded
+<strong>separately</strong> and compared afterwards. Each is compressed into
+1,024 numbers before the two ever meet, so the comparison measures topical
+proximity rather than whether the passage answers the question.</p>
+
+<p>A cross-encoder removes that separation. Query and passage are processed
+<strong>together</strong>, with full attention between every query token and
+every passage token. It can therefore resolve distinctions a bi-encoder
+structurally cannot:</p>
+
+<ul>
+  <li><strong>Negation.</strong> <em>"Contraindicated in pregnancy"</em> and
+      <em>"may be used in pregnancy"</em> are topically near-identical and
+      semantically opposite.</li>
+  <li><strong>Entity binding.</strong> A question naming one molecule should not
+      be satisfied by an otherwise identical statement about a different one.</li>
+  <li><strong>Answer-bearing vs. merely related.</strong> Risk factors for a
+      condition are related to, but are not, its clinical signs.</li>
+</ul>
+
+<p>This precision is purchased with computation — the cross-encoder performs one
+forward pass per candidate rather than one per query — which is why it is
+positioned as the final, narrowest stage of the funnel, operating on a
+pre-filtered candidate set rather than the corpus.</p>
+
+<h2>10. Inference Pipeline</h2>
+
+<p>End to end, from question to grounded answer:</p>
+
+<div class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant A as Researcher agent
+  participant R as Retrieval API
+  participant V as Qdrant
+  U->>A: Question
+  A->>R: POST /search
+  R->>R: Embed query (bge-m3)
+  R->>V: Hybrid search + filters
+  V-->>R: Candidate passages
+  R->>R: Rank, gate, deduplicate
+  R-->>A: Passages + provenance
+  A->>A: Synthesise grounded answer
+  A-->>U: Answer with citations
+</div>
+
+<table>
+  <thead><tr><th style="width:26%">Stage</th><th>Component</th><th>Responsibility</th></tr></thead>
+  <tbody>
+    <tr><td>Query understanding</td><td>Researcher agent</td><td>Interprets intent; may scope the request to a regulatory section</td></tr>
+    <tr><td>Query encoding</td><td>bge-m3</td><td>Dense + sparse query representation</td></tr>
+    <tr><td>Candidate retrieval</td><td>Qdrant</td><td>Filtered hybrid search over 3.2M vectors</td></tr>
+    <tr><td>Ranking &amp; gating</td><td>Retrieval API</td><td>Cosine ordering, relevance floor, duplicate collapse</td></tr>
+    <tr><td>Precision reranking</td><td>bge-reranker-v2-m3</td><td>Cross-encoder reordering of the candidate set</td></tr>
+    <tr><td>Answer synthesis</td><td>Researcher agent LLM</td><td>Composes the response strictly from returned passages</td></tr>
+  </tbody>
+</table>
+
+<p>The interface between the platform and the agent is deliberately narrow: a
+question and an optional scope in, ranked passages with provenance out. The
+retrieval layer never generates prose, and the agent never queries the vector
+database directly. Each side can evolve independently.</p>
+
+<p>Critically, the platform can return <strong>nothing</strong>. When no
+passage clears the relevance floor, the API responds with an empty result set,
+signalling unambiguously that the corpus does not support an answer — the
+foundation of a system that declines to speculate.</p>
+
+<h2 class="brk">11. Data Update Pipeline</h2>
+
+<p>The knowledge base tracks the authorities continuously. Apache Airflow
+orchestrates acquisition; the index updates itself from what acquisition
+produces.</p>
+
+<div class="mermaid">
+flowchart LR
+  T[Schedule] --> SC[Scraper DAG]
+  SC --> AC[Atomic commit<br/>to S3]
+  AC --> DS[Dataset signal]
+  DS --> SY[Indexing DAG]
+  SY --> CH[Change detection<br/>by ETag]
+  CH --> PR[Extract · chunk · embed]
+  PR --> UP[Upsert to Qdrant]
+  CH -.->|unchanged| SK[Skip]
+</div>
+
+<h3>Change detection</h3>
+
+<p>The pipeline is incremental by design. Every indexed chunk records the
+<strong>ETag</strong> of the S3 object it came from — a content fingerprint
+supplied free with the object listing. Before any work is scheduled, the
+pipeline compares current ETags against those already indexed and processes only
+what has genuinely changed.</p>
+
+<p>Deciding to skip a document therefore costs nothing: no download, no parsing,
+no embedding. A routine cycle over a corpus with a handful of updated documents
+touches only those documents, and the platform never performs a full
+re-index.</p>
+
+<h3>Update semantics</h3>
+
+<table>
+  <thead><tr><th style="width:26%">Event</th><th>Behaviour</th></tr></thead>
+  <tbody>
+    <tr><td>New document</td><td>Extracted, chunked, embedded, inserted</td></tr>
+    <tr><td>Revised document</td><td>ETag differs; chunks regenerated and upserted in place under their deterministic keys</td></tr>
+    <tr><td>Unchanged document</td><td>Skipped before any processing</td></tr>
+    <tr><td>Withdrawn document</td><td>Chunks pruned so retrieval cannot cite material no longer published</td></tr>
+  </tbody>
+</table>
+
+<p>Because chunk keys are deterministic, updates overwrite rather than
+accumulate — the index cannot drift into duplicate states, and the pipeline is
+safe to re-run at any point. Retrieval continues uninterrupted throughout;
+indexing and serving share the database but never block one another.</p>
+
+<h2>12. Technology Stack</h2>
+
+<table>
+  <thead><tr><th style="width:22%">Layer</th><th style="width:26%">Technology</th><th>Role</th></tr></thead>
+  <tbody>
+    <tr><td>Orchestration</td><td>Apache Airflow</td><td>Scheduled scraping, Dataset-triggered indexing, dependency management</td></tr>
+    <tr><td>Storage</td><td>Amazon S3</td><td>Immutable document lake with atomic commit and versioned pointers</td></tr>
+    <tr><td>Vector database</td><td>Qdrant</td><td>Hybrid vector search, HNSW indexing, payload filtering</td></tr>
+    <tr><td>Embedding</td><td>BAAI/bge-m3</td><td>Dense (1,024-d) and sparse representations</td></tr>
+    <tr><td>Reranking</td><td>BAAI/bge-reranker-v2-m3</td><td>Cross-encoder precision stage</td></tr>
+    <tr><td>Generation</td><td>Researcher agent LLM</td><td>Grounded answer synthesis from retrieved passages</td></tr>
+    <tr><td>GPU compute</td><td>RunPod (RTX 4090)</td><td>On-demand acceleration for bulk embedding</td></tr>
+    <tr><td>Document processing</td><td>PyMuPDF</td><td>Text and layout extraction from regulatory PDFs</td></tr>
+    <tr><td>Service layer</td><td>FastAPI · Uvicorn</td><td>Retrieval API and operational endpoints</td></tr>
+    <tr><td>Runtime</td><td>Python 3.11 · Docker · systemd</td><td>Containerised services under supervised process management</td></tr>
+  </tbody>
+</table>
+
+<h2>13. System Strengths</h2>
+
+<table>
+  <thead><tr><th style="width:28%">Capability</th><th>Realisation</th></tr></thead>
+  <tbody>
+    <tr><td>Scalable architecture</td><td>3.2M vectors served from commodity hardware; quantized indexing keeps memory bounded as the corpus grows</td></tr>
+    <tr><td>Automated ingestion</td><td>Scheduled scrapers, atomic commits and Dataset-triggered indexing — no manual step between publication and searchability</td></tr>
+    <tr><td>Semantic search</td><td>Questions match meaning, not keywords: "safe while breastfeeding" finds "Fertility, pregnancy and lactation"</td></tr>
+    <tr><td>High retrieval accuracy</td><td>Hybrid dense + sparse recall, structure-aware chunking, metadata scoping and cross-encoder reranking compounding at each stage</td></tr>
+    <tr><td>Multilingual capability</td><td>A single shared embedding space across 100+ languages, enabling regional filings without a parallel pipeline</td></tr>
+    <tr><td>Efficient vector search</td><td>Median query latency ~300 ms end to end, including query embedding</td></tr>
+    <tr><td>Full traceability</td><td>Every passage carries source, document, page and regulatory section — no unsourced claim can reach the user</td></tr>
+    <tr><td>Modular design</td><td>Ingestion, indexing, retrieval and generation are independently deployable and independently replaceable</td></tr>
+    <tr><td>Easy extensibility</td><td>A new source is a manifest and a scraper; the indexing path requires no change</td></tr>
+    <tr><td>Production-ready</td><td>Supervised services, atomic commits, idempotent writes, resumable jobs and health endpoints throughout</td></tr>
+    <tr><td>Continuous knowledge updates</td><td>ETag-driven incremental sync propagates newly published material without re-indexing the corpus</td></tr>
+  </tbody>
+</table>
+
+<footer>
+  Biolyt Retrieval Platform — Technical Architecture Overview · Internal
+  Engineering Documentation · Revision 1.0
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      primaryColor: '#eef3f8', primaryBorderColor: '#0b5fa5',
+      primaryTextColor: '#14181d', lineColor: '#5b6673',
+      fontFamily: 'Segoe UI, Helvetica Neue, Arial, sans-serif', fontSize: '13px'
+    },
+    flowchart: { curve: 'basis', htmlLabels: true }
+  });
+</script>
+</body>
+</html>
