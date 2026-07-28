@@ -39,7 +39,8 @@ def _dedup_key(text: str, n: int = 600) -> str:
 
 def retrieve(query: str, molecule_id: str = None, section: str = None,
              language: str = None, doc_type: str = None, section_code: str = None,
-             top_k: int = TOP_K, final_k: int = FINAL_K):
+             top_k: int = TOP_K, final_k: int = FINAL_K,
+             min_score: float = MIN_SCORE):
     q_emb = embed.embed_query(query)
     flt = {"molecule_id": molecule_id, "section": section, "language": language,
            "doc_type": doc_type, "section_code": section_code}
@@ -61,11 +62,11 @@ def retrieve(query: str, molecule_id: str = None, section: str = None,
     # an in-domain query, 0.53 for "how do I bake sourdough bread", 0.49 for
     # gibberish - and all three produced identical fusion scores, which is why
     # the threshold is on cosine. Sparse-only hits have no cosine and are kept.
-    if MIN_SCORE > 0:
+    if min_score > 0:
         # Every candidate now carries a cosine (they are all rescored against
         # the dense query vector), so this is a straight filter. Under the old
         # fusion, 20 of 50 hits had no score and slipped through untested.
-        ranked = [(h, sc) for h, sc in ranked if h.cosine >= MIN_SCORE]
+        ranked = [(h, sc) for h, sc in ranked if h.cosine >= min_score]
 
     # Collapse duplicate content, keeping the best-ranked copy and recording
     # the others as corroborating sources rather than discarding them: "every
