@@ -1,0 +1,20 @@
+[Unit]
+Description=Biolyt vector store search API
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=ubuntu
+ExecStart=/home/ubuntu/fullPipeline/vector_store/serve.sh
+Restart=always
+RestartSec=10
+# bge-m3 takes 5-30 s to load, longer on a cold page cache. Without this,
+# systemd would call a healthy start a failure and restart it in a loop.
+TimeoutStartSec=300
+KillSignal=SIGINT
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
