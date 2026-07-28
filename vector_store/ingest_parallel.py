@@ -165,7 +165,8 @@ def main():
 
     el = time.time() - t0
     print(f"\ningested {n_chunks:,} chunks from {done - failed:,} documents "
-          f"({failed:,} failed) in {el/60:.1f} min")
+          f"({failed:,} failed, {lost:,} chunks lost to upsert errors) "
+          f"in {el/60:.1f} min")
     print(f"chunk_path: {dict(paths)}")
     print(f"collection now holds "
           f"{qdrant_store.client().get_collection(COLLECTION).points_count:,} points")
