@@ -81,3 +81,17 @@ FINAL_K = int(os.environ.get("FINAL_K", "15"))
 # off costs ordering quality, not recall: the same chunks are retrieved, they
 # are just returned in fusion order instead of cross-encoder order.
 RERANK = os.environ.get("RERANK", "0").lower() not in ("0", "false", "no")
+
+# Minimum dense cosine for a chunk to be returned. 0 disables the check.
+#
+# Without it every query returns FINAL_K results however irrelevant, with full
+# provenance attached - "how do I bake sourdough bread" came back with a sodium
+# chloride leaflet, page number and S3 key included. For a RAG system over
+# regulatory text that is the dangerous failure: not a wrong answer, a
+# confidently sourced one.
+#
+# Left at 0 until calibrated on real query traffic. Three measured points -
+# 0.72 in-domain, 0.53 off-domain, 0.49 gibberish - suggest ~0.60, but bge-m3
+# cosine floors near 0.45-0.50 for unrelated text rather than at zero, so the
+# usable band is narrow and three samples do not justify enforcing a cut-off.
+MIN_SCORE = float(os.environ.get("MIN_SCORE", "0"))

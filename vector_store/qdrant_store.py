@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass, field
 from functools import lru_cache
 
 from qdrant_client import QdrantClient, models
@@ -179,26 +180,76 @@ NO_RESCORE = models.SearchParams(
     quantization=models.QuantizationSearchParams(rescore=False))
 
 
+@dataclass
+class Hit:
+    """One search result. Qdrant's ScoredPoint is a pydantic model and rejects
+    extra attributes, so the fused and dense scores travel on this instead."""
+    id: object
+    payload: dict
+    fused: float                    # reciprocal-rank fusion of dense + sparse
+    cosine: float | None = None     # dense similarity; None if sparse-only
+
+    @property
+    def score(self):                # what callers used before fusion moved here
+        return self.fused
+
+
 def hybrid_search(q_emb: dict, top_k: int, flt: dict | None = None):
-    """Fuse dense + sparse results (RRF). `flt` = {field: value} exact filters."""
+    """Dense + sparse, fused here rather than by Qdrant, so both scores survive.
+
+    Qdrant's built-in RRF returns only the fused value, and that value is 1/rank
+    - so a perfect match and a nonsense query both come back as
+    [0.5, 0.5, 0.333, ...]. Two things follow that matter more than the ranking
+    itself:
+
+    * There is no way to tell "nothing here is relevant". Measured: an
+      in-domain query scored 0.722 by cosine, "how do I bake sourdough bread"
+      scored 0.53, and both produced the same RRF numbers.
+    * Ties are everywhere, and Qdrant breaks them arbitrarily, so the same
+      query returns the same chunks in a different order run to run.
+
+    Fusing in Python costs one extra round trip (~11 ms; both searches are
+    ~11-12 ms each) and keeps the dense cosine on every hit, which fixes both.
+
+    Returns points with two extra attributes: `.cosine` (dense similarity, None
+    if the chunk was found only by sparse search) and `.fused` (the RRF score).
+    """
     qfilter = None
     if flt:
         qfilter = models.Filter(must=[
             models.FieldCondition(key=k, match=models.MatchValue(value=v))
             for k, v in flt.items() if v is not None
         ])
-    res = client().query_points(
+    c = client()
+    dense = c.query_points(
+        collection_name=COLLECTION, query=q_emb["dense"], using="dense",
+        limit=top_k, query_filter=qfilter, with_payload=True,
+        search_params=NO_RESCORE).points
+    sparse = c.query_points(
         collection_name=COLLECTION,
-        prefetch=[
-            models.Prefetch(query=q_emb["dense"], using="dense", limit=top_k,
-                            filter=qfilter, params=NO_RESCORE),
-            models.Prefetch(
-                query=models.SparseVector(
-                    indices=list(q_emb["sparse"].keys()),
-                    values=list(q_emb["sparse"].values())),
-                using="sparse", limit=top_k, filter=qfilter, params=NO_RESCORE),
-        ],
-        query=models.FusionQuery(fusion=models.Fusion.RRF),
-        limit=top_k, with_payload=True,
-    )
-    return res.points
+        query=models.SparseVector(indices=list(q_emb["sparse"].keys()),
+                                  values=list(q_emb["sparse"].values())),
+        using="sparse", limit=top_k, query_filter=qfilter, with_payload=True,
+        search_params=NO_RESCORE).points
+
+    # Reciprocal rank fusion, k=60 as in the original paper. The constant damps
+    # the top ranks so one list cannot dominate purely by being first.
+    RRF_K = 60
+    fused: dict = {}
+    cosine: dict = {}
+    payloads: dict = {}
+    for rank, p in enumerate(dense, 1):
+        fused[p.id] = fused.get(p.id, 0.0) + 1.0 / (RRF_K + rank)
+        cosine[p.id] = p.score
+        payloads[p.id] = p.payload
+    for rank, p in enumerate(sparse, 1):
+        fused[p.id] = fused.get(p.id, 0.0) + 1.0 / (RRF_K + rank)
+        payloads.setdefault(p.id, p.payload)
+
+    hits = [Hit(id=pid, payload=payloads[pid], fused=sc, cosine=cosine.get(pid))
+            for pid, sc in fused.items()]
+    # Deterministic: fused desc, then cosine desc, then id. Without the last two
+    # the order of tied chunks changes between identical queries - RRF produces
+    # heavy ties, and Qdrant broke them arbitrarily.
+    hits.sort(key=lambda h: (-h.fused, -(h.cosine or 0.0), str(h.id)))
+    return hits[:top_k]
