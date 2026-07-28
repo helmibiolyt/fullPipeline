@@ -4,7 +4,7 @@
   POST /search   {query, molecule_id?, section?, language?, final_k?}  -> ranked chunks
   POST /ingest   {prefix?, limit?}   -> kick off ingestion (background)
   GET  /health
-  GET  /test     browser form for trying queries by hand
+  GET  /testvectorstore   browser form for trying queries by hand
 
 Run locally:  uvicorn api:app --port 8000
 In Docker:    docker compose up  (see docker-compose.yaml)
@@ -90,7 +90,7 @@ _PAGE = """<!doctype html><meta charset=utf-8><title>Biolyt vector store</title>
  .none{{padding:1rem;border:1px dashed #8886;border-radius:6px;opacity:.8}}
 </style>
 <h2>Biolyt vector store</h2>
-<form method=get action=/test>
+<form method=get action=/testvectorstore>
   <input type=text name=q placeholder="ask something, e.g. contraindications in hepatic impairment" value="{q}" autofocus>
   <select name=section>{sections}</select>
   <input type=number name=k value="{k}" min=1 max=50 title="results">
@@ -101,7 +101,7 @@ _PAGE = """<!doctype html><meta charset=utf-8><title>Biolyt vector store</title>
 """
 
 
-@app.get("/test", response_class=HTMLResponse)
+@app.get("/testvectorstore", response_class=HTMLResponse)
 def test_page(q: str = "", section: str = "", k: int = FINAL_K):
     """A form for trying queries by hand, so retrieval can be judged by eye.
 
