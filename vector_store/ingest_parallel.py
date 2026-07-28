@@ -53,14 +53,42 @@ from config import COLLECTION       # noqa: E402
 from ingest import indexed_etags    # noqa: E402
 
 _S3 = None
+_OCR = False
 
 
-def _worker_init():
+def _worker_init(ocr=False):
     """One boto3 client per worker; they are not fork-safe to share."""
-    global _S3
+    global _S3, _OCR
     import boto3
     from config import AWS_REGION
     _S3 = boto3.client("s3", region_name=AWS_REGION)
+    _OCR = ocr
+
+
+def _ocr_pages(doc, dpi=200):
+    """Render each page and read it with Tesseract.
+
+    Two populations of document arrive here, and neither yields a single
+    character to normal extraction:
+
+    * scanned filings - the page is a photograph of paper (EMA)
+    * flattened PDFs - the text was converted to vector outlines, so every
+      glyph is a drawing operation rather than a character (MHRA PILs)
+
+    Rendering collapses that distinction: both produce a legible bitmap. 200
+    dpi is enough for body text at these page sizes and keeps the bitmaps
+    small enough to OCR quickly.
+    """
+    import pytesseract
+    from PIL import Image
+    out = []
+    for i, page in enumerate(doc, 1):
+        pm = page.get_pixmap(dpi=dpi)
+        img = Image.frombytes("RGB", (pm.width, pm.height), pm.samples)
+        txt = pytesseract.image_to_string(img)
+        if txt.strip():
+            out.append((i, txt))
+    return out
 
 
 def _process(doc_tuple):
@@ -80,6 +108,12 @@ def _process(doc_tuple):
             return [], None                     # non-PDF handled by ingest.py
         with fitz.open(stream=raw, filetype="pdf") as d:
             blocks = [(i, p.get_text("text")) for i, p in enumerate(d, 1)]
+            # A PDF with no extractable text is not an error and raises
+            # nothing - it just produces no chunks, records no ETag, and gets
+            # retried forever by every later run. 1,034 documents sat in that
+            # state after the backfill. OCR is the only way to read them.
+            if _OCR and not any(t.strip() for _, t in blocks):
+                blocks = _ocr_pages(d)
         chunks = chunker.chunk_document(blocks, source, doc_id, s3_key,
                                         doc_type=doc_type)
         for c in chunks:
@@ -96,6 +130,8 @@ def main():
     ap.add_argument("--workers", type=int, default=max(8, (os.cpu_count() or 8) // 2))
     ap.add_argument("--embed-batch", type=int, default=512)
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--ocr", action="store_true",
+                    help="OCR documents that yield no extractable text")
     a = ap.parse_args()
 
     qdrant_store.ensure_collection()
@@ -140,7 +176,7 @@ def main():
     # futex_wait_queue. spawn starts each worker from a clean interpreter.
     ctx = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=a.workers, initializer=_worker_init,
-                             mp_context=ctx) as ex:
+                             initargs=(a.ocr,), mp_context=ctx) as ex:
         futures = {ex.submit(_process, t): t[0] for t in todo}
         for fut in as_completed(futures):
             chunks, err = fut.result()
