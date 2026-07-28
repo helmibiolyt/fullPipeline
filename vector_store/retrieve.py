@@ -63,10 +63,20 @@ def retrieve(query: str, molecule_id: str = None, section: str = None,
     # gibberish - and all three produced identical fusion scores, which is why
     # the threshold is on cosine. Sparse-only hits have no cosine and are kept.
     if min_score > 0:
-        # Every candidate now carries a cosine (they are all rescored against
-        # the dense query vector), so this is a straight filter. Under the old
-        # fusion, 20 of 50 hits had no score and slipped through untested.
-        ranked = [(h, sc) for h, sc in ranked if h.cosine >= min_score]
+        # Gate the QUERY, not each chunk. The threshold answers "does the
+        # corpus hold anything relevant to this question", which is a property
+        # of the query - so once the best hit clears the bar, return the rest
+        # on their merits.
+        #
+        # Filtering per chunk turned a small score shift into a huge change in
+        # result count, because bge-m3 is case-sensitive and brand names appear
+        # capitalised in the corpus. Measured: "Cosentyx" returned 30 results
+        # (top 0.798) and "cosentyx" returned 6 (top 0.668) - the same drug,
+        # the same documents. It was not even directional: "Humira" gave 10 and
+        # "humira" 22. With a query-level gate every variant returns the full
+        # set, while off-domain queries (best hit ~0.55) still return nothing.
+        if not ranked or max(h.cosine for h, _ in ranked) < min_score:
+            return []
 
     # Collapse duplicate content, keeping the best-ranked copy and recording
     # the others as corroborating sources rather than discarding them: "every
