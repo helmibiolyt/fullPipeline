@@ -21,7 +21,7 @@ from pydantic import BaseModel
 import retrieve
 import ingest as ingest_mod
 import qdrant_store
-from config import COLLECTION, FINAL_K, TOP_K, MIN_SCORE
+from config import COLLECTION, FINAL_K, TOP_K
 
 app = FastAPI(title="Biolyt Vector Store", version="1.0")
 
@@ -41,7 +41,9 @@ class SearchReq(BaseModel):
     language: str | None = None
     final_k: int = FINAL_K            # results returned; ~44-50 distinct exist
     top_k: int = TOP_K                # candidates fetched before dedup
-    min_score: float = MIN_SCORE      # drop hits below this cosine; 0 = off
+    # No min_score here on purpose. The relevance floor is fixed at 0.6 in
+    # config so a caller cannot lower it and get confident-looking answers to
+    # questions the corpus has nothing to say about.
 
 
 class IngestReq(BaseModel):
@@ -69,8 +71,7 @@ def search(req: SearchReq):
     results = retrieve.retrieve(
         req.query, molecule_id=req.molecule_id, section=req.section,
         section_code=req.section_code, doc_type=req.doc_type,
-        language=req.language, top_k=req.top_k, final_k=req.final_k,
-        min_score=req.min_score)
+        language=req.language, top_k=req.top_k, final_k=req.final_k)
     return {"query": req.query, "count": len(results), "results": results}
 
 
