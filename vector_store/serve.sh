@@ -7,4 +7,5 @@ export USE_FP16=0
 export QDRANT_URL=http://localhost:6333
 export QDRANT_API_KEY=xy8MA09Vzslr9HbM1iMNFfrLRaotBm2qkmz9TJewGz0
 export RERANK=0
+export MIN_CHUNK_BUCKET=2
 exec /home/ubuntu/vsenv/bin/python -m uvicorn api:app --host 0.0.0.0 --port 8000

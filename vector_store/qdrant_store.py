@@ -7,7 +7,8 @@ from functools import lru_cache
 
 from qdrant_client import QdrantClient, models
 
-from config import QDRANT_URL, QDRANT_PATH, QDRANT_API_KEY, COLLECTION, EMBED_DIM
+from config import (QDRANT_URL, QDRANT_PATH, QDRANT_API_KEY, COLLECTION,
+                    EMBED_DIM, MIN_CHUNK_BUCKET)
 from schema import Chunk
 
 
@@ -86,9 +87,12 @@ def _ensure_indexes(c):
                                    models.PayloadSchemaType.KEYWORD)
     # Integer, not keyword: indexed_etags() filters on offset == 0 to read one
     # chunk per document instead of all of them.
-    if "offset" not in existing:
-        c.create_payload_index(COLLECTION, "offset",
-                               models.PayloadSchemaType.INTEGER)
+    for field in ("offset", "len_bucket"):
+        # Integer, not keyword: indexed_etags() filters offset == 0 to read one
+        # chunk per document, and search filters len_bucket to skip fragments.
+        if field not in existing:
+            c.create_payload_index(COLLECTION, field,
+                                   models.PayloadSchemaType.INTEGER)
 
 
 # One HTTP request per this many points. A 1024-point batch carries 1024 dense
@@ -225,12 +229,14 @@ def hybrid_search(q_emb: dict, top_k: int, flt: dict | None = None):
     on this host. Returning 15 chunks to an agent that reads all of them is the
     cheaper answer.
     """
-    qfilter = None
-    if flt:
-        qfilter = models.Filter(must=[
-            models.FieldCondition(key=k, match=models.MatchValue(value=v))
-            for k, v in flt.items() if v is not None
-        ])
+    must = [models.FieldCondition(key=k, match=models.MatchValue(value=v))
+            for k, v in (flt or {}).items() if v is not None]
+    if MIN_CHUNK_BUCKET > 0:
+        # Applied here, not after the search: fragments occupy every top slot
+        # for short queries, so filtering the results would leave nothing.
+        must.append(models.FieldCondition(
+            key="len_bucket", range=models.Range(gte=MIN_CHUNK_BUCKET)))
+    qfilter = models.Filter(must=must) if must else None
     res = client().query_points(
         collection_name=COLLECTION,
         prefetch=[

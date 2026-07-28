@@ -114,3 +114,24 @@ RERANK = os.environ.get("RERANK", "0").lower() not in ("0", "false", "no")
 # transfer to another embedding model or another corpus. Recalibrate if either
 # changes.
 MIN_SCORE = float(os.environ.get("MIN_SCORE", "0.6"))
+
+# Skip chunks shorter than this, as a bucket index (see backfill_len / the
+# len_bucket payload field):
+#   0 = <100 chars   1 = 100-149   2 = 150-199   3 = 200-499
+#   4 = 500-999      5 = >=1000
+#
+# 20% of the collection - roughly 634,000 chunks - is under 100 characters,
+# because every UK patient leaflet opens with a numbered table of contents and
+# the chunker treated each line of it as a section. Those fragments carry no
+# information and they win short queries outright: a bare "Lisinopril" matched
+# "3. How to take Lisinopril Tablets" (33 chars) ahead of every real paragraph,
+# and all 250 candidates came back under 100 characters.
+#
+# It has to be filtered inside the search rather than after it - the fragments
+# occupy every top slot, so a post-filter returns nothing at all. Hence the
+# len_bucket payload field, which Qdrant can filter on before ranking.
+#
+# 2 (>=150 chars) keeps genuinely short but real sections - "4.3
+# Contraindications: Hypersensitivity to the active substance..." is ~113
+# chars - while dropping the table-of-contents lines, which are 24-59.
+MIN_CHUNK_BUCKET = int(os.environ.get("MIN_CHUNK_BUCKET", "2"))
