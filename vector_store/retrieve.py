@@ -62,17 +62,10 @@ def retrieve(query: str, molecule_id: str = None, section: str = None,
     # gibberish - and all three produced identical fusion scores, which is why
     # the threshold is on cosine. Sparse-only hits have no cosine and are kept.
     if MIN_SCORE > 0:
-        # Gate on the best cosine in the whole candidate set, not per hit.
-        # Filtering hit-by-hit leaves sparse-only matches (no cosine) in place,
-        # so an off-domain query still returns keyword hits and the threshold
-        # does nothing. If nothing dense clears the bar, the corpus has no
-        # answer and the honest response is an empty list.
-        best = max((h.cosine for h, _ in ranked if h.cosine is not None),
-                   default=0.0)
-        if best < MIN_SCORE:
-            return []
-        ranked = [(h, sc) for h, sc in ranked
-                  if h.cosine is None or h.cosine >= MIN_SCORE]
+        # Every candidate now carries a cosine (they are all rescored against
+        # the dense query vector), so this is a straight filter. Under the old
+        # fusion, 20 of 50 hits had no score and slipped through untested.
+        ranked = [(h, sc) for h, sc in ranked if h.cosine >= MIN_SCORE]
 
     # Collapse duplicate content, keeping the best-ranked copy and recording
     # the others as corroborating sources rather than discarding them: "every

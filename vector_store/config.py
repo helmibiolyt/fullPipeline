@@ -55,7 +55,18 @@ SEMANTIC_MODE = os.environ.get("SEMANTIC_MODE", "embedding")
 SEMANTIC_PERCENTILE = float(os.environ.get("SEMANTIC_PERCENTILE", "88"))
 
 # --- Retrieval ---
-TOP_K = int(os.environ.get("TOP_K", "50"))       # candidates fetched from Qdrant
+# Candidates fetched from Qdrant before dedup. 250, not 50, because ranking by
+# cosine sorts identical copies together: for a generic-heavy query the whole
+# top-50 window fills with copies of three texts, and dedup then leaves 3
+# results where 15 were asked for. Measured distinct results returned:
+#
+#   TOP_K                 50   100   150   250
+#   atorvastatin/liver     3     5     9    15
+#   every other query     15    15    15    15
+#
+# Latency barely moves (238 -> 260 ms median) since one prefetch query serves
+# any depth and the 200 ms query embedding dominates.
+TOP_K = int(os.environ.get("TOP_K", "250"))
 # How many of those candidates are returned. Free to raise: hybrid_search
 # already fetches TOP_K candidates with their payloads, so FINAL_K only slices
 # a list that is already in memory - measured identical at 5, 15, 30 and 50

@@ -195,24 +195,35 @@ class Hit:
 
 
 def hybrid_search(q_emb: dict, top_k: int, flt: dict | None = None):
-    """Dense + sparse, fused here rather than by Qdrant, so both scores survive.
+    """Candidates from dense AND sparse, all ranked by dense cosine.
 
-    Qdrant's built-in RRF returns only the fused value, and that value is 1/rank
-    - so a perfect match and a nonsense query both come back as
-    [0.5, 0.5, 0.333, ...]. Two things follow that matter more than the ranking
-    itself:
+    Sparse still does the recall work it is there for - exact molecule names,
+    licence numbers, anything a 1024-dim embedding blurs - but the final order
+    comes from cosine against the query.
 
-    * There is no way to tell "nothing here is relevant". Measured: an
-      in-domain query scored 0.722 by cosine, "how do I bake sourdough bread"
-      scored 0.53, and both produced the same RRF numbers.
-    * Ties are everywhere, and Qdrant breaks them arbitrarily, so the same
-      query returns the same chunks in a different order run to run.
+    This replaced reciprocal-rank fusion, which lost on every measure tried:
 
-    Fusing in Python costs one extra round trip (~11 ms; both searches are
-    ~11-12 ms each) and keeps the dense cosine on every hit, which fixes both.
+        latency              RRF 27 ms      cosine 20 ms   (one query, not two)
+        hits carrying a score    30 of 50        50 of 50
+        top-5 for "contraindications of atorvastatin in liver disease"
+                             2 of 5 were PAR posology     5 of 5 were 4.3
 
-    Returns points with two extra attributes: `.cosine` (dense similarity, None
-    if the chunk was found only by sparse search) and `.fused` (the RRF score).
+    The scoring gap is the real argument. RRF returns 1/rank, so a perfect
+    match and a nonsense query both come back as [0.5, 0.5, 0.333, ...] - there
+    is no way to say "nothing here is relevant", ties are pervasive so the
+    order shifts between identical queries, and the 20 hits found only by
+    sparse search carried no score at all. Cosine gives every candidate a
+    comparable number, which is what MIN_SCORE needs to work.
+
+    What cosine does NOT fix: it compares the query and the chunk after each
+    has been compressed to 1024 numbers separately, so it scores topic overlap
+    rather than whether the passage answers the question. Measured: for "is
+    this medicine safe during pregnancy", a chunk about driving scored 0.696
+    while "contraindicated during pregnancy" scored 0.665; and "contraindicated
+    of atorvastatin" separates atorvastatin (0.732) from rosuvastatin (0.653)
+    by only 0.08. Only a cross-encoder closes that, and it costs 122 s a query
+    on this host. Returning 15 chunks to an agent that reads all of them is the
+    cheaper answer.
     """
     qfilter = None
     if flt:
@@ -220,36 +231,23 @@ def hybrid_search(q_emb: dict, top_k: int, flt: dict | None = None):
             models.FieldCondition(key=k, match=models.MatchValue(value=v))
             for k, v in flt.items() if v is not None
         ])
-    c = client()
-    dense = c.query_points(
-        collection_name=COLLECTION, query=q_emb["dense"], using="dense",
-        limit=top_k, query_filter=qfilter, with_payload=True,
-        search_params=NO_RESCORE).points
-    sparse = c.query_points(
+    res = client().query_points(
         collection_name=COLLECTION,
-        query=models.SparseVector(indices=list(q_emb["sparse"].keys()),
-                                  values=list(q_emb["sparse"].values())),
-        using="sparse", limit=top_k, query_filter=qfilter, with_payload=True,
-        search_params=NO_RESCORE).points
-
-    # Reciprocal rank fusion, k=60 as in the original paper. The constant damps
-    # the top ranks so one list cannot dominate purely by being first.
-    RRF_K = 60
-    fused: dict = {}
-    cosine: dict = {}
-    payloads: dict = {}
-    for rank, p in enumerate(dense, 1):
-        fused[p.id] = fused.get(p.id, 0.0) + 1.0 / (RRF_K + rank)
-        cosine[p.id] = p.score
-        payloads[p.id] = p.payload
-    for rank, p in enumerate(sparse, 1):
-        fused[p.id] = fused.get(p.id, 0.0) + 1.0 / (RRF_K + rank)
-        payloads.setdefault(p.id, p.payload)
-
-    hits = [Hit(id=pid, payload=payloads[pid], fused=sc, cosine=cosine.get(pid))
-            for pid, sc in fused.items()]
-    # Deterministic: fused desc, then cosine desc, then id. Without the last two
-    # the order of tied chunks changes between identical queries - RRF produces
-    # heavy ties, and Qdrant broke them arbitrarily.
-    hits.sort(key=lambda h: (-h.fused, -(h.cosine or 0.0), str(h.id)))
-    return hits[:top_k]
+        prefetch=[
+            models.Prefetch(query=q_emb["dense"], using="dense", limit=top_k,
+                            filter=qfilter, params=NO_RESCORE),
+            models.Prefetch(
+                query=models.SparseVector(
+                    indices=list(q_emb["sparse"].keys()),
+                    values=list(q_emb["sparse"].values())),
+                using="sparse", limit=top_k, filter=qfilter, params=NO_RESCORE),
+        ],
+        query=q_emb["dense"], using="dense",       # rescore every candidate
+        limit=top_k, with_payload=True, search_params=NO_RESCORE,
+    )
+    hits = [Hit(id=p.id, payload=p.payload, fused=p.score, cosine=p.score)
+            for p in res.points]
+    # Cosine ties are far rarer than RRF ties, but duplicated generic text
+    # produces exact ones - break on id so identical queries stay reproducible.
+    hits.sort(key=lambda h: (-h.cosine, str(h.id)))
+    return hits
