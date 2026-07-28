@@ -14,7 +14,7 @@ import re
 
 import embed
 import qdrant_store
-from config import TOP_K, FINAL_K, RERANK, MIN_SCORE
+from config import TOP_K, FINAL_K, RERANK, MIN_SCORE, DEDUP_COSINE
 
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
@@ -82,6 +82,10 @@ def retrieve(query: str, molecule_id: str = None, section: str = None,
     # the others as corroborating sources rather than discarding them: "every
     # UK atorvastatin licence says this" is stronger evidence than one citation.
     merged, seen = [], {}
+    # Gather more than final_k: the semantic pass below collapses further, and
+    # stopping at final_k here would leave fewer results than were asked for.
+    # Capped so the vector fetch stays bounded.
+    gather = min(len(ranked), max(final_k * 3, 60)) if DEDUP_COSINE > 0 else final_k
     for h, s in ranked:
         k = _dedup_key(h.payload["text"])
         if k in seen:
@@ -89,9 +93,37 @@ def retrieve(query: str, molecule_id: str = None, section: str = None,
             continue
         seen[k] = {"hit": h, "score": s, "duplicates": []}
         merged.append(seen[k])
-        if len(merged) == final_k:
+        if len(merged) == gather:
             break
+
+    if DEDUP_COSINE > 0 and len(merged) > 1:
+        # Second pass, on meaning rather than characters. The text hash only
+        # catches identical copies, and the copies are not identical - each
+        # manufacturer writes its own product name into the wording, so "stop
+        # taking Lisinopril" and "stop taking Lisinopril oral solution" hash
+        # differently and both occupy a slot. Their embeddings sit at 0.96-0.99.
+        import numpy as np
+        vecs = qdrant_store.dense_vectors([m["hit"].id for m in merged])
+        kept = []
+        for m in merged:
+            v = vecs.get(m["hit"].id)
+            if v is None:                     # vector missing: keep, do not guess
+                kept.append(m)
+                continue
+            v = np.asarray(v, dtype=np.float32)
+            v = v / (np.linalg.norm(v) or 1.0)
+            m["_v"] = v
+            twin = next((k for k in kept if "_v" in k
+                         and float(v @ k["_v"]) >= DEDUP_COSINE), None)
+            if twin is not None:
+                twin["duplicates"].append(m["hit"].payload["s3_key"])
+            else:
+                kept.append(m)
+        merged = kept
+    merged = merged[:final_k]
     ranked = [(m["hit"], m["score"]) for m in merged]
+    _dupes = {m["hit"].payload["s3_key"] + str(m["hit"].payload.get("offset")):
+              m["duplicates"] for m in merged}
     return [{
         "score": float(s),
         "text": h.payload["text"],
@@ -109,7 +141,7 @@ def retrieve(query: str, molecule_id: str = None, section: str = None,
         # Real similarity, unlike `score` which is a fused rank. This is the
         # number to threshold on when deciding whether an answer is supported.
         "cosine": getattr(h, "cosine", None),
-        "duplicates": seen[_dedup_key(h.payload["text"])]["duplicates"],
+        "duplicates": _dupes.get(h.payload["s3_key"] + str(h.payload.get("offset")), []),
     } for h, s in ranked]
 
 

@@ -135,3 +135,21 @@ MIN_SCORE = float(os.environ.get("MIN_SCORE", "0.6"))
 # Contraindications: Hypersensitivity to the active substance..." is ~113
 # chars - while dropping the table-of-contents lines, which are 24-59.
 MIN_CHUNK_BUCKET = int(os.environ.get("MIN_CHUNK_BUCKET", "2"))
+
+# Collapse results whose embeddings are at least this similar. 0 disables it.
+#
+# Hashing the text only catches character-identical copies, and the copies are
+# not identical - each manufacturer writes its own product name into the
+# wording ("stop taking Lisinopril" / "Lisinopril oral solution" / "Lisinopril
+# 1 mg/ml oral solution"). Measured on "Signs of an allergic reaction or
+# angioedema from Lisinopril": 50 returned results held 24 distinct meanings,
+# with the same SPC angioedema paragraph appearing 7 times and the same
+# interaction list 6 times.
+#
+# 0.95 is calibrated against that result set. Real duplicates cluster at
+# 0.96-0.99 - the same paragraph from a different licence - well clear of
+# genuinely different content, and every merge inspected at this threshold was
+# a product variant. Lower is dangerous in a way that is hard to notice: a
+# merged chunk disappears silently, so over-merging costs information nobody
+# sees missing, while under-merging only costs a visible slot.
+DEDUP_COSINE = float(os.environ.get("DEDUP_COSINE", "0.95"))

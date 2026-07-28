@@ -198,6 +198,19 @@ class Hit:
         return self.fused
 
 
+def dense_vectors(ids: list) -> dict:
+    """Dense vector per point id, for comparing results to each other.
+
+    Fetched by id rather than asked for during the search: with_vectors=True on
+    query_points cost 680 ms against 69 ms without, while retrieving the same
+    vectors by id afterwards is 26 ms for 120. Re-embedding the texts instead
+    is not an option here - 120 passages on this CPU did not finish in 500 s.
+    """
+    recs = client().retrieve(COLLECTION, ids=ids, with_vectors=["dense"],
+                             with_payload=False)
+    return {r.id: r.vector["dense"] for r in recs}
+
+
 def hybrid_search(q_emb: dict, top_k: int, flt: dict | None = None):
     """Candidates from dense AND sparse, all ranked by dense cosine.
 
