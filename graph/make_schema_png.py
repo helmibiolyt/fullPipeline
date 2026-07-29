@@ -19,9 +19,9 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch, Circle
 import numpy as np
 
-W, H = 21, 15.5
+W, H = 21, 16.0
 fig, ax = plt.subplots(figsize=(W, H), dpi=150)
-ax.set_xlim(0, 100); ax.set_ylim(-24, 100); ax.axis("off")
+ax.set_xlim(0, 100); ax.set_ylim(-28, 100); ax.axis("off")
 fig.patch.set_facecolor("white")
 
 CORE   = "#1f5fbf"   # Substance / Product
@@ -35,39 +35,49 @@ GREY   = "#5d6d7e"   # Country / Region / Route / Identifier
 NEW    = "#d13b6e"   # Phase-2 additions
 
 #            x    y    r    colour  label                  new?
+# Layout rules that keep this readable, for whoever edits it next:
+#   * Substance and Product form a vertical spine; Substance's neighbours fan
+#     across the top half and Product's across the bottom, so the two hubs'
+#     spokes never cross each other.
+#   * Nodes joined to each other (ClinicalTrial-Company-Country,
+#     Approval-RegulatoryAgency, Publication-Disease) sit adjacent, so those
+#     chords stay short instead of cutting across the middle.
+#   * Publication sits left of the Substance->Disease line, not on it.
 NODES = {
- "Substance":        (44, 56, 6.4, CORE,   "Substance",           False),
- "Product":          (44, 30, 5.6, CORE,   "Product",             False),
- "Disease":          (66, 80, 5.2, BIO,    "Disease",             False),
- "Target":           (38, 84, 4.8, TARGET, "Target",              False),
- "ClinicalTrial":    (72, 60, 5.6, CLIN,   "ClinicalTrial",       False),
- "Company":          (74, 34, 4.8, COMP,   "Company",             False),
- "Country":          (92, 72, 3.6, GREY,   "Country",             False),
- "Mechanism":        (18, 84, 4.2, CLASS,  "Mechanism",           False),
- "DrugClass":        (8,  72, 4.2, CLASS,  "DrugClass",           False),
- "Modality":         (5,  58, 3.4, CLASS,  "Modality",            False),
- "Route":            (9,  34, 3.4, GREY,   "Route",               False),
- "Identifier":       (20, 26, 4.4, GREY,   "Identifier",          False),
- "Region":           (22, 12, 3.6, GREY,   "Region",              False),
- "Approval":         (40, 10, 4.4, REG,    "Approval",            False),
- "RegulatoryAgency": (57, 10, 3.8, REG,    "Regulatory\nAgency",  False),
- # --- Phase 2 ---
- "AdverseEvent":     (16, 45, 5.0, NEW,    "Adverse\nEvent",      True),
- "Publication":      (86, 88, 4.6, NEW,    "Publication",         True),
- "RegulatoryEvent":  (57, 46, 5.4, NEW,    "Regulatory\nEvent",   True),
- "Patent":           (77,  9, 4.4, NEW,    "Patent",              True),
- "Exclusivity":      (93, 23, 5.0, NEW,    "Exclusivity",         True),
+ "Substance":        (40, 56, 6.4, CORE,   "Substance",           False),
+ "Product":          (40, 28, 5.6, CORE,   "Product",             False),
+ # --- Substance's neighbours: top half, left to right ---
+ "Modality":         (4,  58, 3.4, CLASS,  "Modality",            False),
+ "DrugClass":        (6,  70, 4.2, CLASS,  "DrugClass",           False),
+ "Mechanism":        (15, 82, 4.2, CLASS,  "Mechanism",           False),
+ "Target":           (33, 88, 4.8, TARGET, "Target",              False),
+ "Publication":      (48, 74, 4.6, NEW,    "Publication",         True),
+ "Disease":          (69, 80, 5.2, BIO,    "Disease",             False),
+ "Country":          (96, 74, 3.6, GREY,   "Country",             False),
+ "ClinicalTrial":    (84, 62, 5.6, CLIN,   "ClinicalTrial",       False),
+ "AdverseEvent":     (9,  45, 5.0, NEW,    "Adverse\nEvent",      True),
+ # --- shared between the hubs ---
+ "RegulatoryEvent":  (62, 46, 5.4, NEW,    "Regulatory\nEvent",   True),
+ "Identifier":       (18, 34, 4.4, GREY,   "Identifier",          False),
+ # --- Product's neighbours: bottom half ---
+ "Company":          (84, 46, 4.8, COMP,   "Company",             False),
+ "Exclusivity":      (94, 28, 5.0, NEW,    "Exclusivity",         True),
+ "Route":            (7,  22, 3.4, GREY,   "Route",               False),
+ "Patent":           (78, 14, 4.4, NEW,    "Patent",              True),
+ "Region":           (12, 6,  3.6, GREY,   "Region",              False),
+ "Approval":         (38, 2,  4.4, REG,    "Approval",            False),
+ "RegulatoryAgency": (56, 4,  3.8, REG,    "Regulatory\nAgency",  False),
 }
 
 #      src              dst              label                  curve  new?
 EDGES = [
  ("Product","Substance","CONTAINS",                   0.00, False),
  ("Company","Product","DEVELOPS",                     0.00, False),
- ("ClinicalTrial","Company","SPONSORED_BY",           0.12, False),
+ ("ClinicalTrial","Company","SPONSORED_BY",           0.00, False),
  ("ClinicalTrial","Disease","STUDIES",                0.00, False),
  ("ClinicalTrial","Country","CONDUCTED_IN",           0.00, False),
  ("Substance","ClinicalTrial","TESTED_IN",            0.00, False),
- ("Substance","Disease","INDICATED_FOR",             -0.14, False),
+ ("Substance","Disease","INDICATED_FOR",              0.00, False),
  ("Substance","Target","TARGETS",                     0.00, False),
  ("Target","Disease","ASSOCIATED_WITH",               0.00, False),
  ("Substance","Mechanism","HAS_MECHANISM",            0.00, False),
@@ -78,16 +88,16 @@ EDGES = [
  ("Product","Route","HAS_ROUTE",                      0.00, False),
  ("Product","Region","APPROVED_IN",                   0.00, False),
  ("Product","Approval","HAS_APPROVAL",                0.00, False),
- ("Product","RegulatoryAgency","APPROVED_BY",         0.20, False),
+ ("Product","RegulatoryAgency","APPROVED_BY",        -0.14, False),
  ("Approval","RegulatoryAgency","ISSUED_BY",          0.00, False),
  # --- Phase 2 ---
  ("Substance","AdverseEvent","HAS_ADVERSE_EVENT",     0.00, True),
  ("Publication","Disease","ABOUT",                    0.00, True),
- ("Publication","Substance","MENTIONS",               0.26, True),
- ("Product","Patent","PROTECTED_BY",                  0.10, True),
- ("Product","Exclusivity","HAS_EXCLUSIVITY",         -0.16, True),
+ ("Publication","Substance","MENTIONS",               0.00, True),
+ ("Product","Patent","PROTECTED_BY",                  0.00, True),
+ ("Product","Exclusivity","HAS_EXCLUSIVITY",          0.00, True),
  ("Product","RegulatoryEvent","SUBJECT_OF",           0.00, True),
- ("Substance","RegulatoryEvent","SUBJECT_OF",         0.14, True),
+ ("Substance","RegulatoryEvent","SUBJECT_OF",         0.08, True),
 ]
 
 
@@ -129,7 +139,8 @@ for key, lbl, col, side in (("Disease", "SUBTYPE_OF", BIO, "up"),
     if side == "up":
         cx, cy, tx, ty = x - 1.0, y + r + 2.2, x - 1.0, y + r + 6.6
     else:
-        cx, cy, tx, ty = x - r - 2.4, y, x - r - 3.0, y + 5.0
+        d = (r + 3.0) * 0.707        # 135 deg: the only clear quadrant
+        cx, cy, tx, ty = x - d, y + d, x - d, y + 5.4
     ax.add_patch(Circle((cx, cy), 3.0, fill=False, ec=col, lw=1.9, zorder=1))
     ax.text(tx, ty, lbl, fontsize=7.4, ha="center", color=col, style="italic",
             fontweight="bold" if col == NEW else "normal")
@@ -144,7 +155,7 @@ for key, (x, y, r, col, label, is_new) in NODES.items():
             va="center", color="white", fontweight="bold", zorder=4,
             linespacing=0.95)
 
-ax.text(50, 97.5, "Biomedical Knowledge Graph — Phase 2 (extended)",
+ax.text(50, 98.0, "Biomedical Knowledge Graph — Phase 2 (extended)",
         fontsize=19, ha="center", fontweight="bold", color="#1b2631")
 ax.text(50, 94.0,
         "20 entity types  ·  27 relationship types      "
@@ -161,7 +172,7 @@ leg = [
  (None, "    Publication      ← europepmc / pubmed / openalex / biorxiv / medrxiv"),
  (None, "    BIOSIMILAR_OF    ← Purple Book license_type 351(k) + resolved_reference_bla"),
 ]
-y = -2.0
+y = -7.0
 for col, txt in leg:
     if col:
         ax.add_patch(Circle((5.4, y + 0.35), 1.05, fc=col, ec="white", lw=1.2))
