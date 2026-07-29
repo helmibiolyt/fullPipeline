@@ -59,6 +59,21 @@ def trial_key(raw: str) -> str:
 
     This is the deduplication mechanism. Everything else follows from every
     loader calling it on the same study id and getting the same string.
+
+    One rule, NAMESPACE:VALUE, applied to every registry - which means 19 of
+    the 22 repeat their own prefix, because their ids already carry it:
+    NCT:NCT01045135, ISRCTN:ISRCTN12345678. 933,232 of 1,048,841 keys look like
+    that. It was considered and kept.
+
+    Stripping the prefix where the id already self-identifies would read better
+    and is safe - those ids are globally unique - but it makes the rule
+    conditional, and a conditional rule is what breaks when the 23rd registry
+    is added and nobody remembers which branch it falls in. EUCTR and CTIS need
+    the namespace because "2004-000010-11" identifies nothing on its own, so
+    the exception would have to exist either way.
+
+    The unprefixed value is not lost: the Identifier node carries
+    value="NCT01045135", and Identifier.value is indexed.
     """
     s = re.sub(r"\s+", "", (raw or "").strip().upper())
     if not s:
