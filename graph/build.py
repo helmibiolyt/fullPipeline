@@ -191,7 +191,18 @@ class Build:
                 continue
             n += 1
             m = self.r.resolve(pref) if pref else None
-            skey = m.key if (m and m.key) else f"CHEMBL:{chembl_id}"
+            # Merge only on a real identifier match. A provisional match merges
+            # on the folded name alone, and ChEMBL's pref_name is often a
+            # category rather than an identity: "platinum complex" is the
+            # preferred name of 248 different molecules, "auranofin analogue"
+            # of 54. Trusting those collapsed 45,891 distinct compounds into
+            # 22,125 nodes.
+            #
+            # The cost is that two ChEMBL rows for one drug that gsrs has never
+            # heard of now stay separate. That is the right way round: a false
+            # merge is silent and permanent, a missed merge is visible as two
+            # nodes and fixable by any identifier they share.
+            skey = m.key if (m and m.resolved) else f"CHEMBL:{chembl_id}"
             self.w.node("Substance", skey, source=key, name=pref,
                         norm_name=fold(pref),
                         max_phase=row.get("max_phase", ""),
