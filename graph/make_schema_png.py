@@ -61,13 +61,15 @@ NODES = {
  "Identifier":       (18, 34, 4.4, GREY,   "Identifier",          False),
  # --- Product's neighbours: bottom half ---
  "Company":          (84, 46, 4.8, COMP,   "Company",             False),
- "Exclusivity":      (94, 28, 5.0, NEW,    "Exclusivity",         True),
+ "Exclusivity":      (84, 30, 5.0, NEW,    "Exclusivity",         True),
  "Route":            (7,  22, 3.4, GREY,   "Route",               False),
- "Patent":           (78, 14, 4.4, NEW,    "Patent",              True),
- # Region moved to the right, beside Country. IN_REGION made the old
- # bottom-left position a corner-to-corner line across the whole figure,
- # since Country sits top-right next to ClinicalTrial.
- "Region":           (80, 78, 3.6, GREY,   "Region",              False),
+ "Patent":           (66, 8,  4.4, NEW,    "Patent",              True),
+ # Bottom right. Region has two edges that come from opposite ends -
+ # IN_REGION down the right column from Country, APPROVED_IN across from
+ # Product - so it sits where both arrive without crossing a node. That
+ # cost moving Exclusivity out of the right column and Patent out of the
+ # diagonal; both were sitting exactly on those two paths.
+ "Region":           (94, 6,  3.6, GREY,   "Region",              False),
  "Approval":         (38, 2,  4.4, REG,    "Approval",            False),
  "RegulatoryAgency": (56, 4,  3.8, REG,    "Regulatory\nAgency",  False),
 }
