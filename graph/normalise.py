@@ -1,0 +1,289 @@
+"""Name normalisation and substance resolution.
+
+Everything in the graph depends on this module. If it maps two different
+molecules to one key, the graph merges them and no later step notices.
+
+`GRAPH_HOW.md` specified a single aggressive `norm()` that stripped salts and
+stereochemistry in one pass. That is not safe, for two reasons found while
+writing the tests:
+
+  * "sodium chloride" is entirely salt tokens - stripping them leaves the empty
+    string, which would collapse every all-salt substance into one node.
+  * levocetirizine and cetirizine are different substances with different
+    UNIIs; stripping the stereo prefix merges them. Same for esomeprazole and
+    omeprazole, levofloxacin and ofloxacin.
+
+So normalisation is tiered instead. Each tier is tried in turn and the tier
+that matched is recorded on the result, which means precision is measurable
+afterwards rather than assumed:
+
+    exact   casefold + punctuation only          safest
+    salt    + salt tokens removed                safe: salt forms share a parent
+    stereo  + stereo prefix removed              risky: recorded, never silent
+
+The strong identifiers (UNII, InChIKey, RXCUI, CHEMBL_ID) remain the only thing
+allowed to assert that two nodes are the same substance. Name matching finds
+candidates; identifiers decide.
+"""
+from __future__ import annotations
+
+import re
+import unicodedata
+from dataclasses import dataclass, field
+
+# Salt and hydrate tokens. Removing these is safe *as a fallback tier* because
+# a salt form and its parent are the same active moiety - but see SALT_ONLY
+# below for the case where the whole name is salts.
+SALTS = {
+    "hydrochloride", "hcl", "hydrobromide", "sodium", "potassium", "calcium",
+    "magnesium", "zinc", "aluminium", "aluminum", "lithium", "sulfate",
+    "sulphate", "mesylate", "mesilate", "maleate", "tartrate", "citrate",
+    "acetate", "phosphate", "succinate", "fumarate", "besylate", "besilate",
+    "tosylate", "bromide", "chloride", "iodide", "nitrate", "oxalate",
+    "malate", "lactate", "gluconate", "carbonate", "bicarbonate", "stearate",
+    "palmitate", "valerate", "propionate", "benzoate", "salicylate",
+    "dihydrate", "monohydrate", "trihydrate", "hemihydrate", "anhydrous",
+    "hydrate", "sesquihydrate", "disodium", "dipotassium", "hydroxide",
+}
+
+# Stereochemistry and racemate prefixes. Deliberately anchored and explicit -
+# the pattern in GRAPH_HOW.md was a character class, [rsd|l|dl|rac], which
+# matches any mixture of those letters and would strip real name prefixes.
+STEREO_PREFIX = re.compile(
+    r"^\(?(?:[+-]|\+/-|±|r|s|rs|sr|d|l|dl|ld|rac|racemic|levo|dextro)\)?[-\s]+",
+    re.IGNORECASE,
+)
+
+# Looser variant, used ONLY to detect conflicts - never to match. It allows the
+# prefix to run straight into the name with no separator, which is how the
+# real risk is spelled: "levocetirizine", "esomeprazole", "esketamine". Single
+# letters are excluded here because "salbutamol" would lose its "s".
+# Over-stripping is harmless for this purpose: a bogus result like
+# "estradiol" -> "tradiol" only blocks something if "tradiol" is itself a
+# registered substance, which it is not.
+_STEREO_LOOSE = re.compile(r"^\(?(?:levo|dextro|racemic|rac|es|ar)\)?[-\s]*",
+                           re.IGNORECASE)
+
+
+def _loose_strip(s: str) -> str:
+    return fold(_STEREO_LOOSE.sub("", fold(s)))
+
+# Legal-entity suffixes, for Company only.
+COMPANY_SUFFIXES = {
+    "inc", "inc.", "ltd", "ltd.", "llc", "llp", "lp", "gmbh", "plc", "sa",
+    "s.a", "nv", "n.v", "bv", "b.v", "ag", "co", "co.", "corp", "corp.",
+    "corporation", "limited", "company", "holdings", "group", "international",
+    "pharma", "pharms", "pharmaceutical", "pharmaceuticals", "laboratories",
+    "laboratory", "labs", "lab", "healthcare", "health", "therapeutics",
+    "biosciences", "bioscience", "biotech", "sciences", "science", "srl",
+    "spa", "s.p.a", "oy", "ab", "as", "a/s", "aps", "kk", "k.k", "pty",
+    "pvt", "private", "usa", "us", "uk", "europe", "eu",
+}
+
+_PUNCT = re.compile(r"[^\w\s]+", re.UNICODE)
+_WS = re.compile(r"\s+")
+
+
+def fold(s: str) -> str:
+    """Unicode-fold, lowercase, strip punctuation, collapse whitespace.
+
+    The floor everything else builds on. Deliberately does not remove tokens -
+    "atorvastatin calcium" stays two words here.
+    """
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFKD", s)
+    s = s.encode("ascii", "ignore").decode()          # drops accents
+    s = s.lower().replace("﻿", "")               # SFDA headers carry a BOM
+    s = re.sub(r"\[.*?\]|\(.*?\)", " ", s)            # bracketed qualifiers
+    s = _PUNCT.sub(" ", s)
+    return _WS.sub(" ", s).strip()
+
+
+def strip_salts(s: str) -> str:
+    """Remove salt/hydrate tokens - unless that would leave nothing.
+
+    "sodium chloride" and "magnesium sulfate" are entirely salt tokens. They are
+    real substances, so the guard returns the folded name unchanged rather than
+    the empty string. Without it every all-salt substance collapses to one node.
+    """
+    toks = [t for t in fold(s).split() if t not in SALTS]
+    return " ".join(toks) if toks else fold(s)
+
+
+def strip_stereo(s: str) -> str:
+    """Remove a leading stereochemistry or racemate marker.
+
+    Risky on purpose: levocetirizine/cetirizine and esomeprazole/omeprazole are
+    distinct substances with distinct UNIIs. Only ever used as the last tier,
+    and the match is labelled `stereo` so it can be audited.
+    """
+    return fold(STEREO_PREFIX.sub("", fold(s)))
+
+
+def norm_company(s: str) -> str:
+    """Company key: fold, then drop legal and descriptive suffixes.
+
+    Company is the weakest node type in the schema - no source carries a
+    registry identifier, so this is clustering, not resolution. Kept separate
+    from substance normalisation because the rules have nothing in common.
+    """
+    toks = [t for t in fold(s).split() if t not in COMPANY_SUFFIXES]
+    return " ".join(toks) if toks else fold(s)
+
+
+@dataclass
+class Match:
+    """The outcome of resolving a name. `method` is carried onto the edge."""
+    key: str
+    method: str          # unii | salt | stereo | provisional
+    matched_name: str = ""
+
+    @property
+    def resolved(self) -> bool:
+        return self.method != "provisional"
+
+
+@dataclass
+class Resolver:
+    """name -> Substance key, built once and shared by every loader.
+
+    Three lookup tables rather than one, so a hit records which tier found it.
+    First writer wins in each table: gsrs preferred names are loaded before
+    synonyms, and synonyms before chembl, so the most authoritative source
+    holds the mapping.
+
+    The stereo tier is built by finalise(), not by add(), because it needs to
+    see every name before it is safe to build. See _build_stereo.
+    """
+    exact: dict[str, str] = field(default_factory=dict)
+    salt: dict[str, str] = field(default_factory=dict)
+    stereo: dict[str, str] = field(default_factory=dict)
+    collisions: list[tuple[str, str, str]] = field(default_factory=list)
+    blocked_stereo: set[str] = field(default_factory=set)
+    _pending: list[tuple[str, str]] = field(default_factory=list)
+    _final: bool = False
+
+    def add(self, name: str, unii: str) -> None:
+        """Register one name -> UNII mapping. Stereo is deferred to finalise()."""
+        if not name or not unii:
+            return
+        e = fold(name)
+        # Length guard: a one- or two-character "synonym" is a parsing artefact,
+        # and registering it would match everything.
+        if not e or not usable_name(e):
+            return
+        if e in self.exact and self.exact[e] != unii:
+            # Two substances share a name. Real and not rare - keep the first
+            # (most authoritative source) and record it rather than overwrite.
+            self.collisions.append((e, self.exact[e], unii))
+        else:
+            self.exact.setdefault(e, unii)
+        self.salt.setdefault(strip_salts(name), unii)
+        self._pending.append((name, unii))
+        self._final = False
+
+    def finalise(self) -> "Resolver":
+        """Build the stereo tier once every name is known.
+
+        Two things have to be true at the same time, which is why this cannot
+        happen in add():
+
+        * The table must hold the PLAIN form, because the prefix is usually on
+          the query, not the registered name. gsrs registers "Salbutamol"; a
+          source writes "R-Salbutamol". So "salbutamol" -> UNII must be present.
+        * That same entry must not let "Levo-cetirizine" reach cetirizine's
+          UNII. Whether it would depends on whether levocetirizine is separately
+          registered - which may not be known until every name is loaded.
+
+        So: propose an entry for every name, then withdraw any whose key could
+        bridge two distinct substances.
+        """
+        self.stereo.clear()
+        self.blocked_stereo.clear()
+        cand: dict[str, set[str]] = {}
+
+        for name, unii in self._pending:
+            st = strip_stereo(name)
+            if st:
+                cand.setdefault(st, set()).add(unii)
+            # Conflict detection uses the looser pattern, so the no-separator
+            # spellings ("levocetirizine") are caught even though the strict
+            # matcher leaves them alone.
+            lo = _loose_strip(name)
+            if lo and lo != fold(name):
+                other = self.exact.get(lo)
+                if other is not None and other != unii:
+                    self.blocked_stereo.add(lo)
+
+        # Any key two different substances both reduce to is ambiguous.
+        for st, uniis in cand.items():
+            if len(uniis) > 1:
+                self.blocked_stereo.add(st)
+
+        for st, uniis in cand.items():
+            if st not in self.blocked_stereo:
+                self.stereo[st] = next(iter(uniis))
+        self._final = True
+        return self
+
+    def resolve(self, name: str) -> Match:
+        """Tiered lookup. Never returns None - an unresolved name gets a
+        provisional NAME: key so the row is kept and can be merged later."""
+        if not self._final:
+            self.finalise()
+        if not name or not fold(name):
+            return Match(key="", method="provisional")
+        e = fold(name)
+        u = self.exact.get(e)
+        if u:
+            return Match(f"UNII:{u}", "unii", e)
+        s = strip_salts(name)
+        u = self.salt.get(s)
+        if u:
+            return Match(f"UNII:{u}", "salt", s)
+        t = strip_stereo(name)
+        u = self.stereo.get(t)
+        if u:
+            return Match(f"UNII:{u}", "stereo", t)
+        return Match(f"NAME:{e}", "provisional", e)
+
+    def stats(self) -> dict:
+        if not self._final:
+            self.finalise()
+        return {"exact": len(self.exact), "salt": len(self.salt),
+                "stereo": len(self.stereo), "collisions": len(self.collisions),
+                "blocked_stereo": len(self.blocked_stereo)}
+
+
+# A synonym has to be at least this long to be usable. Shorter strings are
+# always fragments or bare stereo descriptors, and registering one is actively
+# harmful: it matches far too much.
+MIN_SYNONYM = 3
+
+
+def split_synonyms(raw: str) -> list[str]:
+    """Split a packed synonyms cell. Pipe and semicolon only - NEVER comma.
+
+    gsrs delimits with '|'. Commas inside these values belong to IUPAC
+    systematic names:
+
+        1H-Pyrrole-1-heptanoic acid, 2-(4-fluorophenyl)-...-, calcium salt (2:1), (BS,dR)-
+
+    An earlier version split on commas with a digit guard, which kept "1,1-"
+    intact but still shredded that name into fragments - one of which folds to
+    the single letter "r" and was registered as a synonym for atorvastatin
+    calcium. Any row anywhere containing a stray "r" would then have resolved
+    to atorvastatin. That is the whole class of bug this module exists to
+    prevent, so: no comma splitting.
+    """
+    if not raw:
+        return []
+    parts = re.split(r"[|;]", raw)
+    return [p.strip() for p in parts if p and p.strip()]
+
+
+def usable_name(s: str) -> bool:
+    """Reject strings too short or too featureless to be a real name."""
+    f = fold(s)
+    return len(f) >= MIN_SYNONYM and not f.isdigit()

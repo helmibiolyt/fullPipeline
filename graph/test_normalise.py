@@ -1,0 +1,163 @@
+"""Tests for the resolver. Run: python graph/test_normalise.py
+
+Two kinds of case here, and the second kind matters more:
+
+  * things that SHOULD match  - salt forms, casing, punctuation, brand names
+  * things that MUST NOT match - distinct molecules that look similar
+
+A false negative costs a provisional key that a later identifier merges. A
+false merge is silent and permanent. So the must-not-match cases are the ones
+worth breaking the build over.
+"""
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+
+from normalise import (fold, strip_salts, strip_stereo, norm_company,
+                       Resolver, split_synonyms)
+
+FAILS = []
+
+
+def check(label, got, want):
+    ok = got == want
+    if not ok:
+        FAILS.append(f"{label}\n     got:  {got!r}\n     want: {want!r}")
+    print(f"  {'ok  ' if ok else 'FAIL'}  {label}")
+
+
+print("\nfold()")
+check("accents folded", fold("Béclométasone"), "beclometasone")
+check("punctuation dropped", fold("Co-amoxiclav (250mg)"), "co amoxiclav")
+check("bracketed qualifier dropped", fold("Insulin [human]"), "insulin")
+check("BOM stripped", fold("﻿Trade Name"), "trade name")
+check("whitespace collapsed", fold("  ATORVASTATIN   CALCIUM "), "atorvastatin calcium")
+
+print("\nstrip_salts()")
+check("salt removed", strip_salts("Atorvastatin Calcium"), "atorvastatin")
+check("hydrate removed", strip_salts("Atorvastatin calcium trihydrate"), "atorvastatin")
+check("hcl removed", strip_salts("Metformin HCl"), "metformin")
+# The guard: these are entirely salt tokens and must survive intact.
+check("all-salt name survives", strip_salts("Sodium Chloride"), "sodium chloride")
+check("all-salt name survives 2", strip_salts("Magnesium Sulfate"), "magnesium sulfate")
+check("all-salt name survives 3", strip_salts("Potassium Citrate"), "potassium citrate")
+
+print("\nstrip_stereo()")
+check("(R)- removed", strip_stereo("(R)-Salbutamol"), "salbutamol")
+check("(S)- removed", strip_stereo("(S)-Omeprazole"), "omeprazole")
+check("DL- removed", strip_stereo("DL-Methionine"), "methionine")
+check("no false strip", strip_stereo("Dexamethasone"), "dexamethasone")
+check("no false strip 2", strip_stereo("Lansoprazole"), "lansoprazole")
+check("no false strip 3", strip_stereo("Salbutamol"), "salbutamol")
+
+print("\nnorm_company()")
+check("suffixes dropped", norm_company("Pfizer Inc."), "pfizer")
+check("multi suffix", norm_company("Novartis Pharmaceuticals Corporation"), "novartis")
+check("gmbh", norm_company("Bayer AG"), "bayer")
+check("all-suffix survives", norm_company("Pharmaceuticals Ltd"), "pharmaceuticals ltd")
+
+print("\nsplit_synonyms()")
+check("pipe delimited", split_synonyms("Aspirin|ASA|acetylsalicylic acid"),
+      ["Aspirin", "ASA", "acetylsalicylic acid"])
+check("numeric comma kept", split_synonyms("1,2-dichloroethane|foo"),
+      ["1,2-dichloroethane", "foo"])
+# IUPAC names contain commas. Splitting on them shreds the name into fragments
+# and one of atorvastatin's folded to the single letter "r".
+IUPAC = ("1H-Pyrrole-1-heptanoic acid, 2-(4-fluorophenyl)-5-(1-methylethyl)-, "
+         "calcium salt (2:1), (3S,5R)-|Atorvastatin related compound B")
+check("IUPAC name survives intact", len(split_synonyms(IUPAC)), 2)
+check("...no single-letter fragment",
+      any(len(x.strip()) < 3 for x in split_synonyms(IUPAC)), False)
+
+print(chr(10) + "usable_name() - junk guard")
+from normalise import usable_name
+check("single letter rejected", usable_name("r"), False)
+check("two letters rejected", usable_name("(R)"), False)
+check("pure digits rejected", usable_name("123"), False)
+check("real name accepted", usable_name("Aspirin"), True)
+
+rj = Resolver()
+rj.add("r", "BOGUS")
+rj.add("Atorvastatin", "A0JWA85V8F")
+check("junk synonym never registered", rj.resolve("r").method, "provisional")
+
+print("\nResolver - should match")
+r = Resolver()
+r.add("Atorvastatin", "A0JWA85V8F")
+r.add("Lipitor", "A0JWA85V8F")
+r.add("Metformin", "9100L32L2N")
+r.add("Sodium Chloride", "451W47IQ8X")
+r.add("Cetirizine", "YO7261ME24")
+r.add("Levocetirizine", "6U5EA9RT2O")          # different UNII, on purpose
+r.add("Omeprazole", "KG60484QX9")
+r.add("Esomeprazole", "N3PA6559FT")            # different UNII, on purpose
+
+check("exact", r.resolve("Atorvastatin").key, "UNII:A0JWA85V8F")
+check("case-insensitive", r.resolve("ATORVASTATIN").key, "UNII:A0JWA85V8F")
+check("brand name", r.resolve("Lipitor").key, "UNII:A0JWA85V8F")
+check("salt form", r.resolve("Atorvastatin Calcium").key, "UNII:A0JWA85V8F")
+check("salt tier recorded", r.resolve("Atorvastatin Calcium").method, "salt")
+check("hydrate form", r.resolve("Atorvastatin calcium trihydrate").key, "UNII:A0JWA85V8F")
+check("all-salt substance", r.resolve("Sodium Chloride").key, "UNII:451W47IQ8X")
+
+print("\nResolver - MUST NOT match (a wrong merge here is silent and permanent)")
+check("levocetirizine stays itself", r.resolve("Levocetirizine").key, "UNII:6U5EA9RT2O")
+check("cetirizine stays itself", r.resolve("Cetirizine").key, "UNII:YO7261ME24")
+check("esomeprazole stays itself", r.resolve("Esomeprazole").key, "UNII:N3PA6559FT")
+check("omeprazole stays itself", r.resolve("Omeprazole").key, "UNII:KG60484QX9")
+check("unknown -> provisional", r.resolve("Notarealdrug").key, "NAME:notarealdrug")
+check("unknown labelled", r.resolve("Notarealdrug").method, "provisional")
+check("empty name safe", r.resolve("").key, "")
+
+print("\nResolver - stereo tier must not bridge two registered substances")
+# The case a first version got wrong: 'Levo-cetirizine' is not an exact name,
+# so it fell through to the stereo tier, which stripped 'levo-' and landed on
+# cetirizine's UNII. Two distinct drugs merged, silently and permanently.
+check("hyphenated levo does NOT become cetirizine",
+      r.resolve("Levo-cetirizine").key != "UNII:YO7261ME24", True)
+check("...it stays provisional instead",
+      r.resolve("Levo-cetirizine").method, "provisional")
+# "Levocetirizine" has no separator after "levo", so strip_stereo leaves it
+# alone and no stereo mapping is ever proposed - the protection above comes
+# from that, not from the block list. To exercise the block itself, register a
+# hyphenated form so a stereo mapping IS proposed and must be refused.
+rb = Resolver()
+rb.add("Cetirizine", "YO7261ME24")
+rb.add("Levo-cetirizine", "6U5EA9RT2O")     # strips to "cetirizine" - conflict
+rb.finalise()
+check("conflicting stereo mapping is blocked", "cetirizine" in rb.blocked_stereo, True)
+check("both forms keep their own UNII",
+      (rb.resolve("Cetirizine").key, rb.resolve("Levo-cetirizine").key),
+      ("UNII:YO7261ME24", "UNII:6U5EA9RT2O"))
+check("es-omeprazole does NOT become omeprazole",
+      r.resolve("Es-omeprazole").key != "UNII:KG60484QX9", True)
+
+# The safe case still works: nothing competes with salbutamol.
+r3 = Resolver()
+r3.add("Salbutamol", "QF8SVZ843E")
+# "(R)-" is bracketed, so fold() removes it and the exact tier already wins -
+# the stereo tier is never reached. "R-Salbutamol" is the form that needs it.
+check("(R)-Salbutamol resolves", r3.resolve("(R)-Salbutamol").key, "UNII:QF8SVZ843E")
+check("...via exact, brackets are dropped by fold", r3.resolve("(R)-Salbutamol").method, "unii")
+check("R-Salbutamol resolves", r3.resolve("R-Salbutamol").key, "UNII:QF8SVZ843E")
+check("...via the stereo tier", r3.resolve("R-Salbutamol").method, "stereo")
+
+print("\nResolver - result must not depend on insertion order")
+a = Resolver(); a.add("Cetirizine", "YO72"); a.add("Levocetirizine", "6U5E"); a.finalise()
+b = Resolver(); b.add("Levocetirizine", "6U5E"); b.add("Cetirizine", "YO72"); b.finalise()
+check("same blocked set either order", a.blocked_stereo, b.blocked_stereo)
+check("same stereo table either order", a.stereo, b.stereo)
+
+print("\nResolver - collisions are recorded, not silently overwritten")
+r2 = Resolver()
+r2.add("Ambiguous", "UNII-A")
+r2.add("Ambiguous", "UNII-B")
+check("first writer wins", r2.resolve("Ambiguous").key, "UNII:UNII-A")
+check("collision recorded", len(r2.collisions), 1)
+
+print()
+if FAILS:
+    print(f"{len(FAILS)} FAILURES\n")
+    for f in FAILS:
+        print(f"  - {f}")
+    sys.exit(1)
+print("all passed")

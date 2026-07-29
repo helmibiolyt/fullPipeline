@@ -1,0 +1,359 @@
+#!/usr/bin/env python3
+"""Build the graph to node and edge tables.
+
+    python graph/build.py --slice atorvastatin,erenumab,pembrolizumab
+    python graph/build.py --all
+
+Slice mode exists because the full build reads ~13M rows and takes a while,
+and a mapping bug found after that is a mapping bug found expensively. A slice
+restricted to a handful of molecules runs in seconds and produces a graph small
+enough to read end to end, so the logic gets exercised dozens of times before
+anything expensive happens.
+
+Nothing here talks to Neo4j. Output is CSV under graph/build/, which is both
+what the validator reads and what `neo4j-admin database import` consumes later.
+"""
+from __future__ import annotations
+
+import argparse
+import pathlib
+import sys
+import time
+from datetime import datetime, timezone
+
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+
+import disease
+import lake
+import products
+import safety
+import trials
+from emit import Writer
+from normalise import Resolver, fold, norm_company, split_synonyms
+
+LAKE = {
+    "atc_classes":   "Drug_Substance_Reference/atcddd.fhi.no/atc_ddd_data/atc_classes.csv",
+    "gsrs":          "Drug_Substance_Reference/gsrs.ncats.nih.gov/gsrs_data/gsrs_substances.csv",
+    "molecules":     "Drug_Substance_Reference/ebi.ac.uk-chembl/chembl_data/chembl_molecules.csv",
+    "structures":    "Drug_Substance_Reference/ebi.ac.uk-chembl/chembl_data/chembl_structures.csv",
+    "synonyms":      "Drug_Substance_Reference/ebi.ac.uk-chembl/chembl_data/chembl_synonyms.csv",
+    "targets":       "Drug_Substance_Reference/ebi.ac.uk-chembl/chembl_data/chembl_targets.csv",
+    "uniprot_map":   "Drug_Substance_Reference/ebi.ac.uk-chembl/chembl_data/chembl_uniprot_mapping.csv",
+    "mechanisms":    "Drug_Substance_Reference/ebi.ac.uk-chembl/chembl_data/chembl_mechanisms.csv",
+    "action_types":  "Drug_Substance_Reference/ebi.ac.uk-chembl/chembl_data/chembl_action_types.csv",
+}
+
+
+class Build:
+    def __init__(self, outdir: pathlib.Path, slice_names: set[str] | None,
+                 limit: int | None):
+        self.run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        self.w = Writer(outdir=outdir, run_id=self.run_id)
+        self.r = Resolver()
+        self.slice = slice_names
+        self.limit = limit
+        # Join keys the sources use internally. ChEMBL threads everything
+        # through molregno and tid, neither of which is a graph key, so the
+        # mapping to graph keys has to be held while loading.
+        self.molregno_key: dict[str, str] = {}
+        self.tid_key: dict[str, str] = {}
+        self.chembl_target_key: dict[str, str] = {}
+        self.ca_code_key: dict[str, str] = {}       # Canada DRUG_CODE -> Product key
+        self.fda_appl_products: dict[str, set] = {} # Appl_No -> {(Product_No, key)}
+        self.chembl_mol_key: dict[str, str] = {}    # CHEMBL id -> Substance key
+        # The WHO ATC vocabulary, as a set. Product sources write their own
+        # "ATC" values and several are not WHO codes at all - Canada's TC_ATC
+        # includes local classifications - so membership is checked rather
+        # than assumed, or IN_CLASS points at classes that do not exist.
+        self.atc_codes: set[str] = set()
+        # Dictionaries the prose matchers look things up in. Built by the
+        # loaders that own the vocabulary, read by every loader after them -
+        # which is why load order in run() is not cosmetic.
+        self.mesh_by_name: dict[str, str] = {}      # folded name -> Disease key
+        self.efo_mesh: dict[str, str] = {}          # EFO/MONDO id -> MeSH key
+        self.symbol_target: dict[str, str] = {}     # gene symbol -> Target key
+        self.ensg_target: dict[str, str] = {}       # ENSG id -> Target key
+        self.skipped_targets: set[str] = set()      # HGNC genes ChEMBL lacks
+        self.timings: dict[str, float] = {}
+        self.stats: dict = {}
+
+    # ---- slice ----------------------------------------------------------
+    def wanted(self, *names: str) -> bool:
+        """True if this row is in scope. Everything is in scope for a full run."""
+        if self.slice is None:
+            return True
+        for n in names:
+            f = fold(n or "")
+            if not f:
+                continue
+            if f in self.slice:
+                return True
+            # a slice term appearing inside a longer name still counts, so
+            # "atorvastatin" catches "atorvastatin calcium"
+            if any(s in f for s in self.slice):
+                return True
+        return False
+
+    def wanted_trial(self, interventions: str, title: str) -> bool:
+        """Slice scope for trials.
+
+        A trial is in scope if a slice substance appears in what it tested. The
+        title is a fallback for registries that have no intervention column at
+        all - CTRI and jRCT - where dropping every trial would be worse than
+        matching on prose.
+        """
+        if self.slice is None:
+            return True
+        blob = fold(f"{interventions} {title}")
+        return any(s in blob for s in self.slice)
+
+    def _step(self, name):
+        t0 = time.time()
+        print(f"  {name:22}", end="", flush=True)
+        return t0
+
+    def _done(self, name, t0, n):
+        self.timings[name] = time.time() - t0
+        print(f" {n:>9,} rows   {self.timings[name]:6.1f}s")
+
+    # ---- vocabularies ---------------------------------------------------
+    def load_atc(self):
+        """DrugClass plus its own hierarchy. Loaded whole even in slice mode -
+        it is 1,318 rows and every substance may point into it."""
+        t0 = self._step("atc_classes")
+        key = LAKE["atc_classes"]
+        n = 0
+        pending_parents = []
+        for row in lake.stream_csv(key):
+            code = (row.get("atc_code") or "").strip()
+            if not code:
+                continue
+            n += 1
+            self.atc_codes.add(code)
+            self.w.node("DrugClass", f"ATC:{code}", source=key,
+                        atc_code=code, name=row.get("name", ""),
+                        level=row.get("level", ""))
+            parent = (row.get("parent_code") or "").strip()
+            if parent:
+                pending_parents.append((code, parent))
+        for code, parent in pending_parents:
+            if parent in self.atc_codes:
+                self.w.edge("IN_CLASS", f"ATC:{code}", f"ATC:{parent}", source=key)
+        self._done("atc_classes", t0, n)
+
+    # ---- substance spine -------------------------------------------------
+    def load_gsrs(self):
+        """The naming authority: Substance nodes, UNII/CAS identifiers, and the
+        name lookup every later loader resolves through."""
+        t0 = self._step("gsrs")
+        key = LAKE["gsrs"]
+        n = 0
+        for row in lake.stream_csv(key, limit=self.limit):
+            unii = (row.get("unii") or "").strip()
+            name = (row.get("preferred_name") or "").strip()
+            if not unii or not name:
+                continue
+            syns = split_synonyms(row.get("synonyms", ""))
+            if not self.wanted(name, *syns):
+                continue
+            n += 1
+            skey = f"UNII:{unii}"
+            self.w.node("Substance", skey, source=key, name=name,
+                        norm_name=fold(name),
+                        substance_class=row.get("substance_class", ""),
+                        status=row.get("status", ""), resolved_by="gsrs")
+            self.w.identifier(skey, "UNII", unii, source=key)
+            cas = (row.get("cas_number") or "").strip()
+            if cas:
+                self.w.identifier(skey, "CAS", cas, source=key)
+            # resolver: preferred name first so it wins over synonyms
+            self.r.add(name, unii)
+            for s in syns:
+                self.r.add(s, unii)
+        self._done("gsrs", t0, n)
+
+    def load_chembl_molecules(self):
+        """ChEMBL is pan-therapeutic where gsrs is a naming registry, so it
+        contributes molecules gsrs never lists. Rows that resolve to a known
+        UNII attach to that node; the rest get provisional NAME: keys."""
+        t0 = self._step("chembl_molecules")
+        key = LAKE["molecules"]
+        n = 0
+        for row in lake.stream_csv(key, limit=self.limit):
+            molregno = (row.get("molregno") or "").strip()
+            chembl_id = (row.get("chembl_id") or "").strip()
+            pref = (row.get("pref_name") or "").strip()
+            if not molregno or not chembl_id:
+                continue
+            # A molecule with no preferred name cannot be resolved or matched
+            # by anything downstream; in a slice it is noise.
+            if self.slice is not None and not self.wanted(pref):
+                continue
+            n += 1
+            m = self.r.resolve(pref) if pref else None
+            skey = m.key if (m and m.key) else f"CHEMBL:{chembl_id}"
+            self.w.node("Substance", skey, source=key, name=pref,
+                        norm_name=fold(pref),
+                        max_phase=row.get("max_phase", ""),
+                        resolved_by=(m.method if m else "chembl_id"))
+            self.w.identifier(skey, "CHEMBL_ID", chembl_id, source=key,
+                              match_method=(m.method if m else "structured"))
+            mt = (row.get("molecule_type") or "").strip()
+            if mt:
+                self.w.node("Modality", f"MODALITY:{fold(mt)}", source=key, name=mt)
+                self.w.edge("HAS_MODALITY", skey, f"MODALITY:{fold(mt)}", source=key)
+            self.molregno_key[molregno] = skey
+            self.chembl_mol_key[chembl_id] = skey
+        self._done("chembl_molecules", t0, n)
+
+    def load_structures(self):
+        """InChIKey - the strongest merge signal there is, because it is the
+        chemistry rather than a name."""
+        t0 = self._step("chembl_structures")
+        key = LAKE["structures"]
+        n = 0
+        for row in lake.stream_csv(key, limit=self.limit):
+            molregno = (row.get("molregno") or "").strip()
+            ik = (row.get("standard_inchi_key") or "").strip()
+            skey = self.molregno_key.get(molregno)
+            if not skey or not ik:
+                continue
+            n += 1
+            self.w.identifier(skey, "INCHIKEY", ik, source=key)
+        self._done("chembl_structures", t0, n)
+
+    # ---- targets ---------------------------------------------------------
+    def load_targets(self):
+        """Target keyed by UniProt accession where one exists.
+
+        chembl_uniprot_mapping joins on the target's CHEMBL id, not on tid, so
+        it has to be read first and held. Targets with no UniProt mapping are
+        real - cell lines, whole organisms, protein complexes - and keep a
+        CHEMBL: key rather than being dropped.
+        """
+        t0 = self._step("chembl_targets")
+        umap_key = LAKE["uniprot_map"]
+        uniprot_by_chembl: dict[str, str] = {}
+        for row in lake.stream_csv(umap_key):
+            ct = (row.get("chembl_target_id") or "").strip()
+            acc = (row.get("uniprot_accession") or "").strip()
+            if ct and acc:
+                uniprot_by_chembl.setdefault(ct, acc)
+
+        key = LAKE["targets"]
+        n = 0
+        for row in lake.stream_csv(key, limit=self.limit):
+            tid = (row.get("tid") or "").strip()
+            cid = (row.get("chembl_id") or "").strip()
+            if not tid or not cid:
+                continue
+            acc = uniprot_by_chembl.get(cid)
+            tkey = f"UNIPROT:{acc}" if acc else f"CHEMBL_TARGET:{cid}"
+            n += 1
+            self.w.node("Target", tkey, source=key,
+                        name=row.get("pref_name", ""),
+                        organism=row.get("organism", ""),
+                        target_type=row.get("target_type", ""))
+            if acc:
+                self.w.identifier(tkey, "UNIPROT", acc, source=key)
+            self.tid_key[tid] = tkey
+            self.chembl_target_key[cid] = tkey
+        self._done("chembl_targets", t0, n)
+
+    def load_mechanisms(self):
+        """One file gives both TARGETS and HAS_MECHANISM, as facts rather than
+        inference: molregno -> tid, plus mechanism_of_action and action_type."""
+        t0 = self._step("chembl_mechanisms")
+        # action_type vocabulary first so Mechanism nodes carry a description
+        at_desc = {}
+        for row in lake.stream_csv(LAKE["action_types"]):
+            at = (row.get("action_type") or "").strip()
+            if at:
+                at_desc[at] = row.get("description", "")
+
+        key = LAKE["mechanisms"]
+        n = 0
+        for row in lake.stream_csv(key, limit=self.limit):
+            skey = self.molregno_key.get((row.get("molregno") or "").strip())
+            if not skey:
+                continue
+            n += 1
+            moa = (row.get("mechanism_of_action") or "").strip()
+            action = (row.get("action_type") or "").strip()
+            if moa:
+                mkey = f"MECH:{fold(moa)}"
+                self.w.node("Mechanism", mkey, source=key, name=moa,
+                            action_type=action)
+                self.w.edge("HAS_MECHANISM", skey, mkey, source=key)
+            tkey = self.tid_key.get((row.get("tid") or "").strip())
+            if tkey:
+                self.w.edge("TARGETS", skey, tkey, source=key)
+        self._done("chembl_mechanisms", t0, n)
+
+    # ---- driver ----------------------------------------------------------
+    def run(self):
+        print(f"run_id {self.run_id}"
+              f"{'   SLICE: ' + ', '.join(sorted(self.slice)) if self.slice else '   FULL'}")
+        print()
+        self.load_atc()
+        self.load_gsrs()
+        self.r.finalise()          # stereo tier needs every name first
+        self.load_chembl_molecules()
+        self.load_structures()
+        self.load_targets()
+        self.load_mechanisms()
+        # Disease before products and trials: both match prose against
+        # mesh_by_name, which does not exist until load_mesh has run.
+        for fn in disease.ALL:
+            fn(self)
+        for fn in products.ALL:
+            fn(self)
+        for fn in trials.ALL:
+            fn(self)
+        for fn in safety.ALL:
+            fn(self)
+        man = self.w.close(extra={
+            "mode": "slice" if self.slice else "full",
+            "slice": sorted(self.slice) if self.slice else None,
+            "resolver": self.r.stats(),
+            "stats": self.stats,
+            "timings_sec": {k: round(v, 2) for k, v in self.timings.items()},
+        })
+        return man
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--slice", help="comma-separated substance names")
+    ap.add_argument("--all", action="store_true", help="full build")
+    ap.add_argument("--limit", type=int, help="max rows per file (debugging)")
+    ap.add_argument("--out", default="graph/build")
+    ap.add_argument("--max-mem-gb", type=float, default=0,
+                    help="self-imposed ceiling; 0 disables")
+    a = ap.parse_args()
+    if not a.slice and not a.all:
+        ap.error("give --slice <names> or --all")
+
+    if a.max_mem_gb:
+        # This box also runs Qdrant, which serves the live search API. Without
+        # a ceiling the kernel picks the OOM victim, and Qdrant - the larger,
+        # older process - is the likely choice. A MemoryError here kills only
+        # the build, and says how much it wanted.
+        import resource
+        cap = int(a.max_mem_gb * 1024 ** 3)
+        resource.setrlimit(resource.RLIMIT_AS, (cap, cap))
+        print(f"memory ceiling {a.max_mem_gb} GB")
+
+    names = {fold(s) for s in a.slice.split(",")} if a.slice else None
+    b = Build(pathlib.Path(a.out), names, a.limit)
+    t0 = time.time()
+    man = b.run()
+
+    print(f"\nnodes: " + "  ".join(f"{k}={v:,}" for k, v in sorted(man["nodes"].items())))
+    print(f"edges: " + "  ".join(f"{k}={v:,}" for k, v in sorted(man["edges"].items())))
+    print(f"resolver: {man['resolver']}")
+    print(f"\ntotal {time.time() - t0:.1f}s -> {a.out}/")
+
+
+if __name__ == "__main__":
+    main()

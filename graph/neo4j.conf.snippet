@@ -1,0 +1,46 @@
+# Neo4j settings for a 2 vCPU / 16 GB host that also runs the graph build.
+# Append to /etc/neo4j/neo4j.conf, then: sudo systemctl restart neo4j
+#
+# The budget, and why it is not the usual "give Neo4j everything":
+#
+#   heap          4 GB
+#   page cache    4 GB
+#   build peak    6 GB   (build.py --max-mem-gb 6, measured peak ~4-5 GB)
+#   OS            2 GB
+#   ------------------
+#                16 GB
+#
+# The build runs while Neo4j is up, so the two have to coexist. Handing Neo4j
+# 12 GB the way a dedicated host would means the weekly rebuild pushes it into
+# swap, and a swapped page cache is worse than a small one - we already learned
+# that on the Qdrant box, where adding swap made searches slower, not safer.
+#
+# 4 GB of page cache is enough because the store is ~2-3 GB: the whole graph
+# stays resident. That number depends on the short source-id change in emit.py;
+# with full S3 keys repeated on every row the store was ~5-6 GB and would not
+# have fit.
+
+server.memory.heap.initial_size=4g
+server.memory.heap.max_size=4g
+server.memory.pagecache.size=4g
+
+# Transaction memory. One runaway Cypher query on a 2-core box will otherwise
+# take the whole database down with it; this makes it fail alone instead.
+db.memory.transaction.total.max=2g
+db.memory.transaction.max=512m
+
+# 2 vCPU. Leaving these at the default lets Neo4j size its pools for a machine
+# it does not have, and the resulting context switching costs more than the
+# parallelism gains.
+server.bolt.thread_pool_max_size=40
+db.transaction.concurrent.maximum=8
+
+# Query guard. The research agent writes generated Cypher, and an unbounded
+# traversal over 14M relationships will not finish. Better a timeout it can
+# react to than a request that hangs.
+db.transaction.timeout=120s
+
+# Local only for now. Open 7474/7687 to a security group, never to 0.0.0.0 -
+# the Qdrant box already has 6333 exposed to the internet and that is a hole to
+# close, not a pattern to repeat.
+server.default_listen_address=127.0.0.1

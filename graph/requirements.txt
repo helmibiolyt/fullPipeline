@@ -1,0 +1,8 @@
+# The entire build. Everything else is the standard library, which is what
+# keeps a rebuild on a fresh host a one-minute job rather than a dependency
+# archaeology exercise.
+#
+# matplotlib/numpy are NOT here on purpose: they are used only by
+# make_schema_png.py, which draws the documentation diagram and is not part of
+# building or validating the graph.
+boto3>=1.34

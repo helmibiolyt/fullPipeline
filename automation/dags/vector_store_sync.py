@@ -60,9 +60,14 @@ with DAG(
     # perfectly well-sourced answer to something untrue.
     BashOperator(
         task_id="ingest_new_documents",
+        # Path comes from the environment, defaulting to where the repo is
+        # actually checked out. It was hardcoded to /opt/vector_store, which
+        # exists on no host we run - the task would have failed on `cd` the
+        # first time a source published, and only then.
         bash_command=(
-            "cd /opt/vector_store && "
-            "python ingest.py --prune 2>&1 | tail -40"
+            "cd ${VECTOR_STORE_DIR:-/home/ubuntu/fullPipeline/vector_store} && "
+            "${VECTOR_STORE_PYTHON:-/home/ubuntu/vsenv/bin/python} "
+            "ingest.py --prune 2>&1 | tail -40"
         ),
         # Embedding is the slow part on CPU: ~1.7 min/document on this box.
         # Fine for a delta of tens; a large catch-up belongs on a GPU pod. See
