@@ -26,6 +26,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 import disease
 import lake
 import products
+import reference
 import safety
 import trials
 from emit import Writer
@@ -74,6 +75,12 @@ class Build:
         self.symbol_target: dict[str, str] = {}     # gene symbol -> Target key
         self.ensg_target: dict[str, str] = {}       # ENSG id -> Target key
         self.skipped_targets: set[str] = set()      # HGNC genes ChEMBL lacks
+        self.rxcui_key: dict[str, str] = {}         # RXCUI -> Substance key
+        # Folded generic name -> Substance key, for gsrs substances only.
+        # USAN stems are a convention of INN/USAN generic names, which is what
+        # gsrs holds; matching 200 suffixes against 3M ChEMBL rows, most of
+        # which have no name at all, would cost far more and mean less.
+        self.substance_names: dict[str, str] = {}
         self.timings: dict[str, float] = {}
         self.stats: dict = {}
 
@@ -168,6 +175,7 @@ class Build:
                 self.w.identifier(skey, "CAS", cas, source=key)
             # resolver: preferred name first so it wins over synonyms
             self.r.add(name, unii)
+            self.substance_names.setdefault(fold(name), skey)
             for s in syns:
                 self.r.add(s, unii)
         self._done("gsrs", t0, n)
@@ -311,6 +319,10 @@ class Build:
         self.r.finalise()          # stereo tier needs every name first
         self.load_chembl_molecules()
         self.load_structures()
+        # reference needs molregno_key (chembl_molecules), atc_codes (atc) and
+        # a finalised resolver - so it cannot move earlier.
+        for fn in reference.ALL:
+            fn(self)
         self.load_targets()
         self.load_mechanisms()
         # Disease before products and trials: both match prose against
