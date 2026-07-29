@@ -78,8 +78,7 @@ Measured as top cosine over a standard probe set:
 | Pharmacokinetics | 0.621 | Weak — name the parameter |
 | **US / FDA approval status** | 0.609 | **Borderline — see §7** |
 
-**Returns nothing at all** (below the 0.6 floor — the corpus genuinely lacks
-these):
+**Returns nothing from the vector store** (below the 0.6 floor):
 
 - biomarker selection, companion diagnostics
 - health technology assessment, reimbursement
@@ -87,8 +86,22 @@ these):
 - pricing, cost-effectiveness
 - real-world evidence registries
 
-For these the agent should state the corpus does not cover the topic, rather
-than reaching for adjacent material.
+**Important: "not in the vector store" is not "not in the platform."** The
+vector store indexes *documents* — PDFs published by the authorities. A large
+body of *structured* data sits alongside it in the lake as CSV, destined for
+the graph layer, and it covers several of the topics above:
+
+| Data | Where | Scale |
+|---|---|---|
+| FDA approvals + dates | Orange Book, Purple Book, openFDA | ~47,500 · 2,205 · ~44,452 |
+| **Patents and expiry** | Orange Book `patents_enriched`, Purple Book `patent_list` | ~16,344 · 424 |
+| **Exclusivity** | Orange Book `exclusivity_enriched` | 2,265 |
+| FDA adverse events (FAERS) | openFDA | ~2.9M reports, 2020-2026Q1 |
+| Drug recalls | openFDA | ~17,718 |
+| Targets, mechanisms, ATC | ChEMBL | 18,552 targets · 7,561 mechanisms |
+
+Until the graph is serving, the agent should say these are *not available
+through this endpoint* rather than that the platform lacks them.
 
 ---
 
@@ -204,7 +217,12 @@ Repeating the name (`"erenumab Aimovig mechanism of action"`) improved it from
 
 ## 7. Jurisdiction
 
-There is no FDA source in the corpus. **But FDA content exists inside non-FDA
+The vector store indexes documents from the MHRA, EMA, PMDA and MENA/GCC
+authorities. It holds no FDA *documents* — but the lake does hold substantial
+FDA *structured data* (Orange Book, Purple Book, openFDA, FAERS), which reaches
+the graph layer rather than this endpoint.
+
+Within the vector store, **FDA content still appears inside non-FDA
 documents** — EMA and PMDA reviews routinely cite US decisions:
 
 ```
@@ -291,9 +309,11 @@ for r in a + b + c:                       # §6 verification
 > - Never infer US/FDA approval from EU or UK approval. Report US status only
 >   when a retrieved passage states it explicitly; assessment reports from EMA
 >   and PMDA often do.
-> - The corpus does not cover pricing, reimbursement, health technology
+> - This endpoint does not cover pricing, reimbursement, health technology
 >   assessment, patents, companion diagnostics or real-world evidence
->   registries.
+>   registries. Say they are unavailable here — not that they do not exist;
+>   FDA approvals, patents, exclusivity and adverse-event data are held as
+>   structured data for the graph layer.
 
 ---
 
