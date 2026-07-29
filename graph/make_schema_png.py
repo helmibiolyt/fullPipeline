@@ -144,23 +144,31 @@ for a, b, label, curve, is_new in EDGES:
 # eleven neighbours and almost every quadrant is taken.
 #
 # angle, loop radius, and how far out to push the label.
-for key, lbl, col, ang, out in (
+# Last field overrides the label position, as an offset from the loop centre.
+# Placing a label further along the loop's own angle is fine until something
+# else occupies that direction - SAME_STUDY_AS pointed straight into the
+# IN_REGION edge running down the right column, so it goes under its circle
+# instead, shifted left to clear that line.
+for key, lbl, col, ang, out, lab in (
         # Up-left. Straight up puts the label through the subtitle; right is
         # where Region now sits.
-        ("Disease",       "SUBTYPE_OF",    BIO,   140, 2.4),
-        ("Product",       "BIOSIMILAR_OF", NEW,   135, 3.0),
-        ("Substance",     "IS_SALT_OF",    NEW,   -58, 3.4),
-        ("ClinicalTrial", "SAME_STUDY_AS", CLIN,  -30, 3.0),
+        ("Disease",       "SUBTYPE_OF",    BIO,   140, 2.4, None),
+        ("Product",       "BIOSIMILAR_OF", NEW,   135, 3.0, None),
+        ("Substance",     "IS_SALT_OF",    NEW,   -58, 3.4, None),
+        ("ClinicalTrial", "SAME_STUDY_AS", CLIN,  -30, 3.0, (-2.6, -5.4)),
         # Straight up. At 160 deg the loop ran off the left edge of the canvas
         # - DrugClass sits at x=6 and the circle needs 6.8 of clearance.
-        ("DrugClass",     "IN_CLASS",      CLASS, 90,  2.6)):
+        ("DrugClass",     "IN_CLASS",      CLASS, 90,  2.6, None)):
     x, y, r, *_ = NODES[key]
     a = np.radians(ang)
     d = r + out
     cx, cy = x + d * np.cos(a), y + d * np.sin(a)
-    # Past the far side of the loop (radius 3), not just past its centre, or
-    # the label prints on top of the circle it names.
-    tx, ty = x + (d + 6.8) * np.cos(a), y + (d + 6.8) * np.sin(a)
+    if lab:
+        tx, ty = cx + lab[0], cy + lab[1]
+    else:
+        # Past the far side of the loop (radius 3), not just past its centre,
+        # or the label prints on top of the circle it names.
+        tx, ty = x + (d + 6.8) * np.cos(a), y + (d + 6.8) * np.sin(a)
     ax.add_patch(Circle((cx, cy), 3.0, fill=False, ec=col, lw=1.9, zorder=1))
     ax.text(tx, ty, lbl, fontsize=7.4, ha="center", color=col, style="italic",
             fontweight="bold" if col == NEW else "normal")
