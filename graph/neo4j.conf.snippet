@@ -40,7 +40,21 @@ db.transaction.concurrent.maximum=8
 # react to than a request that hangs.
 db.transaction.timeout=120s
 
-# Local only for now. Open 7474/7687 to a security group, never to 0.0.0.0 -
-# the Qdrant box already has 6333 exposed to the internet and that is a hole to
-# close, not a pattern to repeat.
-server.default_listen_address=127.0.0.1
+# Listening on all interfaces because the database has to be reachable from
+# outside the VM. That makes the Azure NSG the only thing standing between this
+# port and the internet, so the NSG rule must name a source address - a default
+# "Any" rule here publishes 11.8M rows and an auth endpoint to the world.
+# The Qdrant box already has 6333 open to 0.0.0.0; that is a hole to close, not
+# a pattern to copy.
+server.default_listen_address=0.0.0.0
+
+# Advertised address must be the public IP or Browser hands the client a bolt://
+# URL pointing at the VM's private address, which resolves to nothing remotely.
+server.default_advertised_address=4.233.210.24
+server.bolt.listen_address=0.0.0.0:7687
+server.http.listen_address=0.0.0.0:7474
+
+# Browser talks to Bolt directly from the user's machine, so the advertised
+# bolt address has to be the public one too.
+server.bolt.advertised_address=4.233.210.24:7687
+server.http.advertised_address=4.233.210.24:7474
