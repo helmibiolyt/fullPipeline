@@ -13,8 +13,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-if ! command -v python3 >/dev/null; then
-  sudo apt-get update -qq && sudo apt-get install -y -qq python3 python3-venv
+# Test for the venv module, not for python3. Ubuntu ships python3 without
+# python3-venv, so a `command -v python3` check passes on a box where creating
+# a virtualenv still fails - which is exactly what happened on the first host.
+if ! python3 -c "import ensurepip" 2>/dev/null; then
+  echo "installing python3-venv"
+  sudo apt-get update -qq
+  sudo apt-get install -y -qq python3-venv
 fi
 
 python3 -m venv ~/graphenv

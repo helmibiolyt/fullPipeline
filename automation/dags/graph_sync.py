@@ -109,4 +109,28 @@ with DAG(
         env=env, append_env=True,
     )
 
-    build >> validate >> headers >> promote
+    # Retention. Each run is ~1.6 GB and the graph host has 27 GB free, so
+    # keeping every build fills the disk in about fifteen weeks - and it fills
+    # it during a build, which means the failure looks like a corrupt graph
+    # rather than a full volume.
+    #
+    # Two are kept, not one: the previous run is what you re-import from when a
+    # new build validates but turns out to be wrong for a reason validate.py
+    # cannot see. `current` is a symlink into one of them, so it is resolved
+    # and excluded rather than assumed to be the newest.
+    prune = BashOperator(
+        task_id="prune_old_runs",
+        bash_command=(
+            f"cd {GRAPH}/runs && "
+            "keep=$(readlink -f current 2>/dev/null | xargs -r basename); "
+            "ls -1dt */ 2>/dev/null | sed 's#/##' | grep -v \"^${keep:-__none__}$\" "
+            "| tail -n +2 | xargs -r rm -rf; "
+            "echo 'kept:'; ls -1dt */ 2>/dev/null; df -h . | tail -1"
+        ),
+        env=env, append_env=True,
+        # Runs even if an upstream task failed: a failed build still leaves a
+        # partial directory behind, and that is exactly when disk is tightest.
+        trigger_rule="all_done",
+    )
+
+    build >> validate >> headers >> promote >> prune
