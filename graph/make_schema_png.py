@@ -131,16 +131,30 @@ for a, b, label, curve, is_new in EDGES:
             bbox=dict(boxstyle="round,pad=0.26", fc="white",
                       ec=NEW if is_new else "#d5d8dc", lw=0.9, alpha=0.97))
 
-# Self-loops. Disease loops above; Product loops to its left, because below it
-# the loop lands on the HAS_APPROVAL edge label.
-for key, lbl, col, side in (("Disease", "SUBTYPE_OF", BIO, "up"),
-                            ("Product", "BIOSIMILAR_OF", NEW, "left")):
+# Self-loops: an edge between two DIFFERENT nodes of the same label, never a
+# node to itself (there are zero true self-loops in the data). Each is placed
+# by angle rather than by named side, because the only thing that matters is
+# picking a direction with no edge already running through it - Substance has
+# eleven neighbours and almost every quadrant is taken.
+#
+# angle, loop radius, and how far out to push the label.
+for key, lbl, col, ang, out in (
+        # Right, not up: Disease sits at y=80 and a loop above it puts the
+        # label through the subtitle.
+        ("Disease",       "SUBTYPE_OF",    BIO,   18,  2.4),
+        ("Product",       "BIOSIMILAR_OF", NEW,   135, 3.0),
+        ("Substance",     "IS_SALT_OF",    NEW,   -58, 3.4),
+        ("ClinicalTrial", "SAME_STUDY_AS", CLIN,  -30, 3.0),
+        # Straight up. At 160 deg the loop ran off the left edge of the canvas
+        # - DrugClass sits at x=6 and the circle needs 6.8 of clearance.
+        ("DrugClass",     "IN_CLASS",      CLASS, 90,  2.6)):
     x, y, r, *_ = NODES[key]
-    if side == "up":
-        cx, cy, tx, ty = x - 1.0, y + r + 2.2, x - 1.0, y + r + 6.6
-    else:
-        d = (r + 3.0) * 0.707        # 135 deg: the only clear quadrant
-        cx, cy, tx, ty = x - d, y + d, x - d, y + 5.4
+    a = np.radians(ang)
+    d = r + out
+    cx, cy = x + d * np.cos(a), y + d * np.sin(a)
+    # Past the far side of the loop (radius 3), not just past its centre, or
+    # the label prints on top of the circle it names.
+    tx, ty = x + (d + 6.8) * np.cos(a), y + (d + 6.8) * np.sin(a)
     ax.add_patch(Circle((cx, cy), 3.0, fill=False, ec=col, lw=1.9, zorder=1))
     ax.text(tx, ty, lbl, fontsize=7.4, ha="center", color=col, style="italic",
             fontweight="bold" if col == NEW else "normal")
@@ -158,7 +172,7 @@ for key, (x, y, r, col, label, is_new) in NODES.items():
 ax.text(50, 98.0, "Biomedical Knowledge Graph — Phase 2 (extended)",
         fontsize=19, ha="center", fontweight="bold", color="#1b2631")
 ax.text(50, 94.0,
-        "20 entity types  ·  27 relationship types      "
+        "19 entity types built  ·  26 relationship types      "
         "Phase 1 = 15 nodes / 19 edges  ·  additions shown in pink",
         fontsize=10.5, ha="center", color="#5d6d7e")
 
