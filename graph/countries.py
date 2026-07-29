@@ -74,6 +74,44 @@ for _entry in _RAW.replace("\n", "|").split("|"):
     NAME.setdefault(_c.strip(), _n.strip())
 NAME.update(_EXTRA)
 
+# Country -> Region. Without this Region is reachable only from Product, and
+# "which trials ran in the Gulf" cannot be answered by traversal at all - it
+# needs six ISO codes typed by hand.
+#
+# Two deliberate departures from pure geography, both because this graph is
+# about drug regulation rather than atlases:
+#
+#   MENA/GCC spans Asia and Africa. It is kept because it is the grouping this
+#   lake exists to serve, and it takes precedence over the continent - Egypt is
+#   MENA/GCC, not Africa.
+#   South Asia is separate from Asia. India alone carries ~62k trials through
+#   CTRI, and folding it into "Asia" would bury that behind China and Japan.
+#
+# Every country gets exactly one region. Overlaps would double-count any
+# aggregation that traverses this edge.
+_REGIONS = {
+    "North America": "US CA BM GL PR",
+    "Latin America": "MX GT BZ SV HN NI CR PA CU DO HT JM TT BB BS DM AW GP MQ "
+                     "CO VE EC PE BO BR PY UY AR CL GY SR",
+    "Europe": "AL AD AT BY BE BA BG HR CY CZ DK EE FI FR DE GI GR HU IS IE IT "
+              "XK LV LI LT LU MT MD MC ME NL MK NO PL PT RO RU RS SK SI ES SE "
+              "CH UA GB EU TR",
+    "MENA/GCC": "SA AE BH QA OM KW YE JO LB SY IQ IR IL PS EG LY TN DZ MA",
+    "Sub-Saharan Africa": "AO BJ BW BF BI CM CV CF TD KM CG CI SZ ET GA GM GH "
+                          "GN GW KE LS LR MG MW ML MU MZ NA NE NG RW RE SN SC "
+                          "SL ZA SS TZ TG UG ZM ZW SO SD MR DJ",
+    "Asia": "CN JP KR KP TW HK MO MN SG MY ID TH VN PH KH LA MM BN TL",
+    "South Asia": "IN PK BD LK NP BT MV AF",
+    "Central Asia": "KZ UZ KG TJ TM AZ AM GE",
+    "Oceania": "AU NZ FJ PG NC GU",
+}
+
+REGION: dict[str, str] = {}
+for _r, _codes in _REGIONS.items():
+    for _c in _codes.split():
+        REGION[_c] = _r
+
+
 # "Mayo Clinic Hospital in Arizona (Phoenix, Arizona, United States)" - the
 # country is the last comma-field inside the parentheses. Parsing the structure
 # is both cheaper and safer than searching for 200 country names in free text,

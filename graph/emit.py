@@ -77,6 +77,7 @@ EDGE_COLUMNS: dict[str, list[str]] = {
     "ASSOCIATED_WITH":   ["src", "dst", "match_method", "score"],
     "SUBTYPE_OF":        ["src", "dst", "match_method"],
     "IS_SALT_OF":        ["src", "dst", "match_method"],
+    "IN_REGION":         ["src", "dst", "match_method"],
     "HAS_APPROVAL":      ["src", "dst", "match_method"],
     "APPROVED_BY":       ["src", "dst", "match_method"],
     "APPROVED_IN":       ["src", "dst", "match_method"],

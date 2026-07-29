@@ -64,7 +64,10 @@ NODES = {
  "Exclusivity":      (94, 28, 5.0, NEW,    "Exclusivity",         True),
  "Route":            (7,  22, 3.4, GREY,   "Route",               False),
  "Patent":           (78, 14, 4.4, NEW,    "Patent",              True),
- "Region":           (12, 6,  3.6, GREY,   "Region",              False),
+ # Region moved to the right, beside Country. IN_REGION made the old
+ # bottom-left position a corner-to-corner line across the whole figure,
+ # since Country sits top-right next to ClinicalTrial.
+ "Region":           (80, 78, 3.6, GREY,   "Region",              False),
  "Approval":         (38, 2,  4.4, REG,    "Approval",            False),
  "RegulatoryAgency": (56, 4,  3.8, REG,    "Regulatory\nAgency",  False),
 }
@@ -76,6 +79,7 @@ EDGES = [
  ("ClinicalTrial","Company","SPONSORED_BY",           0.00, False),
  ("ClinicalTrial","Disease","STUDIES",                0.00, False),
  ("ClinicalTrial","Country","CONDUCTED_IN",           0.00, False),
+ ("Country","Region","IN_REGION",                   0.00, True),
  ("Substance","ClinicalTrial","TESTED_IN",            0.00, False),
  ("Substance","Disease","INDICATED_FOR",              0.00, False),
  ("Substance","Target","TARGETS",                     0.00, False),
@@ -139,9 +143,9 @@ for a, b, label, curve, is_new in EDGES:
 #
 # angle, loop radius, and how far out to push the label.
 for key, lbl, col, ang, out in (
-        # Right, not up: Disease sits at y=80 and a loop above it puts the
-        # label through the subtitle.
-        ("Disease",       "SUBTYPE_OF",    BIO,   18,  2.4),
+        # Up-left. Straight up puts the label through the subtitle; right is
+        # where Region now sits.
+        ("Disease",       "SUBTYPE_OF",    BIO,   140, 2.4),
         ("Product",       "BIOSIMILAR_OF", NEW,   135, 3.0),
         ("Substance",     "IS_SALT_OF",    NEW,   -58, 3.4),
         ("ClinicalTrial", "SAME_STUDY_AS", CLIN,  -30, 3.0),
@@ -172,7 +176,7 @@ for key, (x, y, r, col, label, is_new) in NODES.items():
 ax.text(50, 98.0, "Biomedical Knowledge Graph — Phase 2 (extended)",
         fontsize=19, ha="center", fontweight="bold", color="#1b2631")
 ax.text(50, 94.0,
-        "19 entity types built  ·  26 relationship types      "
+        "19 entity types built  ·  27 relationship types      "
         "Phase 1 = 15 nodes / 19 edges  ·  additions shown in pink",
         fontsize=10.5, ha="center", color="#5d6d7e")
 
@@ -185,6 +189,7 @@ leg = [
  (None, "    AdverseEvent     ← openFDA FAERS ~2.9M reports, aggregated to (substance, reaction) counts"),
  (None, "    Publication      ← europepmc / pubmed / openalex / biorxiv / medrxiv"),
  (None, "    BIOSIMILAR_OF    ← Purple Book license_type 351(k) + resolved_reference_bla"),
+ (None, "    IN_REGION        ← 189 countries -> 9 regions; MENA/GCC wins over continent"),
 ]
 y = -7.0
 for col, txt in leg:

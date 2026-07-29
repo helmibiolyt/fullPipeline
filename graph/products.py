@@ -67,16 +67,36 @@ def split_ingredients(raw: str) -> list[str]:
 
 
 def load_vocab(b):
-    t0 = b._step("agencies/regions")
+    """Agencies, and the geography everything else attaches to.
+
+    All 189 countries are created here, not just the eleven the agencies sit
+    in. This loader runs first and the Writer keeps the first writer, so this
+    is the only place that can give every Country both a real name and a
+    region - trials.py knows the name but not the region.
+
+    Two bugs lived in the four lines this replaces. `name=country` wrote the
+    ISO code into the name, so COUNTRY:SA read `name: "SA"` - and it hit
+    exactly the ten agency countries, which is every GCC one. And Region was
+    created only for agency jurisdictions, so the 189 countries trials run in
+    connected to nothing above them; products and trials shared no geography.
+    """
+    t0 = b._step("vocab")
     n = 0
+    for region in sorted(set(countries.REGION.values())):
+        b.w.node("Region", f"REGION:{fold(region)}", source="vocab", name=region)
+
+    for iso, region in sorted(countries.REGION.items()):
+        b.w.node("Country", f"COUNTRY:{iso}", source="vocab", iso2=iso,
+                 name=countries.NAME.get(iso, iso))
+        b.w.edge("IN_REGION", f"COUNTRY:{iso}", f"REGION:{fold(region)}",
+                 match_method="structured", source="vocab")
+        n += 1
+
     for code, name, country, region in AGENCIES:
         b.w.node("RegulatoryAgency", f"AGENCY:{code}", source="vocab",
                  code=code, name=name, country=country, region=region)
-        b.w.node("Region", f"REGION:{fold(region)}", source="vocab", name=region)
-        b.w.node("Country", f"COUNTRY:{country}", source="vocab",
-                 iso2=country, name=country)
         n += 1
-    b._done("agencies/regions", t0, n)
+    b._done("vocab", t0, n)
 
 
 def _product(b, key, agency, source, contains, **props):
