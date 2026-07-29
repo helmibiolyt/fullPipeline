@@ -184,7 +184,41 @@ def main():
         hit = any(r["src"] == src and r["dst"] == dst for r in _read(p))
         (ok if hit else fail)(f"{label}")
 
-    # ---- 7. isolated nodes ----------------------------------------------
+    # ---- 7. declared sources that were never read ------------------------
+    #
+    # sources.py is the statement of what feeds the graph. Five files sat in it
+    # with no loader for a while and nothing noticed, because a relationship
+    # that is never emitted does not look wrong in the totals - it looks like
+    # sparse data. IN_CLASS had no Substance source at all and simply appeared
+    # small.
+    #
+    # The manifest records the S3 key of every file actually read, so this is
+    # an exact comparison rather than a guess at whether some loader mentions a
+    # path somewhere.
+    print("\ndeclared sources actually read")
+    try:
+        import sources as _sources
+        declared = {d["file"] for d in _sources.INCLUDED}
+        read = set(man.get("files_read", []))
+        never = sorted(declared - read)
+        # A slice legitimately skips sources it cannot filter - eu_ctr has no
+        # substance column - so an unread file is only a failure on a full run.
+        report = warn if man.get("mode") == "slice" else fail
+        if never:
+            report(f"{len(never)}/{len(declared)} declared sources were never read"
+                   + ("  (slice mode)" if man.get("mode") == "slice" else ""))
+            for f in never[:10]:
+                print(f"          {f}")
+        else:
+            ok(f"all {len(declared)} declared sources were read")
+        extra = sorted(read - declared)
+        if extra:
+            warn(f"{len(extra)} files read but not declared in sources.py: "
+                 f"{extra[:3]}")
+    except Exception as e:
+        warn(f"source coverage check skipped: {type(e).__name__}: {e}")
+
+    # ---- 8. isolated nodes ----------------------------------------------
     print("\nconnectivity")
     touched = set()
     for p in (d / "edges").glob("*.csv"):

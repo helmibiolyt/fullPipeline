@@ -238,6 +238,10 @@ def load_faers(b):
     for q in FAERS_QUARTERS:
         key = f"Safety_Pharmacovigilance/open.fda.gov/Adverse_Events/faers_{q}.csv"
         try:
+            # Every quarter is recorded as read even though the edges carry a
+            # single "faers" source id - twelve S3 keys aggregated into one
+            # fact, and the coverage check needs to see all twelve.
+            b.w.sid(key)
             stream = lake.stream_csv(key, limit=b.limit)
             for row in stream:
                 subs = [s.strip() for s in (row.get("drug_substance") or "").split(";") if s.strip()]

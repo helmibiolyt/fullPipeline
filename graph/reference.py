@@ -16,8 +16,14 @@ Substance nodes that must already exist.
 """
 from __future__ import annotations
 
+import re
+
 import lake
 from normalise import fold
+
+# Where the ingredient name stops and the strength begins: the first bare
+# number, or a number attached to a unit. "ethanol 0.62 ML/ML Topical Gel".
+_STRENGTH = re.compile(r"\s+\d")
 
 L = {
     "atc_subs":  "Drug_Substance_Reference/atcddd.fhi.no/atc_ddd_data/atc_substances.csv",
@@ -161,24 +167,37 @@ def load_dailymed(b):
     "find the label text for this drug" becomes a graph lookup followed by a
     filtered vector search rather than a name guess.
 
-    Joined on RXCUI, which load_rxnorm resolved to substances. Rows without one
-    are hand sanitiser and similar OTC filings with no ingredient mapping - the
-    first row of the file is exactly that.
+    NOT joined on RXCUI, though both files have that column - they are two
+    different RXNorm namespaces and never overlap. DailyMed's rxcui is
+    product-level (SCD/PSN: "chloroprocaine hydrochloride 10 MG/ML Injectable
+    Solution" = 992801) while rxnorm_drugs.csv is entirely tty=IN, the
+    ingredient concept, which carries a different code. Joining them produced
+    exactly zero matches, and read as missing data rather than as the wrong
+    key.
+
+    So the join is on rxstring instead, which begins with the ingredient and
+    then states strength and form. Cutting at the first number leaves the name,
+    which the resolver handles - "chloroprocaine hydrochloride" reaches
+    chloroprocaine through the salt tier. That is a name match and is recorded
+    as one on the edge.
     """
     t0 = b._step("dailymed")
     key = L["dailymed"]
     n = 0
     for row in lake.stream_csv(key, limit=b.limit):
         setid = (row.get("setid") or "").strip()
-        rxcui = (row.get("rxcui") or "").strip()
-        if not setid or not rxcui:
+        rxs = (row.get("rxstring") or "").strip()
+        if not setid or not rxs:
             continue
-        skey = b.rxcui_key.get(rxcui)
-        if not skey:
+        name = _STRENGTH.split(rxs, 1)[0].strip(" ,-")
+        if len(name) < 4:
+            continue
+        m = b.r.resolve(name)
+        if not m.key or not m.resolved:
             continue
         n += 1
-        b.w.identifier(skey, "SPL_SETID", setid, source=key,
-                       match_method="structured")
+        b.w.identifier(m.key, "SPL_SETID", setid, source=key,
+                       match_method=m.method)
     b._done("dailymed", t0, n)
 
 

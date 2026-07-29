@@ -46,6 +46,12 @@ def load_env(path: str = "automation/.env") -> None:
         return
 
 
+# Every S3 key stream_csv has opened. Recorded here rather than by the loaders
+# because a file that is read but yields no matching rows still counts as read
+# - in slice mode most of them do - and asking each loader to declare its own
+# reads is exactly the bookkeeping that let five files go unloaded unnoticed.
+READ: set[str] = set()
+
 _client = None
 
 
@@ -68,6 +74,7 @@ def stream_csv(key: str, limit: int | None = None) -> Iterator[dict]:
     * Undecodable bytes mid-file. errors="replace" keeps the stream alive; one
       mangled character is better than losing the remaining rows.
     """
+    READ.add(key)
     body = s3().get_object(Bucket=BUCKET, Key=key)["Body"]
     wrapper = io.TextIOWrapper(body, encoding="utf-8-sig", errors="replace",
                                newline="")

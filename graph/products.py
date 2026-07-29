@@ -119,6 +119,10 @@ def load_canada(b):
         if code and name:
             ing_by_code.setdefault(code, []).append(name)
 
+    # Read into memory to drive the product filter; it emits no rows of its
+    # own, so the read is recorded explicitly or the coverage check calls it
+    # unread.
+    b.w.sid(L["ca_ingred"])
     keep = {c for c, ings in ing_by_code.items() if b.wanted(*ings)}
     n = 0
     for row in lake.stream_csv(L["ca_drug"], limit=b.limit):
@@ -160,6 +164,63 @@ def load_canada(b):
             if atc in b.atc_codes:
                 b.w.edge("IN_CLASS", key, f"ATC:{atc}", source=L["ca_ther"])
     b._done("canada", t0, n)
+
+
+def load_ca_status(b):
+    """Canada's regulatory status history - the Approval nodes for HC products.
+
+    200k rows against 59k products because this is a history, not a snapshot:
+    a product moves APPROVED -> MARKETED -> DORMANT and each transition is a
+    row. All of them are kept, because "when did this stop being marketed in
+    Canada" is exactly the kind of question the current-status flag cannot
+    answer.
+    """
+    t0 = b._step("canada_status")
+    key = L["ca_status"]
+    n = 0
+    for row in lake.stream_csv(key, limit=b.limit):
+        pkey = b.ca_code_key.get((row.get("DRUG_CODE") or "").strip())
+        status = (row.get("STATUS_EN") or "").strip()
+        date = (row.get("HISTORY_DATE") or "").strip()
+        if not pkey or not status:
+            continue
+        n += 1
+        akey = f"APPROVAL:CA:{(row.get('DRUG_CODE') or '').strip()}:{fold(status)}:{fold(date)}"
+        b.w.node("Approval", akey, source=key, date=date, type="status_change",
+                 status=status, agency="HC")
+        b.w.edge("HAS_APPROVAL", pkey, akey, match_method="structured", source=key)
+    b._done("canada_status", t0, n)
+
+
+def load_pb_patents(b):
+    """Biologics patents, joined on the reference product's BLA number.
+
+    Separate from the Orange Book patent loader because biologics patents are
+    listed against the BLA rather than an application/product pair, so the join
+    key is different even though the node type is the same.
+    """
+    t0 = b._step("purplebook_patents")
+    key = L["pb_patents"]
+    n = 0
+    for row in lake.stream_csv(key, limit=b.limit):
+        bla = (row.get("Reference Product BLA Number") or "").strip()
+        pno = (row.get("Patent Number") or "").strip().replace(",", "")
+        if not bla or not pno:
+            continue
+        # Join to the product purplebook actually created, rather than
+        # assuming the key exists. patent_list is not slice-filtered and the
+        # product loader is, so an unconditional edge dangles for every
+        # biologic outside the slice - 424 of 424 on the first attempt.
+        pkey = b.bla_key.get(bla)
+        if not pkey:
+            continue
+        n += 1
+        pat = f"US:{pno}"
+        b.w.node("Patent", pat, source=key, patent_no=pno,
+                 expire_date=row.get("Patent Expiration Date", ""))
+        b.w.edge("PROTECTED_BY", pkey, pat, match_method="structured",
+                 source=key)
+    b._done("purplebook_patents", t0, n)
 
 
 def load_mhra(b):
@@ -309,7 +370,7 @@ def load_purplebook(b):
     the biosimilar -> originator edge already resolved by the source."""
     t0 = b._step("purplebook")
     n = 0
-    bla_key: dict[str, str] = {}
+    bla_key = b.bla_key
     rows = list(lake.stream_csv(L["pb"], limit=b.limit))
     for row in rows:
         bla = (row.get("bla_number") or "").strip()
@@ -431,5 +492,5 @@ def load_pmda(b):
     b._done("pmda", t0, n)
 
 
-ALL = [load_vocab, load_canada, load_mhra, load_ema, load_orangebook,
-       load_patents, load_purplebook, load_openfda, load_sfda, load_pmda]
+ALL = [load_vocab, load_canada, load_ca_status, load_mhra, load_ema, load_orangebook,
+       load_patents, load_purplebook, load_pb_patents, load_openfda, load_sfda, load_pmda]

@@ -76,6 +76,7 @@ class Build:
         self.ensg_target: dict[str, str] = {}       # ENSG id -> Target key
         self.skipped_targets: set[str] = set()      # HGNC genes ChEMBL lacks
         self.rxcui_key: dict[str, str] = {}         # RXCUI -> Substance key
+        self.bla_key: dict[str, str] = {}           # BLA number -> Product key
         # Folded generic name -> Substance key, for gsrs substances only.
         # USAN stems are a convention of INN/USAN generic names, which is what
         # gsrs holds; matching 200 suffixes against 3M ChEMBL rows, most of
@@ -225,6 +226,32 @@ class Build:
             self.chembl_mol_key[chembl_id] = skey
         self._done("chembl_molecules", t0, n)
 
+    def load_chembl_synonyms(self):
+        """139k names ChEMBL knows that gsrs does not - mostly brand names and
+        research codes.
+
+        Registered as aliases, not as UNII mappings: a synonym identifies a
+        molregno, and the substance that molregno became may have no UNII. The
+        alias tier is consulted last, so a gsrs preferred name always beats a
+        ChEMBL research code for the same string.
+
+        Runs after chembl_molecules because it needs molregno_key, which is why
+        it cannot be folded into the resolver before finalise().
+        """
+        t0 = self._step("chembl_synonyms")
+        key = LAKE["synonyms"]
+        n = 0
+        for row in lake.stream_csv(key, limit=self.limit):
+            skey = self.molregno_key.get((row.get("molregno") or "").strip())
+            syn = (row.get("synonyms") or "").strip()
+            if not skey or not syn:
+                continue
+            n += 1
+            self.r.add_alias(syn, skey)
+        self.w.sid(key)          # record the read; it emits no rows of its own
+        self.stats["chembl_aliases"] = len(self.r.alias)
+        self._done("chembl_synonyms", t0, n)
+
     def load_structures(self):
         """InChIKey - the strongest merge signal there is, because it is the
         chemistry rather than a name."""
@@ -259,6 +286,7 @@ class Build:
             if ct and acc:
                 uniprot_by_chembl.setdefault(ct, acc)
 
+        self.w.sid(umap_key)     # read into memory only; record it as read
         key = LAKE["targets"]
         n = 0
         for row in lake.stream_csv(key, limit=self.limit):
@@ -290,6 +318,7 @@ class Build:
             if at:
                 at_desc[at] = row.get("description", "")
 
+        self.w.sid(LAKE["action_types"])   # vocabulary, emits no rows itself
         key = LAKE["mechanisms"]
         n = 0
         for row in lake.stream_csv(key, limit=self.limit):
@@ -318,6 +347,7 @@ class Build:
         self.load_gsrs()
         self.r.finalise()          # stereo tier needs every name first
         self.load_chembl_molecules()
+        self.load_chembl_synonyms()
         self.load_structures()
         # reference needs molregno_key (chembl_molecules), atc_codes (atc) and
         # a finalised resolver - so it cannot move earlier.
@@ -340,6 +370,7 @@ class Build:
             "slice": sorted(self.slice) if self.slice else None,
             "resolver": self.r.stats(),
             "stats": self.stats,
+            "files_read": sorted(lake.READ),
             "timings_sec": {k: round(v, 2) for k, v in self.timings.items()},
         })
         return man

@@ -159,10 +159,24 @@ class Resolver:
     exact: dict[str, str] = field(default_factory=dict)
     salt: dict[str, str] = field(default_factory=dict)
     stereo: dict[str, str] = field(default_factory=dict)
+    # Names that map to a node key directly rather than to a UNII. ChEMBL
+    # synonyms belong here: they identify a molregno, and the substance that
+    # molregno became may have no UNII at all. Last tier, so a gsrs name always
+    # wins over a ChEMBL research code.
+    alias: dict[str, str] = field(default_factory=dict)
     collisions: list[tuple[str, str, str]] = field(default_factory=list)
     blocked_stereo: set[str] = field(default_factory=set)
     _pending: list[tuple[str, str]] = field(default_factory=list)
     _final: bool = False
+
+    def add_alias(self, name: str, key: str) -> None:
+        """Register name -> an arbitrary node key. Never overrides a real
+        identifier match; see `alias`."""
+        if not name or not key:
+            return
+        e = fold(name)
+        if e and usable_name(e) and e not in self.exact:
+            self.alias.setdefault(e, key)
 
     def add(self, name: str, unii: str) -> None:
         """Register one name -> UNII mapping. Stereo is deferred to finalise()."""
@@ -246,6 +260,9 @@ class Resolver:
         u = self.stereo.get(t)
         if u:
             return Match(f"UNII:{u}", "stereo", t)
+        a = self.alias.get(e)
+        if a:
+            return Match(a, "synonym", e)
         return Match(f"NAME:{e}", "provisional", e)
 
     def stats(self) -> dict:
