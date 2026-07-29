@@ -68,23 +68,57 @@ FIXTURES = [
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", default="graph/build")
+    ap.add_argument("--max-mem-gb", type=float, default=0,
+                    help="self-imposed ceiling; 0 disables")
     a = ap.parse_args()
+    if a.max_mem_gb:
+        # Same reasoning as build.py, and learned the same way: this now runs
+        # on a host where Neo4j holds 8 GB, and without a ceiling the kernel
+        # picks the OOM victim. It picked badly enough to reboot the box.
+        import resource
+        cap = int(a.max_mem_gb * 1024 ** 3)
+        resource.setrlimit(resource.RLIMIT_AS, (cap, cap))
     d = pathlib.Path(a.dir)
     if not (d / "manifest.json").exists():
         sys.exit(f"no build at {d}")
     man = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
 
     # ---- load keys -------------------------------------------------------
+    #
+    # Keys only, plus small per-label tallies. An earlier version kept every
+    # row - 11.5M dicts - which on the graph host meant several GB next to a
+    # Neo4j holding 8, and the box went to swap hard enough to drop SSH. The
+    # checks below never needed whole rows: they need the key set, the
+    # Substance name/resolution columns, and counters.
     keys_by_label: dict[str, set] = {}
-    props: dict[str, list] = {}
+    substance_norm: dict[str, set] = collections.defaultdict(set)
+    resolved_by = collections.Counter()
+    codeish = collections.Counter()      # label -> name equals its own code
+    blank_name = collections.Counter()
+    label_rows = collections.Counter()
     for p in sorted((d / "nodes").glob("*.csv")):
         label = p.stem
-        ks, rows = set(), []
+        ks = set()
         for r in _read(p):
-            ks.add(r["key"])
-            rows.append(r)
+            key = r["key"]
+            ks.add(key)
+            label_rows[label] += 1
+            if label == "Substance":
+                resolved_by[r.get("resolved_by") or "?"] += 1
+                nn = (r.get("norm_name") or "").strip()
+                if nn:
+                    substance_norm[nn].add(key)
+            name = (r.get("name") or "").strip()
+            if not name:
+                blank_name[label] += 1
+            elif name in ((r.get("iso2") or "").strip(),
+                          (r.get("code") or "").strip(),
+                          key.split(":", 1)[-1].strip()):
+                codeish[label] += 1
         keys_by_label[label] = ks
-        props[label] = rows
+    # Only names shared by more than one substance are of interest; dropping
+    # the singletons here is what keeps this dict small on a 3M-node build.
+    substance_norm = {k: v for k, v in substance_norm.items() if len(v) > 1}
     all_keys = set().union(*keys_by_label.values()) if keys_by_label else set()
     print(f"\n{sum(len(v) for v in keys_by_label.values()):,} nodes / "
           f"{len(keys_by_label)} labels   run {man.get('run_id')}\n")
@@ -127,14 +161,8 @@ def main():
 
     # ---- 3. duplicate substances ----------------------------------------
     print("\nsubstance resolution")
-    by_norm = collections.defaultdict(set)
-    by_method = collections.Counter()
-    for r in props.get("Substance", []):
-        by_method[r.get("resolved_by") or "?"] += 1
-        nn = (r.get("norm_name") or "").strip()
-        if nn:
-            by_norm[nn].add(r["key"])
-    dupes = {k: v for k, v in by_norm.items() if len(v) > 1}
+    by_method = resolved_by
+    dupes = substance_norm
     if dupes:
         sample = list(dupes.items())[:3]
         warn(f"{len(dupes):,} normalised names map to >1 Substance node "
@@ -218,7 +246,42 @@ def main():
     except Exception as e:
         warn(f"source coverage check skipped: {type(e).__name__}: {e}")
 
-    # ---- 8. isolated nodes ----------------------------------------------
+    # ---- 8. names that are not names ------------------------------------
+    #
+    # COUNTRY:SA carried name="SA". Every count was right, referential
+    # integrity was clean, and the node was still useless to anyone reading it
+    # - the label loader wrote the ISO code into both fields, and because the
+    # Writer keeps the first writer, the later loader that had the real name
+    # never got to correct it. It affected exactly the ten regulatory-agency
+    # countries, which is every GCC one.
+    #
+    # A display name equal to the node's own code is the detectable form of
+    # that mistake.
+    print("\nnames that are just the code again")
+    # Only labels that declare a `name` column. AdverseEvent carries `term`,
+    # ClinicalTrial `title`, Identifier `scheme`/`value` - warning that those
+    # have no name is noise, and noise is what stops anyone reading warnings.
+    try:
+        from emit import NODE_COLUMNS
+        named = {l for l, c in NODE_COLUMNS.items() if "name" in c}
+    except Exception:
+        named = set(keys_by_label)
+
+    clean = True
+    for label in sorted(keys_by_label):
+        if label not in named:
+            continue
+        n = label_rows[label] or 1
+        if codeish[label]:
+            warn(f"{label}: {codeish[label]:,}/{n:,} nodes have name == their own code")
+            clean = False
+        if blank_name[label] and blank_name[label] / n > 0.5:
+            warn(f"{label}: {blank_name[label]:,}/{n:,} nodes have no name at all")
+            clean = False
+    if clean:
+        ok("every label's name property carries a name")
+
+    # ---- 9. isolated nodes ----------------------------------------------
     print("\nconnectivity")
     touched = set()
     for p in (d / "edges").glob("*.csv"):

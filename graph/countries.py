@@ -61,6 +61,10 @@ Yemen:YE|Zambia:ZM|Zimbabwe:ZW
 
 BY_NAME: dict[str, str] = {}
 NAME: dict[str, str] = {}
+
+# Not an ISO country, but it is what the EMA row carries as its jurisdiction,
+# so it needs a readable name rather than falling back to the bare code.
+_EXTRA = {"EU": "European Union"}
 for _entry in _RAW.replace("\n", "|").split("|"):
     _entry = _entry.strip()
     if not _entry or ":" not in _entry:
@@ -68,6 +72,7 @@ for _entry in _RAW.replace("\n", "|").split("|"):
     _n, _c = _entry.rsplit(":", 1)
     BY_NAME.setdefault(fold(_n), _c.strip())
     NAME.setdefault(_c.strip(), _n.strip())
+NAME.update(_EXTRA)
 
 # "Mayo Clinic Hospital in Arizona (Phoenix, Arizona, United States)" - the
 # country is the last comma-field inside the parentheses. Parsing the structure
