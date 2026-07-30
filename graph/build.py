@@ -25,10 +25,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 
 import disease
 import lake
+import literature
 import products
 import reference
 import safety
 import trials
+import variants
 from emit import Writer
 from normalise import Resolver, fold, norm_company, split_synonyms
 
@@ -358,6 +360,14 @@ class Build:
         for fn in trials.ALL:
             fn(self)
         for fn in safety.ALL:
+            fn(self)
+        # Variants need symbol_target (hgnc, inside disease.ALL) and efo_mesh
+        # (chembl_indications); literature needs mesh_by_name and a finalised
+        # resolver. Both are last because they only read dictionaries the
+        # earlier loaders built.
+        for fn in variants.ALL:
+            fn(self)
+        for fn in literature.ALL:
             fn(self)
         man = self.w.close(extra={
             "mode": "slice" if self.slice else "full",

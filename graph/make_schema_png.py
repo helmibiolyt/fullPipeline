@@ -21,7 +21,7 @@ import numpy as np
 
 W, H = 21, 16.0
 fig, ax = plt.subplots(figsize=(W, H), dpi=150)
-ax.set_xlim(0, 100); ax.set_ylim(-28, 100); ax.axis("off")
+ax.set_xlim(0, 100); ax.set_ylim(-28, 110); ax.axis("off")
 fig.patch.set_facecolor("white")
 
 CORE   = "#1f5fbf"   # Substance / Product
@@ -32,7 +32,9 @@ COMP   = "#c8901a"   # Company
 REG    = "#8a4b08"   # Agency / Approval
 CLASS  = "#1a8a5a"   # Mechanism / DrugClass / Modality
 GREY   = "#5d6d7e"   # Country / Region / Route / Identifier
-NEW    = "#d13b6e"   # Phase-2 additions
+LIT    = "#8e44ad"   # Publication
+SAFE   = "#b03a2e"   # AdverseEvent / RegulatoryEvent
+NEW    = "#d13b6e"   # newest additions: Variant, OrganClass
 
 #            x    y    r    colour  label                  new?
 # Layout rules that keep this readable, for whoever edits it next:
@@ -51,19 +53,29 @@ NODES = {
  "DrugClass":        (6,  70, 4.2, CLASS,  "DrugClass",           False),
  "Mechanism":        (15, 82, 4.2, CLASS,  "Mechanism",           False),
  "Target":           (33, 88, 4.8, TARGET, "Target",              False),
- "Publication":      (48, 74, 4.6, NEW,    "Publication",         True),
+ "Publication":      (48, 74, 4.6, LIT,       "Publication",         False),
  "Disease":          (69, 80, 5.2, BIO,    "Disease",             False),
  "Country":          (96, 74, 3.6, GREY,   "Country",             False),
+ # Variant hangs off Target, not off a Gene node: HGNC already maps symbol
+ # to the UniProt accession Target is keyed by, so the gene step collapses.
+ # Above Publication, not above Target: at x=22,y=96 it was clipped by the
+ # canvas top and collided with the title. Here both its edges - to Target
+ # and to Disease - stay short and cross nothing.
+ "Variant":          (46, 97, 4.2, NEW,    "Variant",             True),
+ # Threaded into the one gap on the left: below AdverseEvent, above Route,
+ # left of Identifier. x=2 hung the dashed ring off the canvas; x=13 put the
+ # circle through Identifier. The ring needs r+0.9 of clearance on every side.
+ "OrganClass":       (7,  33, 4.0, NEW,    "Organ\nClass",        True),
  "ClinicalTrial":    (84, 62, 5.6, CLIN,   "ClinicalTrial",       False),
- "AdverseEvent":     (9,  45, 5.0, NEW,    "Adverse\nEvent",      True),
+ "AdverseEvent":     (9,  45, 5.0, SAFE,      "Adverse\nEvent",      False),
  # --- shared between the hubs ---
- "RegulatoryEvent":  (62, 46, 5.4, NEW,    "Regulatory\nEvent",   True),
+ "RegulatoryEvent":  (62, 46, 5.4, SAFE,      "Regulatory\nEvent",   False),
  "Identifier":       (18, 34, 4.4, GREY,   "Identifier",          False),
  # --- Product's neighbours: bottom half ---
  "Company":          (84, 46, 4.8, COMP,   "Company",             False),
- "Exclusivity":      (84, 30, 5.0, NEW,    "Exclusivity",         True),
+ "Exclusivity":      (84, 30, 5.0, REG,       "Exclusivity",         False),
  "Route":            (7,  22, 3.4, GREY,   "Route",               False),
- "Patent":           (66, 8,  4.4, NEW,    "Patent",              True),
+ "Patent":           (66, 8,  4.4, REG,       "Patent",              False),
  # Bottom right. Region has two edges that come from opposite ends -
  # IN_REGION down the right column from Country, APPROVED_IN across from
  # Product - so it sits where both arrive without crossing a node. That
@@ -82,6 +94,9 @@ EDGES = [
  ("ClinicalTrial","Disease","STUDIES",                0.00, False),
  ("ClinicalTrial","Country","CONDUCTED_IN",           0.00, False),
  ("Country","Region","IN_REGION",                   0.00, True),
+ ("Variant","Target","VARIANT_IN",                  0.00, True),
+ ("Variant","Disease","IMPLICATED_IN",              0.06, True),
+ ("AdverseEvent","OrganClass","IN_ORGAN_CLASS",     0.00, True),
  ("Substance","ClinicalTrial","TESTED_IN",            0.00, False),
  ("Substance","Disease","INDICATED_FOR",              0.00, False),
  ("Substance","Target","TARGETS",                     0.00, False),
@@ -97,13 +112,13 @@ EDGES = [
  ("Product","RegulatoryAgency","APPROVED_BY",        -0.14, False),
  ("Approval","RegulatoryAgency","ISSUED_BY",          0.00, False),
  # --- Phase 2 ---
- ("Substance","AdverseEvent","HAS_ADVERSE_EVENT",     0.00, True),
- ("Publication","Disease","ABOUT",                    0.00, True),
- ("Publication","Substance","MENTIONS",               0.00, True),
- ("Product","Patent","PROTECTED_BY",                  0.00, True),
- ("Product","Exclusivity","HAS_EXCLUSIVITY",          0.00, True),
- ("Product","RegulatoryEvent","SUBJECT_OF",           0.00, True),
- ("Substance","RegulatoryEvent","SUBJECT_OF",         0.08, True),
+ ("Substance","AdverseEvent","HAS_ADVERSE_EVENT",     0.00, False),
+ ("Publication","Disease","ABOUT",                    0.00, False),
+ ("Publication","Substance","MENTIONS",               0.00, False),
+ ("Product","Patent","PROTECTED_BY",                  0.00, False),
+ ("Product","Exclusivity","HAS_EXCLUSIVITY",          0.00, False),
+ ("Product","RegulatoryEvent","SUBJECT_OF",           0.00, False),
+ ("Substance","RegulatoryEvent","SUBJECT_OF",         0.08, False),
 ]
 
 
@@ -152,7 +167,7 @@ for a, b, label, curve, is_new in EDGES:
 for key, lbl, col, ang, out, lab in (
         # Up-left. Straight up puts the label through the subtitle; right is
         # where Region now sits.
-        ("Disease",       "SUBTYPE_OF",    BIO,   140, 2.4, None),
+        ("Disease",       "SUBTYPE_OF",    BIO,   40,  2.4, None),
         ("Product",       "BIOSIMILAR_OF", NEW,   135, 3.0, None),
         ("Substance",     "IS_SALT_OF",    NEW,   -58, 3.4, None),
         ("ClinicalTrial", "SAME_STUDY_AS", CLIN,  -30, 3.0, (-2.6, -5.4)),
@@ -183,23 +198,23 @@ for key, (x, y, r, col, label, is_new) in NODES.items():
             va="center", color="white", fontweight="bold", zorder=4,
             linespacing=0.95)
 
-ax.text(50, 98.0, "Biomedical Knowledge Graph — Phase 2 (extended)",
+ax.text(50, 108.0, "Biomedical Knowledge Graph — Phase 2 (extended)",
         fontsize=19, ha="center", fontweight="bold", color="#1b2631")
-ax.text(50, 94.0,
-        "19 entity types built  ·  27 relationship types      "
+ax.text(50, 104.0,
+        "22 entity types built  ·  32 relationship types      "
         "Phase 1 = 15 nodes / 19 edges  ·  additions shown in pink",
         fontsize=10.5, ha="center", color="#5d6d7e")
 
 leg = [
- (NEW,  "Phase 2 — built from data already in the lake, none of it reachable today:"),
- (None, "    Patent           ← Orange Book patents_enriched (~16,344) + Purple Book patent_list (424)"),
- (None, "                          expiry dates, use codes, substance/product flags"),
- (None, "    Exclusivity      ← Orange Book exclusivity_enriched (2,265) + Purple Book exclusivity columns"),
- (None, "    RegulatoryEvent  ← EMA referrals/shortages/orphan designations, FDA recalls (~17,718), SFDA alerts"),
- (None, "    AdverseEvent     ← openFDA FAERS ~2.9M reports, aggregated to (substance, reaction) counts"),
- (None, "    Publication      ← europepmc / pubmed / openalex / biorxiv / medrxiv"),
- (None, "    BIOSIMILAR_OF    ← Purple Book license_type 351(k) + resolved_reference_bla"),
- (None, "    IN_REGION        ← 189 countries -> 9 regions; MENA/GCC wins over continent"),
+ (NEW,  "Newest additions — Variant and the reaction hierarchy:"),
+ (None, "    Variant          ← ClinVar variant_summary (~21.8M rows, NO header row) + COSMIC 40 files"),
+ (None, "                          filtered: gene must be a drug target, significance must be a real call"),
+ (None, "    VARIANT_IN       ← gene symbol -> UniProt, so no Gene node is needed"),
+ (None, "    IMPLICATED_IN    ← ClinVar PhenotypeIDS MONDO ids, folded onto MeSH"),
+ (None, "    OrganClass       ← vigiaccess System Organ Class. meddra.org has no terminology in it:"),
+ (None, "                          the scrape reached only news pages, the vocabulary itself is licensed"),
+ (LIT,  "Publication — europepmc / pubmed / biorxiv / medrxiv (openalex excluded: API budget exhausted)"),
+ (None, "    ABOUT / MENTIONS ← exact dictionary match on TITLE only, never the abstract"),
 ]
 y = -7.0
 for col, txt in leg:

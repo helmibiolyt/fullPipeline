@@ -304,4 +304,47 @@ def load_faers(b):
     b._done("faers", t0, n)
 
 
-ALL = [load_ema_events, load_recalls, load_sfda_events, load_faers]
+def load_vigiaccess(b):
+    """WHO VigiAccess: the System Organ Class each reaction belongs to.
+
+    This is the hierarchy MedDRA was supposed to provide and does not. The
+    meddra.org scrape reached only public announcement pages -
+    meddra_timeline.csv is news items and meddra_versions.csv is release
+    history - because the terminology itself is licensed. VigiAccess publishes
+    reactions already grouped by SOC, which is the level people actually ask
+    at: "any cardiac event for this drug" is one hop instead of enumerating
+    every cardiac term.
+
+    Counts are per (product, reaction) and come from WHO's VigiBase rather than
+    FAERS, so they are NOT added to the FAERS numbers. Two spontaneous-report
+    systems double-count the same events - a serious case reported in the EU
+    reaches both - and summing them would invent volume. The SOC edges are
+    taken; the counts stay where they were measured.
+    """
+    t0 = b._step("vigiaccess")
+    key = "Safety_Pharmacovigilance/vigiaccess.org/VigiAccess/vigiaccess_adr.csv"
+    n = 0
+    for row in lake.stream_csv(key, limit=b.limit):
+        soc = (row.get("system_organ_class") or "").strip()
+        reaction = (row.get("adverse_reaction") or "").strip()
+        if not soc or not reaction:
+            continue
+        rf = fold(reaction)
+        if len(rf) < 3:
+            continue
+        n += 1
+        akey = f"AE:{rf}"
+        okey = f"SOC:{fold(soc)}"
+        b.w.node("OrganClass", okey, source=key, name=soc)
+        # The AdverseEvent may not exist: FAERS only kept pairs with >=3
+        # reports, and VigiBase covers reactions FAERS never saw. Emitting the
+        # node keeps IN_ORGAN_CLASS from dangling.
+        b.w.node("AdverseEvent", akey, source=key, term=reaction)
+        b.w.edge("IN_ORGAN_CLASS", akey, okey, match_method="structured",
+                 source=key)
+    b.stats["vigiaccess_soc_links"] = n
+    b._done("vigiaccess", t0, n)
+
+
+ALL = [load_ema_events, load_recalls, load_sfda_events, load_faers,
+       load_vigiaccess]

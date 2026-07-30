@@ -57,7 +57,19 @@ NODE_COLUMNS: dict[str, list[str]] = {
     "RegulatoryEvent": ["key", "type", "name", "status", "reason",
                         "start_date", "end_date", "url"],
     "AdverseEvent":    ["key", "term"],
-    "Publication":     ["key", "title", "year", "journal"],
+    "Publication":     ["key", "title", "year", "journal", "doi", "pmid",
+                        "source", "preprint"],
+    # One node per variant. Keyed by ClinVar VariationID where there is
+    # one, COSMIC MutationID otherwise - the two catalogues do not share
+    # an identifier, so a variant in both is two nodes rather than a
+    # guessed merge on genomic position.
+    "Variant":         ["key", "name", "variant_type", "gene_symbol",
+                        "clinical_significance", "catalogue",
+                        "consequence"],
+    # MedDRA System Organ Class - the top of the reaction hierarchy.
+    # AdverseEvent is otherwise 6,913 flat terms with no way to ask for
+    # "any cardiac event".
+    "OrganClass":      ["key", "name"],
 }
 
 # `match_method` distinguishes a fact the source stated (structured) from one
@@ -78,6 +90,16 @@ EDGE_COLUMNS: dict[str, list[str]] = {
     "SUBTYPE_OF":        ["src", "dst", "match_method"],
     "IS_SALT_OF":        ["src", "dst", "match_method"],
     "IN_REGION":         ["src", "dst", "match_method"],
+    # Publication. ABOUT and MENTIONS were on the schema diagram but
+    # never declared here, so emitting either raised KeyError - the
+    # diagram promised two relationships the code refused to write.
+    "ABOUT":             ["src", "dst", "match_method"],
+    "MENTIONS":          ["src", "dst", "match_method"],
+    # Variant.
+    "VARIANT_IN":        ["src", "dst", "match_method"],
+    "IMPLICATED_IN":     ["src", "dst", "match_method", "significance"],
+    # AdverseEvent hierarchy.
+    "IN_ORGAN_CLASS":    ["src", "dst", "match_method"],
     "HAS_APPROVAL":      ["src", "dst", "match_method"],
     "APPROVED_BY":       ["src", "dst", "match_method"],
     "APPROVED_IN":       ["src", "dst", "match_method"],

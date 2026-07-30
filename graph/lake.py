@@ -89,6 +89,25 @@ def stream_csv(key: str, limit: int | None = None) -> Iterator[dict]:
         yield row
 
 
+def stream_rows(key: str, limit: int | None = None):
+    """Yield rows as plain lists, for files that have no header.
+
+    ClinVar's variant_summary.csv is one: its first line is data, so
+    DictReader turns a real variant into the column names and then loses it.
+    Callers index by position and must say why that is safe - for ClinVar the
+    documented column order is stable at the front, where the fields used live,
+    and the extra columns newer releases append go on the end.
+    """
+    body = s3().get_object(Bucket=BUCKET, Key=key)["Body"]
+    wrapper = io.TextIOWrapper(body, encoding="utf-8-sig", errors="replace",
+                               newline="")
+    READ.add(key)
+    for i, row in enumerate(csv.reader(wrapper)):
+        if limit is not None and i >= limit:
+            break
+        yield row
+
+
 def list_keys(prefix: str, suffix: str = "") -> list[str]:
     """Every object under a prefix, optionally filtered by suffix.
 

@@ -252,6 +252,34 @@ INCLUDED: list[dict] = [
       for d in ("Alzheimer", "Cancer", "Cardiovascular", "Diabetes",
                 "Infectious_Disease", "Respiratory")],
 
+    # ---- Publication -------------------------------------------------------
+    dict(file="Literature_Evidence/europepmc.org/europe_pmc/europe_pmc_metadata.csv",
+         rows=None, builds=["node:Publication", "id:PMID", "id:DOI",
+                            "edge:ABOUT", "edge:MENTIONS"],
+         note="66 MB and the largest of the four remaining literature sources. "
+              "Same 23 columns as pubmed_metadata.csv."),
+    dict(file="Literature_Evidence/pubmed.ncbi.nlm.nih.gov/pubmed/pubmed_metadata.csv",
+         rows=1_032, builds=["node:Publication"], note="Same shape as Europe PMC."),
+    dict(file="Literature_Evidence/biorxiv.org/biorxiv/biorxiv_metadata.csv",
+         rows=2_576, builds=["node:Publication"],
+         note="Preprints: keyed by DOI, no PMID and no journal."),
+    dict(file="Literature_Evidence/medrxiv.org/medrxiv/medrxiv_metadata.csv",
+         rows=1_741, builds=["node:Publication"], note="As biorxiv."),
+
+    # ---- Variant -----------------------------------------------------------
+    dict(file="Targets_Genomics_Biomarkers/ncbi.nlm.nih.gov/Variants/variant_summary.csv",
+         rows=None, builds=["node:Variant", "id:CLINVAR", "edge:VARIANT_IN",
+                            "edge:IMPLICATED_IN"],
+         note="~21.8M rows and NO HEADER ROW - the first line is data, so "
+              "columns are read by position. Filtered hard: the gene must be a "
+              "known drug target and the significance must be an actual call."),
+
+    dict(file="Safety_Pharmacovigilance/vigiaccess.org/VigiAccess/vigiaccess_adr.csv",
+         rows=None, builds=["node:OrganClass", "edge:IN_ORGAN_CLASS"],
+         note="The MedDRA System Organ Class per reaction - the hierarchy "
+              "meddra.org itself does not provide. Counts are VigiBase, not "
+              "FAERS, and are deliberately not merged with FAERS counts."),
+
     dict(file="Targets_Genomics_Biomarkers/platform.opentargets.org/Drugs/known_drugs.csv",
          rows=203_100, builds=["edge:INDICATED_FOR", "edge:TARGETS"],
          note="Second source for both; chembl is the base."),
@@ -314,17 +342,30 @@ EXCLUDED: dict[str, str] = {
         "belongs with a Variant/Gene extension, not the current schema.",
 
     "Targets_Genomics_Biomarkers/cbioportal.org":
-        "Cancer genomics study metadata, 23 files. Same reason as COSMIC.",
+        "Planned as a third variant source and is not one. The 23 files are "
+        "study and clinical metadata - per-patient TCGA cohorts - plus "
+        "cancer_types.csv, a cancer-type tree keyed by cbioportal's own ids "
+        "with a `parent` column that references those ids and nothing else. "
+        "Loading it would add a fourth disease vocabulary that crosswalks to "
+        "neither MeSH nor MONDO, so it would sit beside Disease unconnected. "
+        "COSMIC and ClinVar supply the variants.",
 
-    "Literature_Evidence/*":
+    "Literature_Evidence/openalex.org":
         "openalex 7.9M works, europepmc, pubmed, biorxiv, medrxiv. These build "
         "the Publication node, which is Phase 2. Deferred deliberately, not "
         "excluded - the openalex file alone is 17.5 GB and would dominate a "
         "first build.",
 
-    "Safety_Pharmacovigilance/adrreports.eu, vigiaccess.org, meddra.org":
-        "9.4k rows total. Second sources for AdverseEvent behind FAERS's 2.9M "
-        "reports. Worth adding once the FAERS aggregation is proven correct.",
+    "Safety_Pharmacovigilance/adrreports.eu, meddra.org":
+        "meddra.org holds no terminology. The scrape reached only public pages "
+        "- meddra_timeline.csv is news announcements and meddra_versions.csv is "
+        "release history - because MedDRA itself is licensed. It was planned as "
+        "the source of the reaction hierarchy and cannot be; vigiaccess "
+        "publishes reactions already grouped by System Organ Class and is "
+        "loaded instead. adrreports.eu is an index, not data: "
+        "adrreports_substances.csv is name + EMA code + a report URL, with no "
+        "reaction or count in it. Worth revisiting only to add EudraVigilance "
+        "substance codes as identifiers.",
 
     "Regulatory_Approvals/ema.europa.eu/.../herbal_medicines.csv, "
     "maximum_residue_limits.csv, opinions_outside_eu.csv":
