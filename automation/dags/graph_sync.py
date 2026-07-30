@@ -4,27 +4,41 @@ The counterpart to vector_store_sync, and the half that was missing: the
 scraper DAG has always emitted a per-source Dataset on commit, and only the
 vector store listened. CSV sources published to nothing.
 
-Two things make this different from the vector store's sync:
+**This DAG runs over SSH, not locally.** Airflow lives on the vector host; the
+graph is built on a separate machine, because Qdrant wanting its vectors
+resident and Neo4j wanting its store resident do not fit in one 16 GB box. A
+BashOperator here would run inside the Airflow container, which has no graph
+code, no Neo4j and no 6 GB to spare - the first version of this DAG did exactly
+that and could never have worked.
 
-* **The build is whole, not incremental.** There is no delta path in build.py
-  and that is deliberate - the graph's correctness comes from resolving names
-  against a dictionary assembled from every source in one pass, so a partial
-  rebuild would resolve against a half-built dictionary. A full run is ~30-60
-  minutes, which is cheap against a weekly scrape.
+It delegates to `deploy/build-graph.sh` and `deploy/import-graph.sh` rather
+than re-implementing them. Those scripts are also what a human runs by hand, so
+there is one sequence to get right instead of two that drift apart - and the
+earlier inline version had already drifted: it stopped after generating headers
+and never imported anything, so the graph would have been rebuilt weekly and
+never reached the database.
 
-* **Import is gated on validation.** build -> validate -> import, and the
-  import only runs if validate exits 0. Neo4j has no transaction around
-  `neo4j-admin import`: it replaces the store outright. Importing an unchecked
-  build means a bad scrape silently becomes the live graph, and the failure
-  mode is a confident wrong answer rather than an error. The gate is the whole
-  point of this DAG - remove it and it is just a cron job.
+The validation gate lives inside build-graph.sh: it exits non-zero when
+validate.py fails, so with Airflow's default all_success rule the import task
+simply never starts. Neo4j has no transaction around a bulk import - it
+replaces the store outright - so an unchecked build silently becomes the live
+graph, and the failure mode is a confident wrong answer rather than an error.
+
+Setup this DAG needs, once:
+
+    Airflow connection  `graph_host`   SSH, host + user + private key
+    Airflow variable    `neo4j_password`
+
+The variable name ends in `password`, which is what makes Airflow mask it in
+task logs. Renaming it to something without that word puts the password in
+plaintext in every log line.
 """
 from __future__ import annotations
 
 import pendulum
 from airflow import DAG
 from airflow.datasets import Dataset, DatasetAny
-from airflow.operators.bash import BashOperator
+from airflow.providers.ssh.operators.ssh import SSHOperator
 
 import sys
 sys.path.insert(0, "/opt/pylib")
@@ -50,20 +64,17 @@ _datasets = [Dataset(f"s3://{S3_BUCKET}/{s.s3_base}")
              for s in load_sources()
              if f"{s.topic}/{s.source}" not in DOC_ONLY]
 
-GRAPH = "${GRAPH_DIR:-/home/ubuntu/graphbuild}"
-PY = "${GRAPH_PYTHON:-/home/ubuntu/graphenv/bin/python}"
-# Built into a run-specific directory, never over the live one. If the build
-# dies halfway the previous output is still intact and still importable.
-OUT = "$GRAPH_OUT"
+SSH_CONN = "graph_host"
+DEPLOY = "~/fullPipeline/deploy"
 
 with DAG(
     dag_id="graph_sync",
-    description="Rebuild graph CSVs on CSV-source publish; import only if valid",
+    description="Rebuild the graph on CSV-source publish; import only if valid",
     # DatasetAny, not a plain list. A list means AND in Airflow: the DAG waits
     # until EVERY listed dataset has updated since its last run. This one
-    # listens to ~41 CSV sources, so it would have fired only when all 41 published in the
-    # same window - which is to say, effectively never, with no error and no
-    # failed task to notice. Just a store that quietly stopped updating.
+    # listens to ~41 CSV sources, so it would have fired only when all 41
+    # published in the same window - which is to say, effectively never, with
+    # no error and no failed task. Just a graph that quietly stopped updating.
     schedule=DatasetAny(*_datasets) if _datasets else None,
     start_date=pendulum.datetime(2026, 7, 1, tz="UTC"),
     catchup=False,
@@ -72,70 +83,36 @@ with DAG(
     tags=["graph"],
 ) as dag:
 
-    env = {"GRAPH_OUT": "{{ var.value.get('graph_dir', '/home/ubuntu/graphbuild') }}"
-                        "/runs/{{ ts_nodash }}"}
+    # Deliberately no `git pull` task. Deploying code and processing data are
+    # different decisions, and a DAG that pulls before every run turns any
+    # pushed commit into an unreviewed production deploy on the next scrape.
+    # Updating the graph host is `git pull` by hand, when intended.
 
-    # --max-mem-gb is a self-imposed ceiling, not a tuning knob. Neo4j runs on
-    # this same 16 GB box and stays up while the build runs, so the build has
-    # to fit in what is left: 6 GB against a measured peak of ~4-5 GB. Without
-    # a ceiling the kernel chooses the OOM victim, and it would choose Neo4j -
-    # the bigger, older process.
-    build = BashOperator(
-        task_id="build",
-        bash_command=f"cd {GRAPH} && {PY} build.py --all --out {OUT} "
-                     f"--max-mem-gb ${{GRAPH_MAX_MEM_GB:-6}}",
-        env=env, append_env=True,
-        execution_timeout=pendulum.duration(hours=4),
+    build = SSHOperator(
+        task_id="build_and_validate",
+        ssh_conn_id=SSH_CONN,
+        # Writes to ~/graph-runs/<timestamp>/, validates it, and marks it
+        # importable only on success. Keeps the two most recent runs.
+        command=f"bash {DEPLOY}/build-graph.sh",
+        conn_timeout=60,
+        cmd_timeout=4 * 60 * 60,     # a full build is ~30 min; 4h is the guard
+        get_pty=True,                # so sudo inside the script has a terminal
     )
 
-    # Exits non-zero on any FAIL-level check: dangling edge endpoints, a key
-    # used by two labels, a missing fixture. That exit code is the gate.
-    validate = BashOperator(
-        task_id="validate",
-        bash_command=f"cd {GRAPH} && {PY} validate.py --dir {OUT}",
-        env=env, append_env=True,
-        execution_timeout=pendulum.duration(minutes=30),
-    )
-
-    headers = BashOperator(
-        task_id="generate_import",
-        bash_command=f"cd {GRAPH} && {PY} neo4j_import.py --dir {OUT} "
-                     f"--out {OUT}/import",
-        env=env, append_env=True,
-    )
-
-    # Only reached when validate succeeded, because the default trigger rule is
-    # all_success. Promotion is last: `current` is what the import reads, so
-    # flipping it earlier would publish a build that had not passed yet.
-    promote = BashOperator(
-        task_id="promote",
-        bash_command=f"cd {GRAPH} && ln -sfn {OUT} runs/current && "
-                     f"ls -l runs/current",
-        env=env, append_env=True,
-    )
-
-    # Retention. Each run is ~1.6 GB and the graph host has 27 GB free, so
-    # keeping every build fills the disk in about fifteen weeks - and it fills
-    # it during a build, which means the failure looks like a corrupt graph
-    # rather than a full volume.
-    #
-    # Two are kept, not one: the previous run is what you re-import from when a
-    # new build validates but turns out to be wrong for a reason validate.py
-    # cannot see. `current` is a symlink into one of them, so it is resolved
-    # and excluded rather than assumed to be the newest.
-    prune = BashOperator(
-        task_id="prune_old_runs",
-        bash_command=(
-            f"cd {GRAPH}/runs && "
-            "keep=$(readlink -f current 2>/dev/null | xargs -r basename); "
-            "ls -1dt */ 2>/dev/null | sed 's#/##' | grep -v \"^${keep:-__none__}$\" "
-            "| tail -n +2 | xargs -r rm -rf; "
-            "echo 'kept:'; ls -1dt */ 2>/dev/null; df -h . | tail -1"
+    # Only runs when build_and_validate exited 0, which it does only when
+    # validate.py passed. import-graph.sh independently refuses a build
+    # directory with no .validated marker, so the gate holds even if this DAG
+    # is edited to reorder the tasks.
+    import_neo4j = SSHOperator(
+        task_id="import_to_neo4j",
+        ssh_conn_id=SSH_CONN,
+        command=(
+            "NEO4J_PASSWORD='{{ var.value.get('neo4j_password') }}' "
+            f"bash {DEPLOY}/import-graph.sh"
         ),
-        env=env, append_env=True,
-        # Runs even if an upstream task failed: a failed build still leaves a
-        # partial directory behind, and that is exactly when disk is tightest.
-        trigger_rule="all_done",
+        conn_timeout=60,
+        cmd_timeout=60 * 60,
+        get_pty=True,
     )
 
-    build >> validate >> headers >> promote >> prune
+    build >> import_neo4j

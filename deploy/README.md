@@ -59,6 +59,36 @@ vectors for documents that have left S3; without it retrieval keeps citing
 documents that no longer exist, which reads as a well-sourced answer to
 something untrue.
 
+## Wiring Airflow to the graph host
+
+Airflow runs on the vector host; the graph is built on the other machine. So
+`graph_sync` drives it over SSH rather than locally - a BashOperator would run
+inside the Airflow container, which has no graph code, no Neo4j and no 6 GB to
+spare.
+
+Two things must exist in Airflow before that DAG can run, and neither can live
+in the repo:
+
+**An SSH connection named `graph_host`.** Admin -> Connections -> add:
+
+    Conn Id    graph_host
+    Conn Type  SSH
+    Host       <graph host address>
+    Username   azureuser
+    Extra      {"key_file": "/opt/airflow/keys/graph.pem", "conn_timeout": 60}
+
+The key has to be readable inside the Airflow container, so mount it - add a
+volume for it in `automation/docker-compose.yaml`. Permissions must be 600 or
+SSH refuses the key.
+
+**A variable named `neo4j_password`.** Admin -> Variables. The name ending in
+`password` is what makes Airflow mask it in task logs; rename it to something
+without that word and the password appears in plaintext in every log line.
+
+The graph host must also accept SSH from the Airflow host's address - one more
+security-group rule, and the reason `graph_sync` fails on a fresh pair of VMs
+until someone adds it.
+
 ## What these scripts deliberately do not do
 
 **Open firewalls.** Neo4j listens on 0.0.0.0 because it has to be reachable,
