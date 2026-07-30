@@ -406,13 +406,21 @@ EXCLUDED: dict[str, str] = {
     # the graph. Only openalex is out, and the operative reason is not its
     # size.
     "Literature_Evidence/openalex.org":
-        "7.9M works - 99.6% of the literature in the lake, against 5,349 rows "
-        "across the four sources that ARE loaded. Excluded because all "
-        "fifteen of its API keys report insufficient budget, so the snapshot "
-        "can never be refreshed. A frozen corpus that would dominate every "
-        "literature query is worse than a small current one. The 17.5 GB is "
-        "real but secondary; if the budget came back it would be worth "
-        "loading. See the module docstring in literature.py.",
+        "8.70M works crawled (18.83 GB, committed 2026-07-26), against 5,349 "
+        "rows across the four literature sources that ARE loaded. Not "
+        "declared here, so nothing reads it. "
+        "NOT because the API is dead: verified 2026-07-31, the configured key "
+        "returns HTTP 200 and so does the unauthenticated endpoint, and the "
+        "budget is a ROLLING quota (x-ratelimit-limit 10000, ~25 min reset) "
+        "rather than a permanent ceiling. What happened is that six threads "
+        "crawling hard drained the window, took 429 'insufficient budget', "
+        "and every key ended up in cooldown at once - which was recorded as "
+        "permanent exhaustion and never rechecked. "
+        "The crawl is 76% done: 2026 complete, 2021-2025 holding live cursors "
+        "in openalex_works_progress.json, ~13,900 requests from finished. "
+        "The live reason to think twice is proportion - 8.70M works would be "
+        "99.9% of the literature in the graph and dominate every query "
+        "against it. That is a decision, not a blocker.",
 
     "Safety_Pharmacovigilance/adrreports.eu, meddra.org":
         "meddra.org holds no terminology. The scrape reached only public pages "

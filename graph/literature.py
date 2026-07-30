@@ -5,11 +5,18 @@ Four sources, one shape. Europe PMC and PubMed share a column set exactly
 bioRxiv and medRxiv share a different one, because a preprint has no PMID and
 no journal.
 
-openalex is not here. It is 7.9M works against 5,349 rows across these four,
-so it is 99.6% of the literature in the lake - but all fifteen of its API keys
-report insufficient budget, so it cannot be refreshed. Loading a snapshot that
-can never update, and which would dominate every literature query, is worse
-than a small current corpus. See EXCLUDED in sources.py.
+openalex is not here. It is 8.70M works against 5,349 rows across these four,
+so it would be 99.9% of the literature in the graph and dominate every query
+against it. That proportion is the reason, and it is a decision rather than a
+constraint.
+
+It is NOT that the API is dead. That was the recorded reason and it was wrong:
+checked 2026-07-31, the key returns 200, the unauthenticated endpoint returns
+200, and the budget is a rolling quota (10,000 credits, ~25 min reset) rather
+than a permanent ceiling. Six threads crawling hard drained the window, took
+429 'insufficient budget', and every key sat in cooldown at once - which got
+written down as exhausted for good. The crawl is 76% done with live cursors.
+See EXCLUDED in sources.py.
 
 The two edges are deliberately conservative. A paper "mentioning" a drug is
 matched by exact dictionary lookup against the resolver, and a paper "about" a
