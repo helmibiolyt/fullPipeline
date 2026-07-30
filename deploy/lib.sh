@@ -41,8 +41,16 @@ make_venv() {
 # twenty minutes" is a bad way to discover a missing key.
 check_aws() {
   local py="$1"
-  if "$py" -c "import boto3,sys; boto3.client('sts').get_caller_identity()" 2>/dev/null; then
-    ok "AWS credentials resolve"
+  # Through lake.load_env, not bare boto3. boto3 alone does not read
+  # automation/.env, so checking it directly reported "no credentials" on a
+  # host where the build works perfectly - a warning that sends you hunting a
+  # problem you do not have.
+  if "$py" -c "
+import sys; sys.path.insert(0, '$REPO/graph')
+import lake
+lake.s3().list_objects_v2(Bucket=lake.BUCKET, MaxKeys=1)
+" 2>/dev/null; then
+    ok "AWS credentials resolve (bucket reachable)"
   else
     warn "no AWS credentials. Provide ONE of:"
     echo "        - an instance role (preferred on AWS; not available on Azure)"
