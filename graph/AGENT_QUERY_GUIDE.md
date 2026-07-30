@@ -1,0 +1,236 @@
+# Querying the graph
+
+For the research agent. The companion to
+[`vector_store/AGENT_QUERY_GUIDE.md`](../vector_store/AGENT_QUERY_GUIDE.md) —
+that one covers documents, this one covers the graph.
+
+Everything here was measured against the live database, including the things
+that do not work.
+
+---
+
+## The one thing to internalise
+
+**The graph answers questions about relationships between things. It is not a
+search engine.** Almost every useful query has the same shape:
+
+```
+1. find a starting node    (this is the hard part)
+2. traverse from it        (this is fast and reliable)
+```
+
+Step 2 is 13–38 ms. Step 1 is where queries fail, so most of this guide is
+about step 1.
+
+---
+
+## Step 1: finding your starting node
+
+Three mechanisms, in order of how much you should trust them.
+
+### a. Exact identifier — use it whenever you have one
+
+```cypher
+MATCH (i:Identifier {value: 'NCT01045135'})<-[:HAS_IDENTIFIER]-(t)  RETURN t
+MATCH (s:Substance {key: 'UNII:36TN91XZ0V'})                        RETURN s
+```
+
+`Identifier.value` is indexed. Schemes available: `UNII`, `CAS`, `CHEMBL_ID`,
+`INCHIKEY`, `NCT`, `MESH`, `ICD11`, `UNIPROT`, `RXCUI`, `SPL_SETID`, `ATC`,
+`CLINVAR`, `PMID`, `DOI`, `CA_DIN`, `MHRA_PL`, `FDA_APPL_NO`, `NDC`,
+`EMA_PRODUCT`.
+
+### b. Full-text — for names and near-names
+
+```cypher
+CALL db.index.fulltext.queryNodes('entity_names', 'atorvastatin')
+YIELD node, score
+WHERE node:Substance
+RETURN node.name, score LIMIT 5
+```
+
+Three indexes, because the labels do not share a property:
+
+| index | covers | on |
+|---|---|---|
+| `entity_names` | Substance, Product, Disease, Target, Company, Mechanism, DrugClass, OrganClass, Variant | `name`, `synonyms` |
+| `document_titles` | Publication, ClinicalTrial | `title` |
+| `reaction_terms` | AdverseEvent | `term` |
+
+**Always filter by label.** Without `WHERE node:Disease`, a query for
+`"lung cancer"` returns companies called "Lung Cancer Mutation Consortium"
+ahead of the disease. Measured, not hypothetical.
+
+Fuzzy matching with `~` handles typos: `'pembrolizimab~'` finds
+`PEMBROLIZUMAB`.
+
+### c. Embeddings — for abbreviations and paraphrase
+
+Full-text **cannot** bridge these, because there is no shared text:
+
+| query | full-text | embedding |
+|---|---|---|
+| `NSCLC` | nothing | 0.832 → Non-small cell lung cancer |
+| `statins` | nothing | 0.737 → HMG-CoA reductase inhibitor |
+| `COPD` | nothing | 0.803 → Chronic obstructive pulmonary disease |
+| `heart problems` | nothing | 0.873 → heart disorder |
+
+40,432 nodes are embedded with **SapBERT** — Disease, DrugClass, AdverseEvent,
+Mechanism. Those are the labels where a question's wording is far from the
+stored name. Vectors live beside the build:
+
+```bash
+python graph/embed_entities.py --dir ~/graph-runs/<ts> --query "NSCLC"
+```
+
+**Reject matches below 0.60.** Correct answers measured 0.74–0.87 and the best
+wrong answer sat well under 0.6, so the gap is real — use it rather than always
+taking the top hit.
+
+### Which to reach for
+
+```
+have an identifier?          -> (a), always
+a name you believe is exact? -> (b), with a label filter
+an acronym or a phrasing?    -> (c), then verify with (b)
+```
+
+---
+
+## Step 2: traversal patterns that work
+
+### A drug, end to end
+
+```cypher
+MATCH (s:Substance {norm_name: 'atorvastatin'})
+OPTIONAL MATCH (s)-[:IN_CLASS]->(c:DrugClass)
+OPTIONAL MATCH (s)-[:TARGETS]->(t:Target)
+OPTIONAL MATCH (s)-[:HAS_MECHANISM]->(m:Mechanism)
+OPTIONAL MATCH (p:Product)-[:CONTAINS]->(s)
+RETURN s.name, c.atc_code, collect(DISTINCT t.symbol),
+       m.name, count(DISTINCT p) AS products
+```
+
+### Where is it approved, and by whom
+
+```cypher
+MATCH (p:Product)-[:CONTAINS]->(s:Substance {norm_name: 'pembrolizumab'})
+MATCH (p)-[:APPROVED_BY]->(a:RegulatoryAgency)
+RETURN a.code, a.region, count(p) ORDER BY count(p) DESC
+```
+
+### Trials in a region — traverse, do not list countries
+
+```cypher
+MATCH (t:ClinicalTrial)-[:CONDUCTED_IN]->(:Country)-[:IN_REGION]->(r:Region {name:'MENA/GCC'})
+RETURN count(DISTINCT t)
+```
+
+⚠️ **`MENA/GCC` is the whole region** — Israel, Iran, Egypt, North Africa —
+89,328 trials. The six Gulf states alone are 3,793. If you mean the Gulf, name
+the countries.
+
+### Safety, grouped
+
+```cypher
+MATCH (s:Substance {norm_name:'pembrolizumab'})-[e:HAS_ADVERSE_EVENT]->(a:AdverseEvent)
+MATCH (a)-[:IN_ORGAN_CLASS]->(o:OrganClass)
+RETURN o.name, sum(e.report_count) AS reports
+ORDER BY reports DESC LIMIT 10
+```
+
+`OrganClass` is what makes "any cardiac event" one hop instead of enumerating
+every cardiac term.
+
+### Mutation → protein → drug
+
+```cypher
+MATCH (v:Variant)-[:VARIANT_IN]->(t:Target)<-[:TARGETS]-(s:Substance)
+MATCH (v)-[:IMPLICATED_IN]->(d:Disease)
+WHERE v.clinical_significance CONTAINS 'Pathogenic'
+RETURN d.name, t.symbol, collect(DISTINCT s.name)[..5] LIMIT 20
+```
+
+---
+
+## What will mislead you
+
+### `match_method` — check it before trusting an edge
+
+Every edge records how it was established.
+
+| value | meaning | trust |
+|---|---|---|
+| `structured` | the source stated it | high |
+| `unii`, `salt`, `stereo` | resolved via identifier tiers | high |
+| `symbol` | matched on a gene symbol | good |
+| `name` | matched free prose against a dictionary | **treat as a hint** |
+| `provisional` | the name never resolved | **weak** |
+
+`CONDUCTED_IN` and `STUDIES` are entirely `name`-matched. They are useful for
+aggregate questions and should not be cited as fact about one specific trial.
+
+### Dates do not compare
+
+Stored as strings in six formats, one of which is the literal text
+`"Approved Prior to Jan 1, 1982"`. `WHERE p.expire_date < '2027'` is
+meaningless. Parse in your own code.
+
+### 93% of Substances have no name
+
+2.87M ChEMBL research compounds carry only an identifier. `MATCH (s:Substance)`
+mostly returns things with no name, no target and no product. Anchor on
+something real instead.
+
+### Three sources are frozen
+
+Orange Book, ChiCTR and jRCT are blocked at IP level. Their data is in the
+graph and cannot be refreshed. **Orange Book supplies essentially all Patent
+and Exclusivity nodes**, so patent-expiry answers are as of the last successful
+scrape.
+
+### Trial keys look doubled
+
+`NCT:NCT01045135` is correct — 19 of 22 registries embed their prefix in the
+id. The clean value is on the Identifier node.
+
+---
+
+## Performance
+
+Measured on the live database (2 vCPU, whole store in page cache):
+
+| query | time |
+|---|---|
+| indexed point lookup | 21 ms |
+| 1 hop | 23 ms |
+| 2 hops | 13 ms |
+| products by agency | 38 ms |
+| global aggregation over 1.3M edges | 1.27 s |
+
+**Always bound your traversals.** `-[*1..5]->` over 16.8M relationships will
+not finish; there is a 120 s transaction timeout, so an unbounded query costs
+two minutes and returns nothing. Use explicit hops.
+
+Two vCPU means ~2 queries at full speed. Sequential is fine; heavy parallelism
+queues.
+
+---
+
+## Combining with the vector store
+
+They are separate stores joined by identifiers, not by shared storage.
+
+**Graph first when** the question is about relationships: what targets this,
+where is it approved, which trials tested it, what else hits this protein.
+
+**Vector store first when** the question is about what a document *says*:
+contraindications, warnings, dosing, wording of a label.
+
+Bridging: MHRA filenames embed the licence number
+(`..._PL347710263_par.pdf`), and the graph holds 39,002 `MHRA_PL` identifiers.
+So graph → identifier → filtered document search is a real path.
+
+⚠️ **SPL setids do not reach the vector store.** DailyMed publishes only CSVs
+to S3 — no documents — so its 393,581 setids point at labels that were never
+indexed.

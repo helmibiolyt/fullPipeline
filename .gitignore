@@ -36,6 +36,9 @@ vector_store/*.bin
 # raw docs pulled by scrapers (they live in S3, not git)
 **/pdfs/
 **/*.pdf
+# ...except our own documentation, which is generated from the code and belongs
+# with it. The rule above is aimed at scraped source documents.
+!graph/GRAPH_TECHNICAL.pdf
 
 # Personal permission rules; contains machine-specific absolute paths
 .claude/settings.local.json
