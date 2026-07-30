@@ -1,0 +1,14 @@
+# Shell scripts must be LF whatever the checkout platform. A .sh with CRLF
+# fails on Linux as "bad interpreter: /usr/bin/env bash^M", which reads like a
+# missing interpreter rather than a line-ending problem and wastes an hour.
+# These are edited on Windows and run on Ubuntu, so this is not hypothetical.
+*.sh            text eol=lf
+*.service       text eol=lf
+*.cypher        text eol=lf
+Dockerfile      text eol=lf
+
+# Python tolerates CRLF, but the hosts run it and diffs stay cleaner in one
+# convention.
+*.py            text eol=lf
+*.yaml          text eol=lf
+*.yml           text eol=lf
