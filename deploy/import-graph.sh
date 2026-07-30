@@ -43,6 +43,27 @@ rm -rf /tmp/neo4j-stage
 step "stopping neo4j"
 sudo systemctl stop neo4j
 
+# Back up before overwriting. neo4j-admin import replaces the store outright
+# with no transaction and no undo: a duplicate column in one header once failed
+# 786ms in, AFTER the previous store was gone, and the only route back was a
+# 20-minute rebuild from S3. A dump costs a couple of minutes and makes that a
+# restore instead.
+#
+# Skippable with SKIP_BACKUP=1 when disk is genuinely tight - the graph host has
+# 13 GB free and a dump is ~2 GB - but skipping it is a decision, not a default.
+if [ "${SKIP_BACKUP:-0}" != "1" ]; then
+  BACKUP_DIR="${BACKUP_DIR:-$HOME/neo4j-backups}"
+  mkdir -p "$BACKUP_DIR"; sudo chown neo4j:neo4j "$BACKUP_DIR"
+  step "backing up the current database first"
+  if sudo -u neo4j neo4j-admin database dump "$DB" --to-path="$BACKUP_DIR"        --overwrite-destination=true 2>&1 | tail -2; then
+    ok "dump in $BACKUP_DIR ($(du -sh "$BACKUP_DIR" 2>/dev/null | cut -f1))"
+    # Keep two. Older ones describe a graph nobody would restore.
+    ls -1t "$BACKUP_DIR"/*.dump 2>/dev/null | tail -n +3 | xargs -r sudo rm -f
+  else
+    warn "no existing database to dump - first import on this host"
+  fi
+fi
+
 sudo rm -rf "$IMPORT_DIR"/nodes "$IMPORT_DIR"/edges "$IMPORT_DIR"/headers
 sudo mv /tmp/neo4j-stage/nodes /tmp/neo4j-stage/edges "$IMPORT_DIR"/
 sudo cp -r "$BUILD/import/headers" "$IMPORT_DIR"/
