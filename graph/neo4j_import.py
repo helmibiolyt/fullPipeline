@@ -95,10 +95,30 @@ CREATE INDEX trial_registry      IF NOT EXISTS FOR (n:ClinicalTrial) ON (n.regis
 CREATE INDEX event_type          IF NOT EXISTS FOR (n:RegulatoryEvent) ON (n.type);
 CREATE INDEX identifier_value    IF NOT EXISTS FOR (n:Identifier) ON (n.value);
 
-// Full-text over the names a question arrives in. One index across the labels
-// a user names a thing by, so "give me everything about Keytruda" is one call.
+// Full-text over the text a question actually arrives in.
+//
+// Three indexes rather than one, because the labels do not share a property:
+// a paper has a title, a reaction has a term, everything else has a name.
+//
+// `synonyms` matters as much as `name`. Searching only names meant "NSCLC"
+// returned Target nodes and "lung cancer" returned companies with it in their
+// title, while the disease itself - MeSH heading "Carcinoma, Non-Small-Cell
+// Lung" - matched neither query. The entry terms people type live in synonyms.
+//
+// A label without one of the listed properties is skipped for it, so listing
+// name and synonyms together is safe even where only one exists.
 CREATE FULLTEXT INDEX entity_names IF NOT EXISTS
-FOR (n:Substance|Product|Disease|Target|Company) ON EACH [n.name];
+FOR (n:Substance|Product|Disease|Target|Company|Mechanism|DrugClass|OrganClass|Variant)
+ON EACH [n.name, n.synonyms];
+
+// Titles are long free text and score differently from names; keeping them in
+// their own index stops a 400-character trial title from crowding out an exact
+// drug-name hit.
+CREATE FULLTEXT INDEX document_titles IF NOT EXISTS
+FOR (n:Publication|ClinicalTrial) ON EACH [n.title];
+
+CREATE FULLTEXT INDEX reaction_terms IF NOT EXISTS
+FOR (n:AdverseEvent) ON EACH [n.term];
 """
 
 

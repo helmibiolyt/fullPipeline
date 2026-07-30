@@ -81,11 +81,18 @@ def load_mesh(b):
             continue
         n += 1
         dkey = f"MESH:{ui}"
+        # Entry terms are kept on the node, not just used to build the matcher.
+        # They are how anyone actually searches: MeSH's heading is "Carcinoma,
+        # Non-Small-Cell Lung" and the query is "NSCLC". Capped at 30 because a
+        # handful of descriptors carry hundreds and the tail is chemical
+        # registry strings nobody types.
+        syns = [s.strip() for s in (row.get("synonyms") or "").split(";")
+                if len(s.strip()) >= 2][:30]
         b.w.node("Disease", dkey, source=key, name=name, vocabulary="MeSH",
-                 tree_numbers=";".join(trees))
+                 synonyms=";".join(syns), tree_numbers=";".join(trees))
         b.w.identifier(dkey, "MESH", ui, source=key)
         b.mesh_by_name.setdefault(fold(name), dkey)
-        for syn in (row.get("synonyms") or "").split(";"):
+        for syn in syns:
             f = fold(syn)
             if len(f) >= 4:
                 b.mesh_by_name.setdefault(f, dkey)

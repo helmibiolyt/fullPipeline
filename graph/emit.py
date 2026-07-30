@@ -32,13 +32,21 @@ from dataclasses import dataclass, field
 PROV = ["source", "run_id"]
 
 NODE_COLUMNS: dict[str, list[str]] = {
-    "Substance":       ["key", "name", "norm_name", "substance_class", "status",
-                        "max_phase", "resolved_by"],
+    "Substance":       ["key", "name", "norm_name", "synonyms",
+                        "substance_class", "status", "max_phase",
+                        "resolved_by"],
     "Product":         ["key", "name", "brand_name", "agency", "status", "form",
                         "strength"],
     "Identifier":      ["key", "scheme", "value"],
     "Target":          ["key", "symbol", "name", "organism", "target_type"],
-    "Disease":         ["key", "name", "vocabulary", "tree_numbers"],
+    # `synonyms` is what makes a disease findable. MeSH stores the formal
+    # inverted heading - "Carcinoma, Non-Small-Cell Lung" - and nobody types
+    # that. The entry terms that do get typed ("NSCLC", "lung cancer") were
+    # read during the build to match against, then discarded, so a full-text
+    # search for NSCLC returned Target nodes and "lung cancer" returned
+    # companies with it in their name.
+    "Disease":         ["key", "name", "synonyms", "vocabulary",
+                        "tree_numbers"],
     "Mechanism":       ["key", "name", "action_type"],
     "DrugClass":       ["key", "atc_code", "name", "level", "vocabulary"],
     "Modality":        ["key", "name"],

@@ -163,8 +163,11 @@ class Build:
                 continue
             n += 1
             skey = f"UNII:{unii}"
+            # Same discard as MeSH had: gsrs synonyms carry the brand and
+            # trade names people search by, and they were being read into the
+            # resolver and then dropped from the node.
             self.w.node("Substance", skey, source=key, name=name,
-                        norm_name=fold(name),
+                        norm_name=fold(name), synonyms=";".join(syns[:30]),
                         substance_class=row.get("substance_class", ""),
                         status=row.get("status", ""), resolved_by="gsrs")
             self.w.identifier(skey, "UNII", unii, source=key)
