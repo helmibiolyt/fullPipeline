@@ -300,6 +300,15 @@ EXCLUDED: dict[str, str] = {
         "ICD-11. Two coding systems already crosswalk via chembl_indications; a "
         "third adds mapping burden without new coverage.",
 
+    "Targets_Genomics_Biomarkers/uniprot.org":
+        "2,782 proteins across disease-themed files, not a protein reference. "
+        "Target is keyed by UniProt accession, so this looks like the obvious "
+        "spine and is not one: it covers only the diseases someone happened to "
+        "scrape, so keying on it would silently cap the graph at those. "
+        "chembl_targets is the base (18,552 targets) and hgnc_complete_set the "
+        "enrichment. Worth revisiting as enrichment on targets already present, "
+        "never as the source of them.",
+
     "Targets_Genomics_Biomarkers/cancer.sanger.ac.uk":
         "COSMIC gene lists, 40 files / 20k rows. Gene-level cancer census - "
         "belongs with a Variant/Gene extension, not the current schema.",
