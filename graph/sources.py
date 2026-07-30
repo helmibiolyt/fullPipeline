@@ -274,6 +274,21 @@ INCLUDED: list[dict] = [
               "columns are read by position. Filtered hard: the gene must be a "
               "known drug target and the significance must be an actual call."),
 
+    # A trailing slash declares a PREFIX, not a file. These loaders discover
+    # their inputs from S3 rather than naming them, so a new cancer site or
+    # disease-protein file is picked up automatically - and listing today's
+    # filenames here would go stale the moment one is added.
+    dict(file="Targets_Genomics_Biomarkers/cancer.sanger.ac.uk/Cancer_Site_Mutations/",
+         rows=None, builds=["node:Variant", "edge:VARIANT_IN"],
+         note="COSMIC somatic mutations, one file per cancer site. Kept only "
+              "where the gene is a known drug target."),
+
+    dict(file="Targets_Genomics_Biomarkers/uniprot.org/",
+         rows=None, builds=["id:UNIPROT_ENTRY"],
+         note="Enrichment only, on targets ChEMBL already established. "
+              "Disease-scoped, so it cannot be the source of Target nodes - "
+              "see the EXCLUDED note that used to cover this."),
+
     dict(file="Safety_Pharmacovigilance/vigiaccess.org/VigiAccess/vigiaccess_adr.csv",
          rows=None, builds=["node:OrganClass", "edge:IN_ORGAN_CLASS"],
          note="The MedDRA System Organ Class per reaction - the hierarchy "
@@ -327,15 +342,6 @@ EXCLUDED: dict[str, str] = {
         "NCI Thesaurus, 413k rows. A third disease vocabulary after MeSH and "
         "ICD-11. Two coding systems already crosswalk via chembl_indications; a "
         "third adds mapping burden without new coverage.",
-
-    "Targets_Genomics_Biomarkers/uniprot.org":
-        "2,782 proteins across disease-themed files, not a protein reference. "
-        "Target is keyed by UniProt accession, so this looks like the obvious "
-        "spine and is not one: it covers only the diseases someone happened to "
-        "scrape, so keying on it would silently cap the graph at those. "
-        "chembl_targets is the base (18,552 targets) and hgnc_complete_set the "
-        "enrichment. Worth revisiting as enrichment on targets already present, "
-        "never as the source of them.",
 
     "Targets_Genomics_Biomarkers/cancer.sanger.ac.uk":
         "COSMIC gene lists, 40 files / 20k rows. Gene-level cancer census - "
