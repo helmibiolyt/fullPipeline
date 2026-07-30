@@ -76,11 +76,6 @@ INCLUDED: list[dict] = [
               "calcium links to atorvastatin without guessing which trailing "
               "tokens are salts."),
 
-    dict(file="Drug_Substance_Reference/ebi.ac.uk-chembl/chembl_data/chembl_usan_stems.csv",
-         rows=834, builds=["node:Modality", "edge:HAS_MODALITY"],
-         note="-mab -> monoclonal antibody, -tide -> peptide. Modality is "
-              "partly derivable from the name itself."),
-
     dict(file="Drug_Substance_Reference/rxnav.nlm.nih.gov/rxnorm_data/rxnorm_drugs.csv",
          rows=28_920, builds=["id:RXCUI"],
          note="RXCUI is a merge signal and the join to dailymed."),
@@ -269,6 +264,21 @@ INCLUDED: list[dict] = [
 # --------------------------------------------------------------------------
 
 EXCLUDED: dict[str, str] = {
+    "Drug_Substance_Reference/ebi.ac.uk-chembl/chembl_data/chembl_usan_stems.csv":
+        "834 USAN stems. Loaded briefly as Modality and withdrawn: the "
+        "annotations are not one concept - '-mab' is 'monoclonal antibodies' "
+        "(modality), '-kinra' is 'interleukin receptor antagonists' "
+        "(mechanism), '-prazole' is a pharmacologic class - so any single "
+        "label misfiles most of them. As Modality it put 397 class "
+        "descriptions beside 9 real modalities. A stem also has several rows "
+        "with sub-variants ('-mab' as 'monoclonal antibodies', '...: "
+        "chimeric', '...: humanized') that a name suffix cannot tell apart, "
+        "so first-match labelled humanized antibodies chimeric by list order. "
+        "Everything it approximated is stated elsewhere: Modality from ChEMBL "
+        "molecule_type, DrugClass from ATC, Mechanism from chembl_mechanisms. "
+        "Revisit only with the stem table hand-classified into those three - "
+        "that is curation, not a load.",
+
     "Drug_Substance_Reference/pubchem.ncbi.nlm.nih.gov":
         "~291M rows across 5 files, but the two big ones are 2-column lookups "
         "(CID->SMILES 133.9M, CID->parent 119.1M). They are 85% of the lake's "
