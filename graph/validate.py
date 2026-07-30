@@ -203,11 +203,26 @@ def main():
         print(f"        {etype:20} max out-degree {c:>8,}  {k}")
 
     # ---- 6. fixtures -----------------------------------------------------
+    #
+    # A slice only contains the molecules it was asked for, so a fixture about
+    # pembrolizumab cannot pass on a build sliced to atorvastatin. Failing it
+    # anyway made a correct slice build report two failures - and since
+    # build-graph.sh gates the import on this exit code, that teaches people to
+    # ignore validation failures, which is the one habit these checks exist to
+    # prevent.
+    #
+    # Absent subject means out of scope; present subject with the edge missing
+    # is a real defect and still fails. On a full build nothing is out of
+    # scope, so every fixture is enforced.
     print("\nfixtures")
+    sliced = man.get("mode") == "slice"
     for src, etype, dst, label in FIXTURES:
         p = d / "edges" / f"{etype}.csv"
         if not p.exists():
             warn(f"{label}: no {etype} table")
+            continue
+        if sliced and src not in all_keys:
+            print(f"  skip  {label}  (subject not in this slice)")
             continue
         hit = any(r["src"] == src and r["dst"] == dst for r in _read(p))
         (ok if hit else fail)(f"{label}")
