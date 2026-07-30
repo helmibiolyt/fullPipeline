@@ -130,11 +130,17 @@ INCLUDED: list[dict] = [
     dict(file="Regulatory_Approvals/health-products.canada.ca/canada_dpd_data/ingred.csv",
          rows=125_922, builds=["edge:CONTAINS"], note="product -> active ingredients."),
     dict(file="Regulatory_Approvals/health-products.canada.ca/canada_dpd_data/comp.csv",
-         rows=59_384, builds=["node:Company", "edge:DEVELOPS"], note=""),
+         rows=59_384, builds=["node:Company", "edge:DEVELOPS"],
+         note="Canadian marketing authorisation holders. Names are "
+              "normalised by norm_company(), so Pfizer Inc. and Pfizer "
+              "Canada ULC do not become two companies."),
     dict(file="Regulatory_Approvals/health-products.canada.ca/canada_dpd_data/ther.csv",
          rows=58_174, builds=["edge:IN_CLASS"], note="TC_ATC -> DrugClass."),
     dict(file="Regulatory_Approvals/health-products.canada.ca/canada_dpd_data/status.csv",
-         rows=200_119, builds=["node:Approval"], note=""),
+         rows=200_119, builds=["node:Approval"],
+         note="Status history per DIN - marketed, cancelled, dormant. One "
+              "product has many rows, which is why Approval is its own "
+              "node rather than a property of Product."),
 
     dict(file="Regulatory_Approvals/products.mhra.gov.uk/mhra_data/raw_metadata.csv",
          rows=78_215, builds=["node:Product", "id:MHRA_PL"], key="MHRA:{pl_number}",
@@ -162,7 +168,9 @@ INCLUDED: list[dict] = [
               "biosimilar->originator edge already resolved."),
 
     dict(file="Regulatory_Approvals/open.fda.gov/openfda_data/openfda_drugs.csv",
-         rows=42_173, builds=["node:Product", "id:NDC"], note=""),
+         rows=42_173, builds=["node:Product", "id:NDC"],
+         note="openFDA drug records. Supplies the NDC codes that identify "
+              "a US package."),
 
     dict(file="Regulatory_Approvals/pmda.go.jp/pmda_data/pmda_metadata.csv",
          rows=547, builds=["node:Product"], key="PMDA:{...}", note="Japan."),
@@ -173,7 +181,10 @@ INCLUDED: list[dict] = [
               "Headers carry a UTF-8 BOM - strip it."),
 
     dict(file="Drug_Substance_Reference/dailymed.nlm.nih.gov/dailymed_data/dailymed_master_mapping.csv",
-         rows=319_885, builds=["id:SPL_SETID", "id:NDC"], note=""),
+         rows=319_885, builds=["id:SPL_SETID", "id:NDC"],
+         note="SPL setid to NDC. The setid is the canonical handle for a "
+              "US label; note DailyMed publishes no documents to S3, so "
+              "these identify labels the vector store never indexed."),
 
     # ---- Patent / Exclusivity ---------------------------------------------
     dict(file="Regulatory_Approvals/accessdata.fda.gov-orangebook/orangebook_data/patents_enriched.csv",
@@ -183,7 +194,10 @@ INCLUDED: list[dict] = [
               "distinguishes a substance patent from a formulation one."),
 
     dict(file="Regulatory_Approvals/accessdata.fda.gov-orangebook/orangebook_data/exclusivity_enriched.csv",
-         rows=2_265, builds=["node:Exclusivity", "edge:HAS_EXCLUSIVITY"], note=""),
+         rows=2_265, builds=["node:Exclusivity", "edge:HAS_EXCLUSIVITY"],
+         note="FDA market exclusivity periods. With patents, the other "
+              "half of when a drug can face generic competition - and "
+              "frozen, since Orange Book is IP-blocked."),
 
     dict(file="Regulatory_Approvals/purplebooksearch.fda.gov/purplebook_data/patent_list.csv",
          rows=424, builds=["node:Patent", "edge:PROTECTED_BY"],
@@ -230,19 +244,31 @@ INCLUDED: list[dict] = [
               "Without it the same study counts once per registry."),
 
     dict(file="Clinical_Trials_Pipeline_Intelligence/clinicaltrialsregister.eu/eu_ctr_trials/eu_ctr_all_trials.csv",
-         rows=97_822, builds=["node:ClinicalTrial"], note=""),
+         rows=97_822, builds=["node:ClinicalTrial"],
+         note="EU trials register (EudraCT). 8,102 columns, because the "
+              "scraper flattened a nested form - only the first four are "
+              "real per-trial fields, and the header alone exceeds 128 KB."),
     dict(file="Clinical_Trials_Pipeline_Intelligence/chictr.org.cn/chictr_trails2/chictr_detailed.csv",
-         rows=217_497, builds=["node:ClinicalTrial"], note=""),
+         rows=217_497, builds=["node:ClinicalTrial"],
+         note="Chinese registry. Its enrollment column holds prose in "
+              "131,158 rows, which is why staging blanks values that do "
+              "not match their declared type. IP-blocked, so frozen."),
     dict(file="Clinical_Trials_Pipeline_Intelligence/anzctr.org.au/anzctr_trials/anzctr_trials.csv",
-         rows=40_957, builds=["node:ClinicalTrial"], note=""),
+         rows=40_957, builds=["node:ClinicalTrial"],
+         note="Australia/New Zealand registry."),
     dict(file="Clinical_Trials_Pipeline_Intelligence/isrctn.com/isrctn_trials/ISRCTN_search_results.csv",
-         rows=31_373, builds=["node:ClinicalTrial"], note=""),
+         rows=31_373, builds=["node:ClinicalTrial"],
+         note="ISRCTN, UK-based but international."),
     dict(file="Clinical_Trials_Pipeline_Intelligence/euclinicaltrials.eu/ctis_data/CTIS_trials_20260622.csv",
-         rows=10_158, builds=["node:ClinicalTrial"], note=""),
+         rows=10_158, builds=["node:ClinicalTrial"],
+         note="CTIS - the EU system that replaced EudraCT, so recent EU "
+              "trials are here and older ones in eu_ctr."),
     dict(file="Clinical_Trials_Pipeline_Intelligence/ctri.nic.in/ctri_trials/ctri_trials.csv",
-         rows=8_197, builds=["node:ClinicalTrial"], note=""),
+         rows=8_197, builds=["node:ClinicalTrial"],
+         note="Clinical Trials Registry - India."),
     dict(file="Clinical_Trials_Pipeline_Intelligence/jrct.mhlw.go.jp/jrct_trials/jrct_list.csv",
-         rows=476, builds=["node:ClinicalTrial"], note=""),
+         rows=476, builds=["node:ClinicalTrial"],
+         note="Japan Registry of Clinical Trials. IP-blocked, so frozen."),
 
     # ---- Target/Disease associations --------------------------------------
     *[dict(file=f"Targets_Genomics_Biomarkers/platform.opentargets.org/Disease_Associations/{d}_targets.csv",

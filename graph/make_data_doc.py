@@ -22,6 +22,8 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 import sources as graph_sources                    # noqa: E402
+from column_notes import (FILE_NOTE, SOURCE_PURPOSE,  # noqa: E402
+                          choose_columns, notes_for)
 from docgen import E, embed_png, page, render, table   # noqa: E402
 
 HERE = pathlib.Path(__file__).parent
@@ -100,6 +102,8 @@ def csv_block(cat: str, src: str, name: str, meta: dict,
     bits = [human(meta.get("size", 0))]
     if "n_columns" in meta:
         bits.append(f"{meta['n_columns']} columns")
+
+    why = ""
     used = declared.get(key)
     # sources.py may declare a prefix rather than an exact key.
     if used is None:
@@ -113,9 +117,26 @@ def csv_block(cat: str, src: str, name: str, meta: dict,
         # EXCLUDED keys may name a file or a whole source prefix.
         why = excluded.get(key) or next(
             (r for f, r in excluded.items() if key.startswith(f)), "")
-        bits.append(f"not read &mdash; {E(why[:300])}" if why
-                    else "not read by the graph")
+        bits.append("not read by the graph")
     p.append(f'<div class=meta>{" &middot; ".join(bits)}</div>')
+
+    # What the file is for. For a file the graph reads, sources.py states it
+    # exactly - what it builds and why. For one it does not, the exclusion
+    # reason is the answer, and failing that the source's own purpose.
+    if used:
+        builds = ", ".join(f"<code>{E(b)}</code>"
+                           for b in used.get("builds", []))
+        serves = used.get("note", "")
+        p.append(f"<p><b>Serves:</b> {serves or 'read by the build.'}"
+                 + (f"<br><b>Builds:</b> {builds}" if builds else "") + "</p>")
+    elif why:
+        p.append(f"<p><b>Serves:</b> not used by the graph &mdash; "
+                 f"{E(why)}</p>")
+    else:
+        pur = SOURCE_PURPOSE.get(src, "")
+        p.append("<p><b>Serves:</b> published by the scraper and available in "
+                 "the lake, but nothing in the graph schema consumes it."
+                 + (f" {pur}" if pur else "") + "</p>")
 
     if "error" in meta:
         p.append(f'<div class=warn>could not sample: {E(meta["error"])}</div>')
@@ -127,15 +148,35 @@ def csv_block(cat: str, src: str, name: str, meta: dict,
         p.append('<div class=warn>no header row</div>')
         return "".join(p)
 
+    if name in FILE_NOTE:
+        p.append(f'<div class=note>{FILE_NOTE[name]}</div>')
+
+    show, hidden = choose_columns(name, cols)
+    if hidden:
+        p.append(f'<div class=note>{len(cols):,} columns. Showing the '
+                 f'{len(show)} that identify a record; <b>{hidden:,} '
+                 f'hidden</b>.</div>')
+
+    if not rows:
+        p.append('<div class=warn>No data row could be sampled &mdash; the '
+                 'file is header-only, or its first record is larger than the '
+                 'read window.</div>')
+
     # Transposed: one row per column, one column per sample record.
     head = ["column"] + [f"row {i + 1}" for i in range(len(rows))]
     body = []
-    for i, c in enumerate(cols):
-        cells = [E(c)]
+    for i in show:
+        cells = [E(cols[i])]
         for r in rows:
             cells.append(E(r[i]) if i < len(r) else "<i>&mdash;</i>")
         body.append(cells)
     p.append(table(head, body, cls="tp"))
+
+    # Explanations, after the table, for the columns that need one.
+    notes = notes_for([cols[i] for i in show])
+    if notes:
+        p.append(table(["column", "what it means"],
+                       [[f"<code>{E(c)}</code>", E(x)] for c, x in notes]))
     return "".join(p)
 
 
