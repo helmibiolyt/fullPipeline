@@ -52,7 +52,10 @@ SOURCE_PURPOSE: dict[str, str] = {
     "europepmc.org": "Europe PMC. Broader than PubMed, includes preprints.",
     "biorxiv.org": "bioRxiv preprints.",
     "medrxiv.org": "medRxiv preprints - clinical, so closer to this domain.",
-    "openalex.org": "OpenAlex. Excluded - the API budget was exhausted.",
+    "openalex.org": "OpenAlex. 7.9M works, and 99.6% of the literature in "
+        "the lake - but excluded from the graph: all fifteen API keys report "
+        "insufficient budget, so it can never be refreshed. Every Publication "
+        "node comes from europepmc, pubmed, biorxiv and medrxiv instead.",
     # Regulatory
     "accessdata.fda.gov": "FDA Drugs@FDA. US approvals and product records.",
     "accessdata.fda.gov-orangebook": "Orange Book. Patents and exclusivities "

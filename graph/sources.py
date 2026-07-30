@@ -400,11 +400,19 @@ EXCLUDED: dict[str, str] = {
         "neither MeSH nor MONDO, so it would sit beside Disease unconnected. "
         "COSMIC and ClinVar supply the variants.",
 
+    # This entry used to list europepmc, pubmed, biorxiv and medrxiv alongside
+    # openalex and call the whole group "deferred to Phase 2". Phase 2 has
+    # happened: those four are in INCLUDED and build every Publication node in
+    # the graph. Only openalex is out, and the operative reason is not its
+    # size.
     "Literature_Evidence/openalex.org":
-        "openalex 7.9M works, europepmc, pubmed, biorxiv, medrxiv. These build "
-        "the Publication node, which is Phase 2. Deferred deliberately, not "
-        "excluded - the openalex file alone is 17.5 GB and would dominate a "
-        "first build.",
+        "7.9M works - 99.6% of the literature in the lake, against 5,349 rows "
+        "across the four sources that ARE loaded. Excluded because all "
+        "fifteen of its API keys report insufficient budget, so the snapshot "
+        "can never be refreshed. A frozen corpus that would dominate every "
+        "literature query is worse than a small current one. The 17.5 GB is "
+        "real but secondary; if the budget came back it would be worth "
+        "loading. See the module docstring in literature.py.",
 
     "Safety_Pharmacovigilance/adrreports.eu, meddra.org":
         "meddra.org holds no terminology. The scrape reached only public pages "
