@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pendulum
 from airflow import DAG
-from airflow.datasets import Dataset
+from airflow.datasets import Dataset, DatasetAny
 from airflow.operators.bash import BashOperator
 
 import sys
@@ -45,8 +45,12 @@ _datasets = [Dataset(f"s3://{S3_BUCKET}/{s.s3_base}")
 with DAG(
     dag_id="vector_store_sync",
     description="Embed newly published documents into Qdrant (incremental by ETag)",
-    # Any listed dataset updating wakes this DAG.
-    schedule=_datasets or None,
+    # DatasetAny, not a plain list. A list means AND in Airflow: the DAG waits
+    # until EVERY listed dataset has updated since its last run. This one
+    # listens to eight document sources, so it would have fired only when all eight published in the
+    # same window - which is to say, effectively never, with no error and no
+    # failed task to notice. Just a store that quietly stopped updating.
+    schedule=DatasetAny(*_datasets) if _datasets else None,
     start_date=pendulum.datetime(2026, 7, 1, tz="UTC"),
     catchup=False,
     max_active_runs=1,          # one ingest at a time; they share the model

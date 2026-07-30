@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import pendulum
 from airflow import DAG
-from airflow.datasets import Dataset
+from airflow.datasets import Dataset, DatasetAny
 from airflow.operators.bash import BashOperator
 
 import sys
@@ -59,7 +59,12 @@ OUT = "$GRAPH_OUT"
 with DAG(
     dag_id="graph_sync",
     description="Rebuild graph CSVs on CSV-source publish; import only if valid",
-    schedule=_datasets or None,
+    # DatasetAny, not a plain list. A list means AND in Airflow: the DAG waits
+    # until EVERY listed dataset has updated since its last run. This one
+    # listens to ~41 CSV sources, so it would have fired only when all 41 published in the
+    # same window - which is to say, effectively never, with no error and no
+    # failed task to notice. Just a store that quietly stopped updating.
+    schedule=DatasetAny(*_datasets) if _datasets else None,
     start_date=pendulum.datetime(2026, 7, 1, tz="UTC"),
     catchup=False,
     max_active_runs=1,          # a second build would fight the first for RAM
