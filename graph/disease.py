@@ -30,8 +30,17 @@ L = {
     "ot_drugs":    "Targets_Genomics_Biomarkers/platform.opentargets.org/Drugs/known_drugs.csv",
 }
 
-OT_AREAS = ("Alzheimer", "Cancer", "Cardiovascular", "Diabetes",
-            "Infectious_Disease", "Respiratory")
+# Discovered from S3, not listed here. The six areas that existed when this was
+# written are a snapshot of one scraper run; a seventh would have been ignored
+# in silence, and the totals would have looked entirely healthy.
+OT_PREFIX = "Targets_Genomics_Biomarkers/platform.opentargets.org/Disease_Associations/"
+
+# ICD-11 chapters that are not conditions. X is Extension Codes - anatomy,
+# substances, histopathology - and V is the functioning assessment supplement.
+# Without this filter 16,904 of 41,475 Disease nodes were things like "Cystic
+# duct", "Levator scapulae muscle" and "Pembrolizumab". MeSH gets the
+# equivalent filter via its C/F03 tree check; ICD-11 had none.
+ICD_NON_DISEASE_CHAPTERS = {"X", "V"}
 
 
 def ot_disease_key(raw: str) -> str:
@@ -100,11 +109,15 @@ def load_icd11(b):
     """
     t0 = b._step("icd11")
     key = L["icd11"]
-    n = matched = 0
+    n = matched = skipped = 0
     for row in lake.stream_csv(key, limit=b.limit):
         code = (row.get("code") or "").strip()
         title = (row.get("title") or "").strip()
         if not code or not title:
+            continue
+        chapter = (row.get("chapter_no") or "").strip().upper()
+        if chapter in ICD_NON_DISEASE_CHAPTERS or code[:1].upper() in ICD_NON_DISEASE_CHAPTERS:
+            skipped += 1
             continue
         n += 1
         hit = b.mesh_by_name.get(fold(title))
@@ -117,6 +130,7 @@ def load_icd11(b):
         b.w.identifier(dkey, "ICD11", code, source=key,
                        match_method="name" if hit else "structured")
     b.stats["icd11_name_matched"] = matched
+    b.stats["icd11_non_disease_skipped"] = skipped
     b._done("icd11", t0, n)
 
 
@@ -230,9 +244,9 @@ def load_opentargets_assoc(b):
     t0 = b._step("opentargets_assoc")
     best: dict[tuple[str, str], tuple[float, str, str]] = {}
     n = 0
-    for area in OT_AREAS:
-        key = (f"Targets_Genomics_Biomarkers/platform.opentargets.org/"
-               f"Disease_Associations/{area}_targets.csv")
+    areas = lake.list_keys(OT_PREFIX, "_targets.csv")
+    b.stats["opentargets_areas"] = len(areas)
+    for key in areas:
         for row in lake.stream_csv(key, limit=b.limit):
             tkey = b.ensg_target.get((row.get("target_id") or "").strip())
             if not tkey:

@@ -29,8 +29,10 @@ L = {
     "sfda_short": "MENA_GCC_Regulatory_Market/sfda.gov.sa/Shortage_Drugs_List.csv",
 }
 
-FAERS_QUARTERS = ("2020", "2021", "2022", "2023", "2024Q1", "2024Q2", "2024Q3",
-                  "2024Q4", "2025Q1", "2025Q2", "2025Q3_Q4", "2026Q1")
+# Discovered from S3 rather than listed. A hardcoded tuple is a snapshot of
+# what the scraper had produced that day: publish 2026Q2 and a quarter of
+# adverse events goes missing with nothing to indicate it.
+FAERS_PREFIX = "Safety_Pharmacovigilance/open.fda.gov/Adverse_Events/"
 
 # A single spontaneous report is not evidence of anything; it is one person
 # filling in a form. Below this many reports the pair is dropped, and the count
@@ -235,8 +237,9 @@ def load_faers(b):
     # for a report are contiguous, so a per-report seen-set bounded to the
     # current report is enough, and costs nothing in memory.
     cur_report, seen_pairs = None, set()
-    for q in FAERS_QUARTERS:
-        key = f"Safety_Pharmacovigilance/open.fda.gov/Adverse_Events/faers_{q}.csv"
+    quarters = lake.list_keys(FAERS_PREFIX, ".csv")
+    b.stats["faers_files"] = len(quarters)
+    for key in quarters:
         try:
             # Every quarter is recorded as read even though the edges carry a
             # single "faers" source id - twelve S3 keys aggregated into one
@@ -282,7 +285,8 @@ def load_faers(b):
                             c[1] += serious
                             c[2] += death
         except Exception as e:
-            b.stats.setdefault("faers_missing", []).append(f"{q}: {type(e).__name__}")
+            b.stats.setdefault("faers_missing", []).append(
+                f"{key.rsplit('/', 1)[-1]}: {type(e).__name__}")
 
     dropped = 0
     for (skey, rf), (cnt, ser, dth) in pairs.items():

@@ -58,7 +58,7 @@ def load_atc_substances(b):
         # against atc_codes rejected the entire file.
         parent = (row.get("parent_code") or "").strip()
         b.w.node("DrugClass", f"ATC:{code}", source=key, atc_code=code,
-                 name=name, level="5")
+                 name=name, level="5", vocabulary="ATC")
         b.atc_codes.add(code)
         if parent in b.atc_codes:
             b.w.edge("IN_CLASS", f"ATC:{code}", f"ATC:{parent}", source=key)
@@ -103,40 +103,25 @@ def load_hierarchy(b):
     b._done("chembl_hierarchy", t0, n)
 
 
-def load_usan_stems(b):
-    """Modality from the name itself: -mab is an antibody, -tide a peptide.
-
-    USAN stems are the naming convention every generic name follows, so a
-    substance's modality is partly derivable without any annotation. Only
-    suffixes are used - a prefix stem like "cef-" says chemical family, not
-    modality, and matching prefixes against 3M names produces mostly noise.
-    """
-    t0 = b._step("usan_stems")
-    key = L["usan"]
-    stems = []
-    for row in lake.stream_csv(key, limit=b.limit):
-        stem = (row.get("stem") or "").strip()
-        ann = (row.get("annotation") or "").strip()
-        if (row.get("stem_class") or "").strip().lower() != "suffix":
-            continue
-        s = stem.lstrip("-").strip()
-        # Short stems match everything. "-ac" would claim every name ending in
-        # those two letters, which is thousands of unrelated molecules.
-        if len(s) >= 4 and ann:
-            stems.append((s, ann))
-    b.stats["usan_suffix_stems"] = len(stems)
-
-    n = 0
-    for name, skey in b.substance_names.items():
-        for s, ann in stems:
-            if name.endswith(s):
-                mkey = f"MODALITY:{fold(ann)[:60]}"
-                b.w.node("Modality", mkey, source=key, name=ann)
-                b.w.edge("HAS_MODALITY", skey, mkey, match_method="usan_stem",
-                         source=key)
-                n += 1
-                break          # longest-first ordering is not worth the cost
-    b._done("usan_stems", t0, n)
+# load_usan_stems was removed rather than repaired.
+#
+# It inferred a substance's Modality from its name suffix, which was wrong
+# twice over. First, the annotations are not one concept: "-mab" is
+# "monoclonal antibodies" (modality), "-kinra" is "interleukin receptor
+# antagonists" (mechanism), "-prazole" is a pharmacologic class. Routing them
+# all to any single label misfiles two thirds of them - as Modality it put 397
+# class descriptions next to 9 real modalities.
+#
+# Second, and worse, a stem has several rows with sub-variants: "-mab" appears
+# as "monoclonal antibodies", "...: fully human", "...: chimeric" and
+# "...: humanized". A name suffix cannot distinguish those, so matching the
+# first row assigned "chimeric" to humanized antibodies by list order. That is
+# invented precision, which is worse than no annotation.
+#
+# Everything it approximated is already in the graph, stated rather than
+# inferred: Modality from ChEMBL molecule_type, DrugClass from WHO ATC,
+# Mechanism from chembl_mechanisms. Revisit only with the USAN stem table
+# hand-classified into those three, which is a curation task, not a load.
 
 
 def load_rxnorm(b):
@@ -201,5 +186,4 @@ def load_dailymed(b):
     b._done("dailymed", t0, n)
 
 
-ALL = [load_atc_substances, load_hierarchy, load_usan_stems, load_rxnorm,
-       load_dailymed]
+ALL = [load_atc_substances, load_hierarchy, load_rxnorm, load_dailymed]

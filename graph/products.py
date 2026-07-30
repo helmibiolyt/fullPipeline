@@ -10,6 +10,7 @@ record on the edge which resolver tier matched.
 """
 from __future__ import annotations
 
+import json
 import re
 
 import countries
@@ -64,6 +65,43 @@ def split_ingredients(raw: str) -> list[str]:
     if not raw:
         return []
     return [p.strip() for p in _SPLIT.split(raw) if p and p.strip()]
+
+
+# Folded on both sides. Writing the literals pre-folded by hand does not work:
+# fold() turns a hyphen into a space, so "0-unassigned" never matched the
+# "0 unassigned" it produces, and the placeholder survived the filter.
+_ROUTE_JUNK = {fold(x) for x in
+               ("0-UNASSIGNED", "UNASSIGNED", "NOT APPLICABLE", "N/A", "NONE")}
+
+
+def _routes(raw: str) -> list[str]:
+    """Split a route cell into individual routes, dropping placeholders."""
+    out = []
+    for part in re.split(r"\s*,\s*", raw or ""):
+        p = part.strip()
+        if p and fold(p) not in _ROUTE_JUNK:
+            out.append(p)
+    return out
+
+
+def _route_name(raw) -> str:
+    """SFDA writes administrationRoute as a JSON object, not a string.
+
+        {"id": 9016, "nameAr": "...", "nameEn": "Oral use", "sort": 160, ...}
+
+    Taken literally that becomes the Route node's name, so 8,138 products sat
+    on routes called '{"id": 9016, ...}' and none of them merged with Canada's
+    "ORAL". The readable value is nameEn.
+    """
+    v = (raw or "").strip()
+    if not v:
+        return ""
+    if v.startswith("{"):
+        try:
+            return (json.loads(v).get("nameEn") or "").strip()
+        except (ValueError, AttributeError):
+            return ""
+    return v
 
 
 def load_vocab(b):
@@ -172,11 +210,12 @@ def load_canada(b):
     for row in lake.stream_csv(L["ca_route"], limit=b.limit):
         key = b.ca_code_key.get((row.get("DRUG_CODE") or "").strip())
         rt = (row.get("ROUTE_OF_ADMINISTRATION_EN") or "").strip()
-        if not key or not rt:
-            continue
-        rkey = f"ROUTE:{fold(rt)}"
-        b.w.node("Route", rkey, source=L["ca_route"], name=rt)
-        b.w.edge("HAS_ROUTE", key, rkey, source=L["ca_route"])
+        # "BUCCAL, SUBLINGUAL" is two routes recorded in one cell, and
+        # "0-UNASSIGNED" is Canada's placeholder for none.
+        for one in _routes(rt):
+            b.w.node("Route", f"ROUTE:{fold(one)}", source=L["ca_route"], name=one)
+            if key:
+                b.w.edge("HAS_ROUTE", key, f"ROUTE:{fold(one)}", source=L["ca_route"])
 
     for row in lake.stream_csv(L["ca_ther"], limit=b.limit):
         key = b.ca_code_key.get((row.get("DRUG_CODE") or "").strip())
@@ -320,10 +359,9 @@ def load_orangebook(b):
                  name=row.get("Trade_Name", ""), brand_name=row.get("Trade_Name", ""),
                  strength=row.get("Strength", ""), form=form.strip())
         b.w.identifier(key, "FDA_APPL_NO", appl, source=L["ob"])
-        if route.strip():
-            rkey = f"ROUTE:{fold(route)}"
-            b.w.node("Route", rkey, source=L["ob"], name=route.strip())
-            b.w.edge("HAS_ROUTE", key, rkey, source=L["ob"])
+        for one in _routes(route):
+            b.w.node("Route", f"ROUTE:{fold(one)}", source=L["ob"], name=one)
+            b.w.edge("HAS_ROUTE", key, f"ROUTE:{fold(one)}", source=L["ob"])
         appr = (row.get("Approval_Date") or "").strip()
         if appr:
             akey = f"FDA:{appl}:{appr}"
@@ -477,10 +515,10 @@ def load_sfda(b):
             if (atc or "").strip():
                 if atc.strip() in b.atc_codes:
                     b.w.edge("IN_CLASS", key, f"ATC:{atc.strip()}", source=L["sfda"])
-        rt = (row.get("administrationRoute") or "").strip()
-        if rt:
-            b.w.node("Route", f"ROUTE:{fold(rt)}", source=L["sfda"], name=rt)
-            b.w.edge("HAS_ROUTE", key, f"ROUTE:{fold(rt)}", source=L["sfda"])
+        rt = _route_name(row.get("administrationRoute"))
+        for one in _routes(rt):
+            b.w.node("Route", f"ROUTE:{fold(one)}", source=L["sfda"], name=one)
+            b.w.edge("HAS_ROUTE", key, f"ROUTE:{fold(one)}", source=L["sfda"])
         comp = (row.get("company") or "").strip()
         if comp:
             ckey = f"COMPANY:{norm_company(comp)}"

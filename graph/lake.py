@@ -89,6 +89,24 @@ def stream_csv(key: str, limit: int | None = None) -> Iterator[dict]:
         yield row
 
 
+def list_keys(prefix: str, suffix: str = "") -> list[str]:
+    """Every object under a prefix, optionally filtered by suffix.
+
+    Exists so loaders stop hardcoding which files a source publishes. A tuple
+    of six disease areas or twelve FAERS quarters is a snapshot of what the
+    scraper produced on the day it was written: add 2026Q2 and the loader
+    silently ignores it, with nothing to flag that the graph is now missing a
+    quarter of adverse events.
+    """
+    out = []
+    for page in s3().get_paginator("list_objects_v2").paginate(
+            Bucket=BUCKET, Prefix=prefix):
+        for o in page.get("Contents", []):
+            if o["Key"].endswith(suffix) and o.get("Size", 0) > 0:
+                out.append(o["Key"])
+    return sorted(out)
+
+
 def header(key: str) -> list[str]:
     """Column names only - a few KB, not the whole object."""
     body = s3().get_object(Bucket=BUCKET, Key=key, Range="bytes=0-16384")["Body"].read()

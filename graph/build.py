@@ -77,11 +77,6 @@ class Build:
         self.skipped_targets: set[str] = set()      # HGNC genes ChEMBL lacks
         self.rxcui_key: dict[str, str] = {}         # RXCUI -> Substance key
         self.bla_key: dict[str, str] = {}           # BLA number -> Product key
-        # Folded generic name -> Substance key, for gsrs substances only.
-        # USAN stems are a convention of INN/USAN generic names, which is what
-        # gsrs holds; matching 200 suffixes against 3M ChEMBL rows, most of
-        # which have no name at all, would cost far more and mean less.
-        self.substance_names: dict[str, str] = {}
         self.timings: dict[str, float] = {}
         self.stats: dict = {}
 
@@ -140,7 +135,7 @@ class Build:
             self.atc_codes.add(code)
             self.w.node("DrugClass", f"ATC:{code}", source=key,
                         atc_code=code, name=row.get("name", ""),
-                        level=row.get("level", ""))
+                        level=row.get("level", ""), vocabulary="ATC")
             parent = (row.get("parent_code") or "").strip()
             if parent:
                 pending_parents.append((code, parent))
@@ -176,7 +171,6 @@ class Build:
                 self.w.identifier(skey, "CAS", cas, source=key)
             # resolver: preferred name first so it wins over synonyms
             self.r.add(name, unii)
-            self.substance_names.setdefault(fold(name), skey)
             for s in syns:
                 self.r.add(s, unii)
         self._done("gsrs", t0, n)

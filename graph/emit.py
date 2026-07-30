@@ -40,7 +40,7 @@ NODE_COLUMNS: dict[str, list[str]] = {
     "Target":          ["key", "symbol", "name", "organism", "target_type"],
     "Disease":         ["key", "name", "vocabulary", "tree_numbers"],
     "Mechanism":       ["key", "name", "action_type"],
-    "DrugClass":       ["key", "atc_code", "name", "level"],
+    "DrugClass":       ["key", "atc_code", "name", "level", "vocabulary"],
     "Modality":        ["key", "name"],
     "Route":           ["key", "name"],
     "Region":          ["key", "name"],
