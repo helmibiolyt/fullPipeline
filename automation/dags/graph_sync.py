@@ -45,24 +45,31 @@ sys.path.insert(0, "/opt/pylib")
 from scrape_pipeline.registry import load_sources          # noqa: E402
 from scrape_pipeline.settings import S3_BUCKET             # noqa: E402
 
-# The document sources vector_store_sync owns. Everything else publishes CSVs,
-# which is what the graph is built from. Listed as an exclusion rather than an
-# inclusion so a new CSV scraper is picked up by adding its manifest, with no
-# edit here - the same property that makes the vector DAG's list maintainable.
-DOC_ONLY = {
-    "Regulatory_Approvals/products.mhra.gov.uk",
-    "Regulatory_Approvals/ema.europa.eu",
-    "Regulatory_Approvals/pmda.go.jp",
-    "MENA_GCC_Regulatory_Market/dha.gov.ae",
-    "MENA_GCC_Regulatory_Market/doh.gov.ae",
-    "MENA_GCC_Regulatory_Market/nhra.bh",
-    "MENA_GCC_Regulatory_Market/moph.gov.qa",
-    "MENA_GCC_Regulatory_Market/moh.gov.om",
-}
+# Which sources should wake this DAG comes from graph/sources.py - the single
+# declaration of what the graph actually reads - not from a list maintained
+# here. The list that used to live here was wrong in both directions.
+#
+# It excluded mhra, ema and pmda as "document sources", but those publish
+# documents AND CSVs: mhra_data/raw_metadata.csv is 78,215 UK products,
+# ema_medicines.csv is every centrally authorised EU medicine, and five EMA
+# tables are the entire RegulatoryEvent population. Their CSV updates would
+# never have rebuilt the graph, silently.
+#
+# It also included ~14 sources the graph never reads, each of which would have
+# triggered a 30-minute rebuild and a Neo4j restart to produce a byte-identical
+# graph.
+#
+# Deriving it means adding a file to sources.py updates the trigger too, with
+# nothing to keep in step by hand.
+sys.path.insert(0, "/opt/graph")            # mounted read-only by compose
+import sources as graph_sources             # noqa: E402
+
+_GRAPH_SOURCES = {"/".join(d["file"].split("/")[:2])
+                  for d in graph_sources.INCLUDED}
 
 _datasets = [Dataset(f"s3://{S3_BUCKET}/{s.s3_base}")
              for s in load_sources()
-             if f"{s.topic}/{s.source}" not in DOC_ONLY]
+             if f"{s.topic}/{s.source}" in _GRAPH_SOURCES]
 
 SSH_CONN = "graph_host"
 DEPLOY = "~/fullPipeline/deploy"
@@ -72,8 +79,8 @@ with DAG(
     description="Rebuild the graph on CSV-source publish; import only if valid",
     # DatasetAny, not a plain list. A list means AND in Airflow: the DAG waits
     # until EVERY listed dataset has updated since its last run. This one
-    # listens to ~41 CSV sources, so it would have fired only when all 41
-    # published in the same window - which is to say, effectively never, with
+    # listens to the 27 sources that feed the graph, so it would have fired
+    # only when all 27 published in the same window - effectively never, with
     # no error and no failed task. Just a graph that quietly stopped updating.
     schedule=DatasetAny(*_datasets) if _datasets else None,
     start_date=pendulum.datetime(2026, 7, 1, tz="UTC"),

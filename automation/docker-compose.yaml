@@ -39,6 +39,10 @@ x-airflow-common: &airflow-common
     - ./config:/opt/automation/config
     - ./data:/opt/automation/data
     - ../scrape:/opt/scrape
+    # graph_sync derives its trigger set from graph/sources.py, the one
+    # declaration of what the graph actually reads. Read-only: Airflow
+    # imports it, never writes it.
+    - ../graph:/opt/graph:ro
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     postgres:
