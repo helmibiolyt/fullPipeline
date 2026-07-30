@@ -39,6 +39,7 @@ vector_store/*.bin
 # ...except our own documentation, which is generated from the code and belongs
 # with it. The rule above is aimed at scraped source documents.
 !graph/GRAPH_TECHNICAL.pdf
+!graph/DATA_SOURCES.pdf
 
 # Personal permission rules; contains machine-specific absolute paths
 .claude/settings.local.json

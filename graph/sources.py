@@ -329,10 +329,28 @@ EXCLUDED: dict[str, str] = {
         "InChIKey, which is the identifier that matters. Revisit only if a "
         "PubChem CID crosswalk is specifically needed.",
 
-    "Targets_Genomics_Biomarkers/ncbi.nlm.nih.gov":
-        "ClinVar variants, ~21.8M rows. There is no Variant node in the schema. "
-        "Adding one is a real extension (variant -> gene -> target -> disease), "
-        "not a load - so it is a schema decision first.",
+    # variant_summary.csv IS loaded now - see INCLUDED. This entry used to
+    # exclude the whole source on the grounds that no Variant node existed;
+    # one does, so what remains excluded is the other five ClinVar files,
+    # which describe submissions rather than variants.
+    "Targets_Genomics_Biomarkers/ncbi.nlm.nih.gov/Variants/var_citations.csv":
+        "Variant-to-publication citations. Variant links to a gene and a "
+        "disease; Publication reaches drugs and diseases by its own title "
+        "matching, so this edge would duplicate both paths.",
+    "Targets_Genomics_Biomarkers/ncbi.nlm.nih.gov/Variants/"
+    "summary_of_conflicting_interpretations.csv":
+        "Where submitters disagree on significance. The loader keeps only "
+        "unambiguous calls, so this file describes the rows it discards.",
+    "Targets_Genomics_Biomarkers/ncbi.nlm.nih.gov/Variants/cross_references.csv":
+        "ClinVar to other variant databases. Nothing in the schema consumes "
+        "them.",
+    "Targets_Genomics_Biomarkers/ncbi.nlm.nih.gov/Variants/"
+    "gene_specific_summary.csv":
+        "Per-gene submission counts - an aggregate over variant_summary, not "
+        "new facts.",
+    "Targets_Genomics_Biomarkers/ncbi.nlm.nih.gov/Variants/"
+    "submission_summary.csv":
+        "Who submitted what, and when. Provenance about ClinVar itself.",
 
     "Ontologies_Standards/loinc.org":
         "4.4M rows of laboratory observation codes across 56 files. Nothing in "
