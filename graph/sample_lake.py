@@ -45,28 +45,43 @@ DOC_EXT = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".htm", ".html", ".txt",
            ".xml", ".zip", ".json"}
 
 
-def sample_csv(s3, key: str) -> dict:
-    """Header and first rows of a CSV, read from its first 128 KB.
+def _read(s3, key: str, n: int) -> bytes | None:
+    try:
+        return s3.get_object(Bucket=BUCKET, Key=key,
+                             Range=f"bytes=0-{n - 1}")["Body"].read()
+    except Exception:                                        # noqa: BLE001
+        return None
+
+
+def sample_csv(s3, key: str, size: int) -> dict:
+    """Header and first rows of a CSV, read from the front of the object.
 
     A truncated final row is dropped: a ranged GET almost always cuts one in
     half, and half a row printed as data is worse than one fewer row.
+
+    The window escalates when no complete data row fits. One file here has
+    2,555 columns and its header alone is over 128 KB, so the first window
+    returned a header and nothing else - which reads as "this file is empty"
+    rather than "the window was too small".
     """
-    try:
-        body = s3.get_object(Bucket=BUCKET, Key=key,
-                             Range=f"bytes=0-{SAMPLE_BYTES - 1}")["Body"].read()
-    except Exception as e:                                   # noqa: BLE001
-        return {"error": str(e)[:200]}
+    body = None
+    for want in (SAMPLE_BYTES, SAMPLE_BYTES * 8, SAMPLE_BYTES * 32):
+        body = _read(s3, key, min(want, size) if size else want)
+        if body is None:
+            return {"error": "range read failed"}
+        text = body.decode("utf-8", errors="replace")
+        truncated = len(body) >= min(want, size or want)
+        if truncated:
+            cut = text.rfind("\n")
+            if cut > 0:
+                text = text[:cut]
+        try:
+            rows = list(csv.reader(io.StringIO(text)))
+        except Exception as e:                               # noqa: BLE001
+            return {"error": f"csv parse: {str(e)[:150]}"}
+        if len(rows) > 1 or not truncated:
+            break
 
-    text = body.decode("utf-8", errors="replace")
-    if len(body) == SAMPLE_BYTES:
-        cut = text.rfind("\n")
-        if cut > 0:
-            text = text[:cut]
-
-    try:
-        rows = list(csv.reader(io.StringIO(text)))
-    except Exception as e:                                   # noqa: BLE001
-        return {"error": f"csv parse: {str(e)[:150]}"}
     if not rows:
         return {"error": "empty"}
 
@@ -123,7 +138,7 @@ def main():
 
         for src, s in sources.items():
             for name, meta in s["csvs"].items():
-                meta.update(sample_csv(s3, meta["key"]))
+                meta.update(sample_csv(s3, meta["key"], meta["size"]))
             s["docs"] = dict(s["docs"])
         out[cat] = sources
         print(f"{cat}: {len(sources)} sources, {n_obj} objects", flush=True)
