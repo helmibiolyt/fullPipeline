@@ -57,8 +57,13 @@ NODE_COLUMNS: dict[str, list[str]] = {
     "RegulatoryEvent": ["key", "type", "name", "status", "reason",
                         "start_date", "end_date", "url"],
     "AdverseEvent":    ["key", "term"],
+    # `source_db`, not `source`: every row already carries a `source` from PROV,
+    # and declaring it again put the column in the file twice. csv.DictWriter
+    # accepts duplicate fieldnames without complaint, so the build succeeded and
+    # neo4j-admin rejected the header 786ms into the import - after the previous
+    # store had already been overwritten.
     "Publication":     ["key", "title", "year", "journal", "doi", "pmid",
-                        "source", "preprint"],
+                        "source_db", "preprint"],
     # One node per variant. Keyed by ClinVar VariationID where there is
     # one, COSMIC MutationID otherwise - the two catalogues do not share
     # an identifier, so a variant in both is two nodes rather than a
@@ -116,6 +121,18 @@ EDGE_COLUMNS: dict[str, list[str]] = {
     "HAS_ADVERSE_EVENT": ["src", "dst", "match_method", "report_count",
                           "serious_count", "death_count"],
 }
+
+
+# A declared column that collides with PROV lands in the file twice. Checked
+# here rather than discovered at import: csv.DictWriter takes duplicate
+# fieldnames silently, so the build looks fine and neo4j-admin fails on a
+# header it cannot parse, by which point the old store is already gone.
+for _label, _cols in NODE_COLUMNS.items():
+    _clash = set(_cols) & set(PROV)
+    assert not _clash, f"{_label} declares {_clash}, which PROV already adds"
+for _etype, _cols in EDGE_COLUMNS.items():
+    _clash = set(_cols) & set(PROV)
+    assert not _clash, f"{_etype} declares {_clash}, which PROV already adds"
 
 
 @dataclass
