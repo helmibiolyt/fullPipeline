@@ -52,15 +52,25 @@ sudo systemctl stop neo4j
 # Skippable with SKIP_BACKUP=1 when disk is genuinely tight - the graph host has
 # 13 GB free and a dump is ~2 GB - but skipping it is a decision, not a default.
 if [ "${SKIP_BACKUP:-0}" != "1" ]; then
-  BACKUP_DIR="${BACKUP_DIR:-$HOME/neo4j-backups}"
-  mkdir -p "$BACKUP_DIR"; sudo chown neo4j:neo4j "$BACKUP_DIR"
+  # Under /var/lib/neo4j, not $HOME. neo4j-admin runs as the neo4j user, which
+  # cannot traverse /home/azureuser (mode 750), so a dump there fails with
+  # "is not an existing directory" even though the directory is right there.
+  BACKUP_DIR="${BACKUP_DIR:-/var/lib/neo4j/backups}"
+  sudo mkdir -p "$BACKUP_DIR"; sudo chown neo4j:neo4j "$BACKUP_DIR"
   step "backing up the current database first"
-  if sudo -u neo4j neo4j-admin database dump "$DB" --to-path="$BACKUP_DIR"        --overwrite-destination=true 2>&1 | tail -2; then
-    ok "dump in $BACKUP_DIR ($(du -sh "$BACKUP_DIR" 2>/dev/null | cut -f1))"
+  if sudo -u neo4j neo4j-admin database dump "$DB" --to-path="$BACKUP_DIR"        --overwrite-destination=true >/tmp/dump.log 2>&1; then
+    ok "dump: $(sudo du -sh "$BACKUP_DIR" 2>/dev/null | cut -f1) in $BACKUP_DIR"
     # Keep two. Older ones describe a graph nobody would restore.
-    ls -1t "$BACKUP_DIR"/*.dump 2>/dev/null | tail -n +3 | xargs -r sudo rm -f
+    sudo bash -c "ls -1t '$BACKUP_DIR'/*.dump 2>/dev/null | tail -n +3 | xargs -r rm -f"
+  elif grep -qi "does not exist\|no such database" /tmp/dump.log; then
+    warn "no existing database yet - first import on this host"
   else
-    warn "no existing database to dump - first import on this host"
+    # Anything else is a real failure and must not be mistaken for "nothing to
+    # back up". The first version of this reported a permissions error as
+    # "first import on this host", which would have read as success.
+    die "backup FAILED - refusing to overwrite an un-backed-up store.
+        $(tail -3 /tmp/dump.log)
+        Re-run with SKIP_BACKUP=1 only if you accept losing the current graph."
   fi
 fi
 
