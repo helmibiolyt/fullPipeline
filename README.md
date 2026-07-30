@@ -274,9 +274,17 @@ residential proxy or different egress IP fixes it; no code change will.
 **93% of Substances have no name** — 2.87M ChEMBL research compounds carrying
 only an identifier. Reachable by ID, never by name or embedding.
 
-**Six sources are permanently excluded**: pubchem (85% of the lake's rows,
-redundant with ChEMBL's InChIKey), openalex (API budget exhausted), evs.nci,
-loinc, cdisc, nupco. Each reason is recorded in `graph/sources.py`.
+**Five sources are permanently excluded**: pubchem (85% of the lake's rows,
+redundant with ChEMBL's InChIKey), evs.nci, loinc, cdisc, nupco. Each reason is
+recorded in `graph/sources.py`.
+
+**OpenAlex is deferred, not excluded — it needs a bigger graph host.** 8.70M
+works and 18.83 GB are already in S3 and ready to load; the host has 8.8 GB of
+29 GB free and the change needs about 10 GB. Add it when the graph VM is
+upgraded. It was previously recorded as dead on an exhausted API budget, which
+was wrong: the key works, the unauthenticated endpoint works, and the quota is
+a rolling window that refills. Worth filtering on load the way ClinVar is, so
+papers that match no drug or disease do not consume disk to answer nothing.
 
 **Dates are strings.** The sources write at least six formats and one is the
 literal text "Approved Prior to Jan 1, 1982", so date-range comparison does not

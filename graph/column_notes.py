@@ -52,12 +52,13 @@ SOURCE_PURPOSE: dict[str, str] = {
     "europepmc.org": "Europe PMC. Broader than PubMed, includes preprints.",
     "biorxiv.org": "bioRxiv preprints.",
     "medrxiv.org": "medRxiv preprints - clinical, so closer to this domain.",
-    "openalex.org": "OpenAlex. 8.70M works crawled and sitting in the "
-        "lake, but not read by the graph - it would be 99.9% of the "
-        "literature and dominate every query. Its API still works "
-        "(checked 2026-07-31); the budget is a rolling quota, not the "
-        "permanent exhaustion previously recorded. Every Publication node "
-        "comes from europepmc, pubmed, biorxiv and medrxiv instead.",
+    "openalex.org": "OpenAlex. 8.70M works, 18.83 GB, in the lake and "
+        "ready - deferred purely on disk: the graph host has 8.8 GB free "
+        "and this needs about 10 GB. To be added when the graph VM is "
+        "upgraded. Its API works (checked 2026-07-31); the budget is a "
+        "rolling quota, not the permanent exhaustion once recorded. Until "
+        "then every Publication node comes from europepmc, pubmed, "
+        "biorxiv and medrxiv.",
     # Regulatory
     "accessdata.fda.gov": "FDA Drugs@FDA. US approvals and product records.",
     "accessdata.fda.gov-orangebook": "Orange Book. Patents and exclusivities "

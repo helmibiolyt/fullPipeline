@@ -405,22 +405,28 @@ EXCLUDED: dict[str, str] = {
     # happened: those four are in INCLUDED and build every Publication node in
     # the graph. Only openalex is out, and the operative reason is not its
     # size.
+    # DEFERRED ON DISK, not rejected. Decision 2026-07-31: add it when the
+    # graph VM is upgraded.
     "Literature_Evidence/openalex.org":
-        "8.70M works crawled (18.83 GB, committed 2026-07-26), against 5,349 "
-        "rows across the four literature sources that ARE loaded. Not "
-        "declared here, so nothing reads it. "
-        "NOT because the API is dead: verified 2026-07-31, the configured key "
-        "returns HTTP 200 and so does the unauthenticated endpoint, and the "
-        "budget is a ROLLING quota (x-ratelimit-limit 10000, ~25 min reset) "
-        "rather than a permanent ceiling. What happened is that six threads "
-        "crawling hard drained the window, took 429 'insufficient budget', "
-        "and every key ended up in cooldown at once - which was recorded as "
-        "permanent exhaustion and never rechecked. "
-        "The crawl is 76% done: 2026 complete, 2021-2025 holding live cursors "
-        "in openalex_works_progress.json, ~13,900 requests from finished. "
-        "The live reason to think twice is proportion - 8.70M works would be "
-        "99.9% of the literature in the graph and dominate every query "
-        "against it. That is a decision, not a blocker.",
+        "8.70M works, 18.83 GB, already in S3 and ready to load. Left out for "
+        "one reason: the graph host has 8.8 GB of 29 GB free and this needs "
+        "about 10 GB - store 5.6 -> ~10-12 GB, build output 4.8 -> ~9 GB, and "
+        "the import holds staged CSVs on disk alongside the store it "
+        "replaces, so peak is worse than steady state. Page cache would also "
+        "go from covering most of a 5.6 GB store to a third of a 12 GB one. "
+        "NOT blocked, and not an API problem: verified 2026-07-31, the key "
+        "returns 200, so does the unauthenticated endpoint, and the "
+        "scraper's own query returns 11,483,614 matches with a live cursor. "
+        "The budget is a ROLLING quota (x-ratelimit-limit 10000, ~25 min "
+        "reset); six threads drained the window, took 429 'insufficient "
+        "budget', and that got recorded as permanent exhaustion. The crawl is "
+        "76% done - 2026 complete, 2021-2025 holding live cursors, ~13,900 "
+        "requests from finished. "
+        "WHEN THE VM IS UPGRADED: finish the crawl, declare the file here, "
+        "rebuild. literature.py already handles the shape. Worth filtering on "
+        "load the way ClinVar is (21.8M rows -> 937,377 kept) - a Publication "
+        "with no ABOUT and no MENTIONS edge is a title nothing can reach, "
+        "costing disk and cache to answer nothing.",
 
     "Safety_Pharmacovigilance/adrreports.eu, meddra.org":
         "meddra.org holds no terminology. The scrape reached only public pages "
