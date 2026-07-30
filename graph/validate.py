@@ -216,16 +216,28 @@ def main():
     # scope, so every fixture is enforced.
     print("\nfixtures")
     sliced = man.get("mode") == "slice"
+    checked = 0
     for src, etype, dst, label in FIXTURES:
         p = d / "edges" / f"{etype}.csv"
         if not p.exists():
-            warn(f"{label}: no {etype} table")
+            # A slice can legitimately produce no edges of a type. A full build
+            # cannot: no TARGETS.csv at all means the mechanisms loader emitted
+            # nothing, which is a broken build wearing a warning.
+            (warn if sliced else fail)(f"{label}: no {etype} table at all")
             continue
         if sliced and src not in all_keys:
             print(f"  skip  {label}  (subject not in this slice)")
             continue
+        checked += 1
         hit = any(r["src"] == src and r["dst"] == dst for r in _read(p))
         (ok if hit else fail)(f"{label}")
+    if sliced and not checked:
+        # Otherwise a fixtures section of nothing but skips reads as a pass,
+        # and the check silently stops covering anything. Slice-only: on a full
+        # build an unchecked fixture has already failed above, and adding "out
+        # of scope for this slice" there is both wrong and noise.
+        warn(f"no fixture was actually checked - all {len(FIXTURES)} were out "
+             f"of scope for this slice")
 
     # ---- 7. declared sources that were never read ------------------------
     #
