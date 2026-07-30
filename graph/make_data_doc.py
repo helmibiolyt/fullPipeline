@@ -245,7 +245,7 @@ def main():
              "                   +--&gt; graph_sync          35 CSV-publishing sources\n"
              "                   |      build  ~24 min --&gt; validate --&gt; import ~8 min\n"
              "                   |\n"
-             "                   +--&gt; vector_store_sync    8 document sources\n"
+             "                   +--&gt; vector_store_sync   10 document sources\n"
              "                          chunk --&gt; embed --&gt; upsert to Qdrant</pre>")
     p.append("<p>Neither sync DAG has a schedule of its own. They wake when "
              "data lands, so a sync cannot race the scrape that feeds it, and "
@@ -295,11 +295,12 @@ def main():
     p.append(table(["category", "sources", "CSVs", "documents", "size"], rows))
 
     p.append(f"<p>Of the {n_src} sources, <b>35 feed the graph</b> (77 "
-             "declared files) and <b>8 publish documents</b> to the vector "
-             "store. Three &mdash; ema, mhra, pmda &mdash; do both, so 40 "
-             "sources are used and 9 are not. Exclusions are recorded with "
-             "reasons in <code>graph/sources.py</code> and repeated against "
-             "each file below.</p>")
+             "declarations covering 96 files) and <b>10 publish documents</b> "
+             "to the vector store. Four &mdash; ema, mhra, pmda, anzctr "
+             "&mdash; do both, so <b>41 are used and 8 are not</b>. Every "
+             "exclusion is recorded with a reason in "
+             "<code>graph/sources.py</code> and repeated against each file "
+             "below.</p>")
 
     # ---------------------------------------------------------------- 5
     p.append("<h2>5. Every source, every file</h2>")

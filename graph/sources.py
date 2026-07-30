@@ -428,7 +428,18 @@ EXCLUDED: dict[str, str] = {
         "with no ABOUT and no MENTIONS edge is a title nothing can reach, "
         "costing disk and cache to answer nothing.",
 
-    "Safety_Pharmacovigilance/adrreports.eu, meddra.org":
+    # These two were one dict key holding two paths, which meant neither
+    # matched a real S3 prefix on lookup - the reason existed but could not be
+    # found by the path it described. Split.
+    "Safety_Pharmacovigilance/meddra.org":
+        "Holds no terminology. The scrape reached only public pages - "
+        "meddra_timeline.csv is news announcements and meddra_versions.csv is "
+        "release history - because MedDRA itself is licensed. It was planned "
+        "as the source of the reaction hierarchy and cannot be; vigiaccess "
+        "publishes reactions already grouped by System Organ Class and is "
+        "loaded instead.",
+
+    "Safety_Pharmacovigilance/adrreports.eu":
         "meddra.org holds no terminology. The scrape reached only public pages "
         "- meddra_timeline.csv is news announcements and meddra_versions.csv is "
         "release history - because MedDRA itself is licensed. It was planned as "
@@ -452,9 +463,13 @@ EXCLUDED: dict[str, str] = {
     "Regulatory_Approvals/health-products.canada.ca/.../vet.csv":
         "6,982 veterinary products. Out of scope for a human-medicines graph.",
 
-    "Ontologies_Standards/cdisc.org, MENA_GCC_Regulatory_Market/nupco.com":
-        "198 rows combined. Standards lists and procurement catalogues with no "
-        "node to attach to.",
+    "Ontologies_Standards/cdisc.org":
+        "Standards lists with no node to attach to. 198 rows combined with "
+        "nupco.",
+
+    "MENA_GCC_Regulatory_Market/nupco.com":
+        "Procurement catalogues - what a buyer purchased, not a regulatory "
+        "fact about a drug. No node to attach to.",
 
     "*/Index/*_documents.csv, mhra_documents.csv, ema_documents.csv":
         "Document indexes - filename, URL, product name. These describe the "

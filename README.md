@@ -28,7 +28,7 @@ deploy/         provisioning and operations scripts for both hosts
    (@weekly)       │  ~436 CSVs + 93,435 documents    │
                    └───────┬──────────────────┬───────┘
                            │                  │
-         35 sources / 77 declared      8 document sources
+         35 sources / 77 declared     10 document sources
               CSV files                       │
                            │                  │
                   ┌────────▼───────┐  ┌───────▼────────┐
@@ -47,9 +47,9 @@ deploy/         provisioning and operations scripts for both hosts
 declared CSV files** between them — ChEMBL alone contributes nine. `graph_sync`
 triggers per source; `graph/sources.py` declares per file.
 
-Three sources — **mhra, ema, pmda** — publish *both* documents and CSVs, so
-they feed both stores. Counting the overlap once, **40 of the 49 scrapers are
-used**; the remaining 9 are excluded with reasons recorded in
+Four sources — **mhra, ema, pmda, anzctr** — publish *both* documents and
+CSVs, so they feed both stores. Counting the overlap once, **41 of the 49
+scrapers are used**; the remaining 8 are excluded with reasons recorded in
 `graph/sources.py`.
 
 ## Two hosts, and why
@@ -77,7 +77,7 @@ Only one DAG is on a clock.
               each source's commit task emits
               Dataset("s3://moine-data/<s3_base>")
                    ├──► graph_sync         (35 CSV-publishing sources)
-                   └──► vector_store_sync  (8 document sources)
+                   └──► vector_store_sync  (10 document sources)
 ```
 
 The sync DAGs have **no schedule of their own**. They wake when data actually
