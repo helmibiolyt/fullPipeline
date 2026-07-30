@@ -14,4 +14,4 @@ hydrate: [pmda_data/pmda_metadata.csv]
 # commit would delete every document it skipped. mirror MUST stay false while
 # this source is incremental.
 mirror: false
-enabled: true
+enabled: false
