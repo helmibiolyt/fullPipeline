@@ -49,3 +49,12 @@ graph/final*/
 graph/runs/
 graph/import/
 graph/*.log
+
+# Private keys. graph_sync needs an SSH key readable inside the Airflow
+# container, and the only already-mounted writable path is automation/config -
+# so without this rule, putting it there would commit a private key to a repo
+# that gets pushed to GitHub.
+*.pem
+*.key
+*.p12
+id_rsa*
