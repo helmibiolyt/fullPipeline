@@ -18,7 +18,7 @@ from __future__ import annotations
 import pendulum
 from airflow import DAG
 from airflow.datasets import Dataset, DatasetAny
-from airflow.operators.bash import BashOperator
+from airflow.providers.ssh.operators.ssh import SSHOperator
 
 import sys
 sys.path.insert(0, "/opt/pylib")
@@ -62,19 +62,27 @@ with DAG(
     # mirror:true sources, where a run legitimately deletes files: without it
     # retrieval keeps citing documents that no longer exist, which reads as a
     # perfectly well-sourced answer to something untrue.
-    BashOperator(
+    # SSHOperator, not BashOperator - the same correction graph_sync needed.
+    # A BashOperator runs INSIDE the Airflow container, which has no
+    # vector_store code, no venv, no torch and no models; it failed in two
+    # seconds on `cd` to a path that does not exist there. The ingest has to
+    # run on the host, where all of that lives.
+    #
+    # The connection points at this same machine. That looks odd and is
+    # correct: Airflow is containerised and the work is not.
+    SSHOperator(
         task_id="ingest_new_documents",
-        # Path comes from the environment, defaulting to where the repo is
-        # actually checked out. It was hardcoded to /opt/vector_store, which
-        # exists on no host we run - the task would have failed on `cd` the
-        # first time a source published, and only then.
-        bash_command=(
-            "cd ${VECTOR_STORE_DIR:-/home/ubuntu/fullPipeline/vector_store} && "
-            "${VECTOR_STORE_PYTHON:-/home/ubuntu/vsenv/bin/python} "
-            "ingest.py --prune 2>&1 | tail -40"
+        ssh_conn_id="vector_host",
+        # Trailing space matters: SSHOperator treats a command ending in ".sh"
+        # as a path to a Jinja template file. This one ends in a flag, but the
+        # habit is cheap and the failure mode is obscure.
+        command=(
+            "cd ${VECTOR_STORE_DIR:-$HOME/fullPipeline/vector_store} && "
+            "${VECTOR_STORE_PYTHON:-$HOME/vsenv/bin/python} ingest.py --prune "
         ),
+        conn_timeout=60,
         # Embedding is the slow part on CPU: ~1.7 min/document on this box.
-        # Fine for a delta of tens; a large catch-up belongs on a GPU pod. See
-        # vector_store/VECTOR_PLAN.md section 3.
-        execution_timeout=pendulum.duration(hours=6),
+        # Fine for a delta of tens; a large catch-up belongs on a GPU pod.
+        cmd_timeout=6 * 60 * 60,
+        get_pty=True,
     )

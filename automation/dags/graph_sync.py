@@ -100,7 +100,11 @@ with DAG(
         ssh_conn_id=SSH_CONN,
         # Writes to ~/graph-runs/<timestamp>/, validates it, and marks it
         # importable only on success. Keeps the two most recent runs.
-        command=f"bash {DEPLOY}/build-graph.sh",
+        # Trailing space is load-bearing. SSHOperator lists ".sh" in
+        # template_ext, so a command ENDING in .sh is treated as a path to a
+        # Jinja template file and fails with TemplateNotFound - naming the
+        # whole command string as the missing template.
+        command=f"bash {DEPLOY}/build-graph.sh ",
         conn_timeout=60,
         cmd_timeout=4 * 60 * 60,     # a full build is ~30 min; 4h is the guard
         get_pty=True,                # so sudo inside the script has a terminal
@@ -115,7 +119,7 @@ with DAG(
         ssh_conn_id=SSH_CONN,
         command=(
             "NEO4J_PASSWORD='{{ var.value.get('neo4j_password') }}' "
-            f"bash {DEPLOY}/import-graph.sh"
+            f"bash {DEPLOY}/import-graph.sh "
         ),
         conn_timeout=60,
         cmd_timeout=60 * 60,
