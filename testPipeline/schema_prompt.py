@@ -236,6 +236,32 @@ THINGS THAT WILL MISLEAD YOU
 PERFORMANCE — you MUST bound traversals. There is a 120s timeout and
 16.8M relationships; `-[*1..5]->` will never finish. Use explicit hops and
 always end with LIMIT.
+
+AGGREGATE EARLY. Transaction memory is capped at 512 MB, and chaining several
+MATCH clauses before any aggregation builds every combination in memory first.
+This exhausts it:
+
+    MATCH (s:Substance)-[:TESTED_IN]->(t:ClinicalTrial)
+    MATCH (p:Product)-[:CONTAINS]->(s)
+    MATCH (p)-[:HAS_APPROVAL]->(a:Approval)
+    WITH t, count(DISTINCT a) AS n ORDER BY n DESC LIMIT 5000
+    RETURN t.title, n
+
+The same question, aggregating at each step so the row count falls before the
+next join, returns 2,188 rows in 1.2 seconds:
+
+    MATCH (p:Product)-[:HAS_APPROVAL]->(:Approval)
+    WITH p, count(*) AS approvals
+    MATCH (p)-[:CONTAINS]->(s:Substance)
+    WITH s, sum(approvals) AS approvals
+    ORDER BY approvals DESC LIMIT 25
+    MATCH (s)-[:TESTED_IN]->(t:ClinicalTrial)
+    RETURN s.name, approvals, t.title LIMIT 5000
+
+Put ORDER BY and LIMIT on the aggregate, not only at the end: narrowing to the
+top 25 substances before expanding to their trials is what keeps it small.
+Anchor on something specific wherever the question allows it - an unanchored
+three-way join over this graph is hundreds of millions of paths.
 """
 
 

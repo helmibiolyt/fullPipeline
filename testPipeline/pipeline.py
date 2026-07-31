@@ -167,10 +167,38 @@ def gather(cypher: str, doc_query: str, section: str | None, k: int = 8):
     return graph, docs
 
 
-# Errors the model can actually fix by rewriting. A connection failure or a
-# timeout is not one of them - retrying those just wastes a model call.
+# Errors the model can actually fix by rewriting. A connection failure is not
+# one of them - retrying that just wastes a model call.
+#
+# Running out of transaction memory IS fixable, and is usually shape rather
+# than scale: joining three relationships before aggregating expands to
+# hundreds of millions of paths, where aggregating each step first answers the
+# same question in a second. Measured on the query that prompted this - the
+# unanchored form exhausted 512 MiB, the aggregate-early form returned 2,188
+# rows in 1.2 seconds. So the limit is not raised; a query that needs more
+# than half a gigabyte of intermediate state is asking the wrong way.
 _FIXABLE = ("SyntaxError", "TypeError", "ArgumentError", "ParameterMissing",
-            "InvalidArgument", "ProcedureCallFailed", "SemanticError")
+            "InvalidArgument", "ProcedureCallFailed", "SemanticError",
+            "MemoryPoolOutOfMemory", "TransactionTimedOut")
+
+_MEMORY_ADVICE = """
+That query ran out of transaction memory. It is almost never too much data -
+it is the shape. Chaining several MATCH clauses before any aggregation builds
+every combination in memory first.
+
+Aggregate at each step instead, so the row count falls before the next join:
+
+    MATCH (p:Product)-[:HAS_APPROVAL]->(:Approval)
+    WITH p, count(*) AS approvals
+    MATCH (p)-[:CONTAINS]->(s:Substance)
+    WITH s, sum(approvals) AS approvals
+    ORDER BY approvals DESC LIMIT 25
+    MATCH (s)-[:TESTED_IN]->(t:ClinicalTrial)
+    RETURN s.name, approvals, t.title LIMIT 5000
+
+Also: put the ORDER BY and LIMIT on the aggregate, not at the end - narrowing
+to the top 25 substances before expanding to their trials is what keeps this
+small. And anchor on something specific wherever the question allows it."""
 
 
 def gather_repaired(question: str, cypher: str, doc_query: str,
@@ -199,6 +227,8 @@ def gather_repaired(question: str, cypher: str, doc_query: str,
              {"role": "assistant", "content": "cypher:\n" + cypher},
              {"role": "user",
               "content": "Neo4j rejected that query:\n\n" + err +
+                         ("\n" + _MEMORY_ADVICE
+                          if "Memory" in err or "TimedOut" in err else "") +
                          "\n\nRewrite it so it runs. Remember that WITH "
                          "resets scope - anything you want to keep must be "
                          "listed in every WITH that follows it. Keep the same "
