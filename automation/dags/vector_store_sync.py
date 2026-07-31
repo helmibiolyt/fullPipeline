@@ -25,17 +25,29 @@ sys.path.insert(0, "/opt/pylib")
 from scrape_pipeline.registry import load_sources          # noqa: E402
 from scrape_pipeline.settings import S3_BUCKET             # noqa: E402
 
-# Sources that actually publish documents. Derived from the manifests rather
-# than hardcoded, so a new document source is picked up by adding its manifest.
+# Sources that publish documents. Hand-maintained on purpose, and it has to
+# be: only 3 of the 10 sources that actually write PDFs declare a pdf output
+# subdir in their manifest, so deriving this set would silently miss seven of
+# them. An earlier comment here claimed it WAS derived, which promised a
+# safety property that did not exist - add a document source to this set by
+# hand, or it will never wake this DAG.
+#
+# Verified against the lake inventory on 2026-07-31: these are exactly the
+# sources holding objects ending in .pdf.
 DOC_SOURCES = {
-    "Regulatory_Approvals/products.mhra.gov.uk",
-    "Regulatory_Approvals/ema.europa.eu",
-    "Regulatory_Approvals/pmda.go.jp",
-    "MENA_GCC_Regulatory_Market/dha.gov.ae",
-    "MENA_GCC_Regulatory_Market/doh.gov.ae",
-    "MENA_GCC_Regulatory_Market/nhra.bh",
-    "MENA_GCC_Regulatory_Market/moph.gov.qa",
-    "MENA_GCC_Regulatory_Market/moh.gov.om",
+    "Regulatory_Approvals/products.mhra.gov.uk",      # 70,559 PDFs
+    "Regulatory_Approvals/ema.europa.eu",             # 22,150
+    "Regulatory_Approvals/pmda.go.jp",                #    547
+    "MENA_GCC_Regulatory_Market/dha.gov.ae",          #     88
+    "MENA_GCC_Regulatory_Market/doh.gov.ae",          #     60
+    "MENA_GCC_Regulatory_Market/moh.gov.om",          #     18
+    "MENA_GCC_Regulatory_Market/nhra.bh",             #      9
+    "MENA_GCC_Regulatory_Market/moph.gov.qa",         #      1
+    # These two were missing. Their chunks are in Qdrant already - a full
+    # ingest picked them up - but nothing woke this DAG when they published,
+    # so new documents from them would have been dropped without an error.
+    "Clinical_Trials_Pipeline_Intelligence/anzctr.org.au",   # 1
+    "Ontologies_Standards/loinc.org",                        # 1
 }
 
 _datasets = [Dataset(f"s3://{S3_BUCKET}/{s.s3_base}")
