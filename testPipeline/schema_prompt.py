@@ -93,30 +93,17 @@ HOW TO FIND A STARTING NODE — this is where queries fail, not traversal.
 
 THINGS THAT WILL MISLEAD YOU
 
-* TARGETS ARE A SPECIAL CASE — READ THIS BEFORE WRITING ANY QUERY ABOUT A
-  PROTEIN OR GENE.
-  Target.symbol and Target.gene_family are EMPTY on all 16,624 nodes, even
-  though the schema declares them. Targets carry ONLY the full protein name,
-  stored capitalised ("Epidermal growth factor receptor").
-  Because of that, ALL THREE of these return zero rows, always:
-      (:Target {{symbol:'EGFR'}})
-      (:Target {{name:'epidermal growth factor receptor'}})
-      WHERE t.name = 'epidermal growth factor receptor'
-  Any question naming a gene or protein MUST use this exact shape:
-
-      CALL db.index.fulltext.queryNodes('entity_names', '<protein name>')
-      YIELD node WHERE node:Target
-      WITH node AS t LIMIT 3
-      MATCH (s:Substance)-[:TARGETS]->(t)
-      RETURN DISTINCT s.name, t.name LIMIT 25
-
-  Expand the symbol to the protein name for the search string: EGFR ->
-  "epidermal growth factor receptor", HER2 -> "receptor tyrosine protein
-  kinase erbB-2", VEGFR2 -> "vascular endothelial growth factor receptor 2",
-  PD-1 -> "programmed cell death protein 1", ALK -> "ALK tyrosine kinase
-  receptor", BRAF -> "serine/threonine-protein kinase B-raf".
-  If you know the UniProt accession, key directly instead — that is exact and
-  always works: (:Target {{key:'UNIPROT:P00533'}}) is EGFR.
+* Target.symbol is populated for 5,902 of 16,624 nodes - the human proteins
+  HGNC covers. Prefer it, it is exact and indexed:
+      MATCH (s:Substance)-[:TARGETS]->(t:Target {{symbol:'EGFR'}})
+      RETURN DISTINCT s.name LIMIT 25
+  The other 10,722 are non-human or complexes and carry only a protein name.
+  If a symbol lookup returns nothing, fall back to the full-text index with
+  the protein name expanded - EGFR -> "epidermal growth factor receptor",
+  HER2 -> "receptor tyrosine protein kinase erbB-2", PD-1 -> "programmed cell
+  death protein 1", BRAF -> "serine/threonine-protein kinase B-raf".
+  Never use `WHERE t.name = '...'`: stored names are capitalised, so equality
+  on a lowercase phrase matches nothing.
 
 * Trial keys look doubled — `NCT:NCT01045135` is correct. 19 of 22 registries
   embed their prefix in the id. Filter registry with

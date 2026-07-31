@@ -112,9 +112,14 @@ CREATE INDEX identifier_value    IF NOT EXISTS FOR (n:Identifier) ON (n.value);
 //
 // A label without one of the listed properties is skipped for it, so listing
 // name and synonyms together is safe even where only one exists.
+// `symbol` is listed because a gene symbol is what people actually type.
+// Until Target.symbol was populated it was always null, so indexing it would
+// have done nothing; now searching "EGFR" reaches the protein directly
+// instead of requiring the caller to know it as "Epidermal growth factor
+// receptor".
 CREATE FULLTEXT INDEX entity_names IF NOT EXISTS
 FOR (n:Substance|Product|Disease|Target|Company|Mechanism|DrugClass|OrganClass|Variant)
-ON EACH [n.name, n.synonyms];
+ON EACH [n.name, n.synonyms, n.symbol];
 
 // Titles are long free text and score differently from names; keeping them in
 // their own index stops a 400-character trial title from crowding out an exact

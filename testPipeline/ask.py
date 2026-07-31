@@ -43,9 +43,33 @@ load_dotenv(HERE / ".env")
 from schema_prompt import (ROUTER_SYSTEM, TOOLS, graph_schema,  # noqa: E402
                            live_counts)
 
-GROQ_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+# Two providers, one shape. Both speak the OpenAI chat-completions dialect and
+# both honour tool_choice="required", which is the property this pipeline is
+# built on - the router must call one of the two tools and may never answer
+# from its own knowledge.
+#
+# They differ in how they report failure: Groq uses HTTP status codes, MiniMax
+# returns HTTP 200 with the real outcome in base_resp. A client that only
+# checks the status code reads a MiniMax quota error as a successful empty
+# reply.
+PROVIDER = os.getenv("LLM_PROVIDER", "minimax").strip().lower()
+
+PROVIDERS = {
+    "groq": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "key": os.getenv("GROQ_API_KEY", ""),
+        "model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+    },
+    "minimax": {
+        "url": "https://api.minimax.io/v1/text/chatcompletion_v2",
+        "key": os.getenv("MINIMAX_API_KEY", ""),
+        "model": os.getenv("MINIMAX_MODEL", "MiniMax-M2"),
+    },
+}
+_P = PROVIDERS.get(PROVIDER) or PROVIDERS["groq"]
+GROQ_KEY = _P["key"]
+GROQ_MODEL = _P["model"]
+GROQ_URL = _P["url"]
 
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://4.233.210.24:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
@@ -95,8 +119,9 @@ def check_cypher(q: str) -> str | None:
 def route(question: str, verbose=False) -> dict:
     """Ask Groq which of the two stores to use, and for the query to run."""
     if not GROQ_KEY:
-        sys.exit("GROQ_API_KEY missing - copy testPipeline/.env.example "
-                 "to testPipeline/.env and fill it in")
+        sys.exit(f"no API key for provider {PROVIDER!r} - set "
+                 f"{'MINIMAX_API_KEY' if PROVIDER == 'minimax' else 'GROQ_API_KEY'} "
+                 f"in testPipeline/.env")
 
     body = {
         "model": GROQ_MODEL,
@@ -136,8 +161,14 @@ def route(question: str, verbose=False) -> dict:
             print(dim(f"  rate limited, waiting {wait:.1f}s"))
         time.sleep(wait)
     if r.status_code != 200:
-        sys.exit(f"groq {r.status_code}: {r.text[:400]}")
+        sys.exit(f"{PROVIDER} {r.status_code}: {r.text[:400]}")
     data = r.json()
+    # MiniMax answers 200 even when it refuses: insufficient balance, an
+    # invalid key and a rate limit all arrive here rather than as a status.
+    br = data.get("base_resp") or {}
+    if br.get("status_code"):
+        sys.exit(f"{PROVIDER}: {br.get('status_msg')} "
+                 f"(code {br['status_code']})")
     msg = data["choices"][0]["message"]
     calls = msg.get("tool_calls") or []
     if not calls:
