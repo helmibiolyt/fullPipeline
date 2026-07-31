@@ -210,7 +210,7 @@ def run(question: str, k: int = 8) -> dict:
            "plan_ms": 0, "answer_ms": 0, "tokens": 0,
            "model": A.GROQ_MODEL, "provider": A.PROVIDER}
     try:
-        args, pms, ptok = plan(question)
+        args, pms, ptok = plan_checked(question)
         out["plan_ms"] = pms
         out["tokens"] += ptok
         out["cypher"] = (args.get("cypher") or "").strip()
@@ -256,7 +256,7 @@ def run_streamed(question: str, k: int = 8):
     """
     t0 = time.time()
     try:
-        args, pms, ptok = plan(question)
+        args, pms, ptok = plan_checked(question)
     except Exception as e:                                   # noqa: BLE001
         yield {"stage": "error", "error": f"{type(e).__name__}: {str(e)[:300]}"}
         return
@@ -293,3 +293,95 @@ def run_streamed(question: str, k: int = 8):
     yield {"stage": "answer", "answer": text, "sources": srcs,
            "answer_ms": ams, "tokens": ptok + atok,
            "total_ms": int((time.time() - t0) * 1000)}
+
+
+# --------------------------------------------------------------------------
+# Direction checking.
+#
+# Telling the model which way each arrow points does not reliably work. It
+# wrote (:Product)<-[:HAS_APPROVAL]-(:Approval) with the arrow reversed, which
+# matches nothing and raises nothing - the answer then says "the graph has no
+# such data", which is false and unfalsifiable from the outside.
+#
+# So the direction is checked against the schema before the query runs. Only
+# patterns where BOTH ends carry a label can be checked; anything else is left
+# alone rather than guessed at.
+# Wrapped in a lookahead so matches may OVERLAP. A chained path,
+# (a)-[r1]-(b)-[r2]-(c), shares node (b) between the two links; a consuming
+# match eats it and never sees the second relationship - which is exactly
+# where the reversed HAS_APPROVAL was hiding.
+_PAT = re.compile(
+    r"(?=("
+    r"\(\s*\w*\s*:\s*(\w+)[^)]*\)\s*(<-|-)\s*\[\s*:?\s*(\w+)[^\]]*\]\s*(->|-)\s*"
+    r"\(\s*\w*\s*:\s*(\w+)[^)]*\)"
+    r"))")
+
+
+def _allowed(spec: str) -> set[str]:
+    return {x.strip() for x in spec.replace("|", " ").split() if x.strip()}
+
+
+def check_directions(cypher: str) -> list[str]:
+    """Reversed or impossible relationships, as human-readable complaints."""
+    from make_tech_doc import EDGES
+
+    problems = []
+    for _whole, left_label, larrow, rel, rarrow, right_label in             _PAT.findall(cypher):
+        spec = EDGES.get(rel)
+        if not spec:
+            continue
+        src_ok, dst_ok = _allowed(spec[0]), _allowed(spec[1])
+        if src_ok == {"any"}:
+            continue
+        # Which node is the source depends on which side the arrowhead is on.
+        if larrow == "<-":
+            src, dst = right_label, left_label
+        elif rarrow == "->":
+            src, dst = left_label, right_label
+        else:
+            continue                      # undirected, nothing to check
+        if src in src_ok and (dst in dst_ok or dst_ok == {"any"}):
+            continue
+        if dst in src_ok and src in dst_ok:
+            problems.append(
+                f"{rel} is written backwards: it runs "
+                f"(:{spec[0]})-[:{rel}]->(:{spec[1]}), "
+                f"you wrote it from {src} to {dst}")
+        else:
+            problems.append(
+                f"{rel} cannot connect {src} to {dst}: it runs "
+                f"(:{spec[0]})-[:{rel}]->(:{spec[1]})")
+    return problems
+
+
+def plan_checked(question: str) -> tuple[dict, int, int]:
+    """plan(), with one repair attempt if the Cypher points the wrong way."""
+    args, ms, tok = plan(question)
+    problems = check_directions(args.get("cypher", ""))
+    if not problems:
+        return args, ms, tok
+
+    t0 = time.time()
+    data = _chat(
+        [{"role": "system",
+          "content": PLANNER_SYSTEM + "\n\nGRAPH SCHEMA\n"
+                     + graph_schema(live_counts(A.run_cypher))},
+         {"role": "user", "content": question},
+         {"role": "assistant",
+          "content": "cypher:\n" + args.get("cypher", "")},
+         {"role": "user",
+          "content": "That query will match nothing. " + " ".join(problems)
+                     + " Rewrite both queries with every arrow the way the "
+                       "schema states. Remember a Substance is approved when "
+                       "EXISTS { (:Product)-[:CONTAINS]->(s) } - there is no "
+                       "path from Substance to Approval."}],
+        tools=PLAN_TOOL, max_tokens=PLAN_TOKENS)
+    calls = data["choices"][0]["message"].get("tool_calls") or []
+    if calls:
+        fixed = _parse_args(calls[0]["function"]["arguments"])
+        if fixed.get("cypher") and not check_directions(fixed["cypher"]):
+            fixed.setdefault("document_query", args.get("document_query", ""))
+            fixed.setdefault("section", args.get("section", ""))
+            return (fixed, ms + int((time.time() - t0) * 1000),
+                    tok + data.get("usage", {}).get("total_tokens", 0))
+    return args, ms + int((time.time() - t0) * 1000), tok
