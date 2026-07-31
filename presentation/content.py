@@ -214,18 +214,82 @@ def human(n: float) -> str:
 
 
 # --------------------------------------------------------------------------
-# Entities: what each label is, and where it comes from. Node counts are from
-# the live graph on 2026-07-31.
-NODE_COUNTS = {
-    "Substance": "3,070,258", "Identifier": "7,947,581",
-    "ClinicalTrial": "1,049,701", "Variant": "937,377", "Product": "210,074",
-    "Approval": "201,430", "Company": "159,409", "RegulatoryEvent": "27,069",
-    "Disease": "24,488", "Target": "16,624", "DrugClass": "6,996",
-    "AdverseEvent": "6,981", "Publication": "6,324", "Exclusivity": "2,344",
-    "Mechanism": "1,967", "Patent": "7,971", "Country": "189", "Route": "145",
-    "OrganClass": "27", "RegulatoryAgency": "11", "Modality": "11",
-    "Region": "9",
+# Entities: what each label is, and where it comes from.
+#
+# Counts are READ FROM THE LIVE GRAPH, not written here. They move on every
+# rebuild - the last one changed Disease by 1,085 as duplicate vocabulary
+# entries merged, and the next will drop ClinicalTrial by roughly 33,000 as
+# duplicate registry keys collapse. A number typed into a slide is correct
+# until the first rebuild and wrong afterwards, silently, in front of an
+# investor.
+#
+# The snapshot below is a fallback for building the deck without database
+# access, and it is dated so a stale one is obvious.
+FALLBACK_COUNTS = {
+    "Substance": 3_070_258, "Identifier": 7_947_581,
+    "ClinicalTrial": 1_049_701, "Variant": 937_377, "Product": 210_074,
+    "Approval": 201_430, "Company": 159_409, "RegulatoryEvent": 27_069,
+    "Disease": 23_403, "Target": 16_624, "Patent": 7_971, "DrugClass": 6_996,
+    "AdverseEvent": 6_981, "Publication": 6_324, "Exclusivity": 2_344,
+    "Mechanism": 1_967, "Country": 189, "Route": 145, "OrganClass": 27,
+    "RegulatoryAgency": 11, "Modality": 11, "Region": 9,
 }
+FALLBACK_DATE = "2026-07-31"
+
+_live: dict | None = None
+
+
+def live_counts() -> dict:
+    """label -> count, from Neo4j; the dated snapshot if it is unreachable.
+
+    Each `MATCH (n:Label) RETURN count(n)` is answered from the count store in
+    constant time, so all 22 plus the totals cost one round trip.
+    """
+    global _live
+    if _live is not None:
+        return _live
+    try:
+        sys.path.insert(0, str(ROOT / "testPipeline"))
+        import ask as A                                      # noqa: PLC0415
+        q = "\nUNION ALL\n".join(
+            f"MATCH (n:{l}) RETURN '{l}' AS label, count(n) AS n"
+            for l in sorted(NODE_COLUMNS))
+        rows, _ms = A.run_cypher(q)
+        _live = {r["label"]: r["n"] for r in rows}
+        tot, _ = A.run_cypher("MATCH (n) RETURN count(n) AS n")
+        edg, _ = A.run_cypher("MATCH ()-[r]->() RETURN count(r) AS n")
+        _live["_nodes"], _live["_edges"] = tot[0]["n"], edg[0]["n"]
+        _live["_source"] = "live"
+    except Exception as e:                                   # noqa: BLE001
+        print(f"  ! graph unreachable ({type(e).__name__}); using the "
+              f"{FALLBACK_DATE} snapshot")
+        _live = dict(FALLBACK_COUNTS)
+        _live["_nodes"] = sum(FALLBACK_COUNTS.values())
+        _live["_edges"] = 16_821_596
+        _live["_source"] = f"snapshot {FALLBACK_DATE}"
+    return _live
+
+
+def count(label: str) -> str:
+    n = live_counts().get(label)
+    return f"{n:,}" if isinstance(n, int) else "—"
+
+
+def millions(n: int) -> str:
+    return f"{n/1_000_000:.1f}M" if n >= 1_000_000 else f"{n:,}"
+
+
+# Kept as a name so existing slide code reads unchanged; now formatted from
+# whatever live_counts() returned.
+class _Counts(dict):
+    def get(self, k, default="—"):
+        return count(k) if k in live_counts() else default
+
+    def __getitem__(self, k):
+        return count(k)
+
+
+NODE_COUNTS = _Counts()
 
 NODE_ORIGIN = {
     "Substance": ("gsrs, ChEMBL molecules",

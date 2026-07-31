@@ -143,14 +143,15 @@ def build():
                "One connected view of\nglobal drug development",
                size=52, color=T.TEXT, bold=True, line=1.08)
     c = T.text(s, T.MARGIN, Inches(4.5), Inches(9.6), Inches(0.9),
-               "49 data sources, reconciled into a 13.7M-node knowledge graph "
+               f"49 data sources, reconciled into a "
+               f"{C.millions(C.live_counts()['_nodes'])}-node knowledge graph "
                "and a 3.2M-chunk document store — kept current automatically.",
                size=15.5, color=T.MUTED, line=1.4)
     stats = T.rect(s, T.MARGIN, Inches(5.65), FULL, Inches(1.05),
                    T.PANEL, radius=0.06)
     for i, (v, l, col) in enumerate([
-            ("13.7M", "graph nodes", T.BLUE),
-            ("16.8M", "relationships", T.BLUE),
+            (C.millions(C.live_counts()["_nodes"]), "graph nodes", T.BLUE),
+            (C.millions(C.live_counts()["_edges"]), "relationships", T.BLUE),
             ("3.24M", "document chunks", T.VIOLET),
             ("93,505", "documents", T.VIOLET),
             ("41", "live sources", T.GREEN)]):
@@ -889,8 +890,8 @@ def build():
 
     s, y = new(prs, "what exists today", "Where the platform stands", T.GREEN)
     for i, (v, l, col) in enumerate([
-            ("13.7M", "graph nodes", T.BLUE),
-            ("16.8M", "relationships", T.BLUE),
+            (C.millions(C.live_counts()["_nodes"]), "graph nodes", T.BLUE),
+            (C.millions(C.live_counts()["_edges"]), "relationships", T.BLUE),
             ("3.24M", "document chunks", T.VIOLET),
             ("41", "live sources", T.CYAN)]):
         T.stat(s, T.MARGIN + Inches(i * 3.0), y, Inches(2.8), v, l, col,
@@ -970,7 +971,8 @@ def _architecture(s, y):
              {"size": 11.5, "color": T.MUTED, "space_after": 6}),
             ("build → validate → import  (Neo4j)",
              {"size": 11.5, "color": T.MUTED, "space_after": 10}),
-            ("13,676,986 nodes   16,830,561 relationships",
+            (f"{C.live_counts()['_nodes']:,} nodes   "
+             f"{C.live_counts()['_edges']:,} relationships",
              {"size": 13, "color": T.TEXT, "bold": True, "space_after": 8}),
             ("22 entity types · 32 relationship types · 3 full-text indexes",
              {"size": 11, "color": T.DIM, "space_after": 6}),
