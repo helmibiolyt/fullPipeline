@@ -26,7 +26,14 @@ from schema_prompt import (ANSWER_SYSTEM, PLAN_TOOL,  # noqa: F401
                            PLANNER_SYSTEM, graph_schema, live_counts)
 
 
-def _chat(messages, tools=None, tool_choice=None, max_tokens=2000):
+# A reasoning model spends tokens thinking before it emits anything, and that
+# spend comes out of the same budget as the output. Too low a ceiling
+# truncates the tool call rather than shortening it.
+PLAN_TOKENS = 6000
+ANSWER_TOKENS = 2500
+
+
+def _chat(messages, tools=None, tool_choice=None, max_tokens=2500):
     """One call to whichever provider is configured."""
     body = {"model": A.GROQ_MODEL, "messages": messages,
             "temperature": 0.1, "max_tokens": max_tokens}
@@ -47,6 +54,40 @@ def _chat(messages, tools=None, tool_choice=None, max_tokens=2000):
     return data
 
 
+def _parse_args(raw: str) -> dict:
+    """Tool arguments, repaired if the model ran out of tokens mid-string.
+
+    MiniMax-M2 reasons before it answers, and that reasoning is charged
+    against the same budget as the tool call. Hit the ceiling and the
+    arguments arrive as truncated JSON - {"cypher": "MATCH (s:Sub - which
+    fails with "Unterminated string". A bigger budget is the real fix; this
+    salvages the run when it happens anyway, because a slightly short Cypher
+    query is still worth running and a crash is not.
+    """
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    patched = raw
+    if patched.count('"') % 2:
+        patched += '"'
+    patched += "}" * max(0, patched.count("{") - patched.count("}"))
+    try:
+        return json.loads(patched)
+    except json.JSONDecodeError:
+        pass
+    out = {}
+    for field in ("cypher", "document_query", "section"):
+        m = re.search(r'"' + field + r'"\s*:\s*"((?:[^"\\]|\\.)*)', raw)
+        if m:
+            out[field] = m.group(1).replace('\\"', '"').replace("\\n", " ")
+    if not out.get("cypher") and not out.get("document_query"):
+        raise RuntimeError(
+            f"the planner's tool call was truncated beyond repair "
+            f"({len(raw)} chars): {raw[:160]}")
+    return out
+
+
 def plan(question: str) -> tuple[dict, int, int]:
     """Both queries, in one forced tool call."""
     t0 = time.time()
@@ -55,13 +96,16 @@ def plan(question: str) -> tuple[dict, int, int]:
           "content": PLANNER_SYSTEM + "\n\nGRAPH SCHEMA\n"
                      + graph_schema(live_counts(A.run_cypher))},
          {"role": "user", "content": question}],
-        tools=PLAN_TOOL)
+        tools=PLAN_TOOL, max_tokens=PLAN_TOKENS)
     msg = data["choices"][0]["message"]
     calls = msg.get("tool_calls") or []
     if not calls:
         raise RuntimeError("the planner answered instead of writing queries: "
                            + (msg.get("content") or "")[:200])
-    args = json.loads(calls[0]["function"]["arguments"])
+    args = _parse_args(calls[0]["function"]["arguments"])
+    if not args.get("document_query"):
+        # Optional to recover: the question itself is a serviceable search.
+        args["document_query"] = question
     return (args, int((time.time() - t0) * 1000),
             data.get("usage", {}).get("total_tokens", 0))
 
@@ -139,7 +183,7 @@ def answer(question: str, graph: dict, docs: dict) -> tuple[str, list, int, int]
         {"role": "system", "content": ANSWER_SYSTEM},
         {"role": "user",
          "content": f"QUESTION: {question}\n\n{_evidence(graph, docs)}"},
-    ], max_tokens=1200)
+    ], max_tokens=ANSWER_TOKENS)
     msg = data["choices"][0]["message"]
     text = (msg.get("content") or "").strip()
     # MiniMax-M2 is a reasoning model: with no tool call to make it commit,
@@ -199,3 +243,53 @@ def run(question: str, k: int = 8) -> dict:
         out["error"] = f"{type(e).__name__}: {str(e)[:300]}"
     out["total_ms"] = int((time.time() - t0) * 1000)
     return out
+
+
+def run_streamed(question: str, k: int = 8):
+    """The same three stages, yielding each as it completes.
+
+    The whole thing takes 15-25 seconds and most of that is the two model
+    calls. Waiting on a single response means staring at a spinner with no
+    idea whether anything is happening; yielding after the plan, and again
+    after the stores answer, shows the queries and the evidence within a few
+    seconds and leaves only the prose outstanding.
+    """
+    t0 = time.time()
+    try:
+        args, pms, ptok = plan(question)
+    except Exception as e:                                   # noqa: BLE001
+        yield {"stage": "error", "error": f"{type(e).__name__}: {str(e)[:300]}"}
+        return
+
+    cypher = (args.get("cypher") or "").strip()
+    dq = args.get("document_query", "")
+    section = args.get("section") or ""
+    yield {"stage": "plan", "cypher": cypher, "document_query": dq,
+           "section": section, "plan_ms": pms, "tokens": ptok}
+
+    graph, docs = gather(cypher, dq, section or None, k)
+    yield {"stage": "evidence",
+           "graph": {"rows": [{k2: A._fmt(v) for k2, v in r.items()}
+                              for r in graph["rows"][:25]],
+                     "columns": list(graph["rows"][0].keys())
+                     if graph["rows"] else [],
+                     "total": len(graph["rows"]), "ms": graph["ms"],
+                     "error": graph["error"]},
+           "docs": {"chunks": [{
+               "score": c.get("score") or c.get("rerank_score") or 0,
+               "source": c.get("source", ""),
+               "file": (c.get("s3_key") or "").split("/")[-1],
+               "heading": c.get("heading") or c.get("section") or "",
+               "text": " ".join((c.get("text") or "").split())[:1200],
+           } for c in docs["chunks"][:k]],
+               "total": len(docs["chunks"]), "ms": docs["ms"],
+               "error": docs["error"]}}
+
+    try:
+        text, srcs, ams, atok = answer(question, graph, docs)
+    except Exception as e:                                   # noqa: BLE001
+        yield {"stage": "error", "error": f"{type(e).__name__}: {str(e)[:300]}"}
+        return
+    yield {"stage": "answer", "answer": text, "sources": srcs,
+           "answer_ms": ams, "tokens": ptok + atok,
+           "total_ms": int((time.time() - t0) * 1000)}

@@ -50,6 +50,29 @@ def ask(req: Ask):
     return JSONResponse(P.run(req.question, k=req.k))
 
 
+@app.post("/ask/stream")
+def ask_stream(req: Ask):
+    """Server-sent events, one per stage, so the page fills in as it goes."""
+    import json as _json
+
+    from fastapi.responses import StreamingResponse
+
+    SEP = "\n\n"          # SSE frames are terminated by a blank line
+
+    def gen():
+        try:
+            for ev in P.run_streamed(req.question, k=req.k):
+                yield "data: " + _json.dumps(ev) + SEP
+        except Exception as e:                               # noqa: BLE001
+            yield "data: " + _json.dumps(
+                {"stage": "error",
+                 "error": f"{type(e).__name__}: {str(e)[:300]}"}) + SEP
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-store",
+                                      "X-Accel-Buffering": "no"})
+
+
 PAGE = r"""
 <!doctype html><meta charset=utf-8>
 <title>Biolyt · ask</title>
@@ -185,27 +208,70 @@ document.getElementById('f').onsubmit=e=>{e.preventDefault();submit();};
 const esc=s=>String(s??'').replace(/[&<>"]/g,
   c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
+let D={};   // accumulates the stages as they stream in
+
+function spin(msg){
+  return '<div class=spin><span class=dot></span><span class=dot></span>'+
+         '<span class=dot></span> '+msg+'</div>';
+}
+
 async function submit(){
   const question=qEl.value.trim(); if(!question) return;
   go.disabled=true;
-  out.innerHTML='<div class=spin><span class=dot></span><span class=dot>'+
-    '</span><span class=dot></span> asking the graph and the documents'+
-    '&hellip;</div>';
+  D={question,plan_ms:0,answer_ms:0,tokens:0};
+  const t0=Date.now();
+  out.innerHTML=spin('writing the two queries&hellip;');
+
   try{
-    const r=await fetch('/ask',{method:'POST',
+    const r=await fetch('/ask/stream',{method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({question,k:6})});
-    const data=await r.json();
-    try{ render(data); }
-    catch(e){
-      out.innerHTML='<div class=err>display error: '+esc(e.message)+
-        '<br><br>The answer came back fine &mdash; this is the page failing '+
-        'to draw it. Reload with Ctrl+F5 if you had an older version open.'+
-        '</div><pre class=q>'+esc(JSON.stringify(data,null,1).slice(0,1500))+
-        '</pre>';
+    const rd=r.body.getReader(), dec=new TextDecoder();
+    let buf='';
+    while(true){
+      const {value,done}=await rd.read();
+      if(done) break;
+      buf+=dec.decode(value,{stream:true});
+      let i;
+      while((i=buf.indexOf('
+
+'))>=0){
+        const line=buf.slice(0,i).trim(); buf=buf.slice(i+2);
+        if(!line.startsWith('data:')) continue;
+        let ev; try{ ev=JSON.parse(line.slice(5)); }catch(e){ continue; }
+        Object.assign(D,ev);
+        try{ paint(ev.stage,((Date.now()-t0)/1000).toFixed(1)); }
+        catch(e){
+          out.innerHTML='<div class=err>display error: '+esc(e.message)+
+            '</div><pre class=q>'+
+            esc(JSON.stringify(D,null,1).slice(0,1500))+'</pre>';
+        }
+      }
     }
   }catch(err){ out.innerHTML='<div class=err>'+esc(err)+'</div>'; }
   go.disabled=false;
+}
+
+function paint(stage,secs){
+  if(stage==='error'){
+    out.innerHTML='<div class=err>'+esc(D.error)+'</div>'; return;
+  }
+  if(stage==='plan'){
+    out.innerHTML=spin('querying the graph and 3.24M document chunks&hellip;')+
+      '<div class=meta>queries written in '+D.plan_ms+' ms</div>'+
+      '<pre class=q>'+esc(D.cypher)+'</pre>'+
+      '<pre class="q v">'+esc(D.document_query)+'</pre>';
+    return;
+  }
+  if(stage==='evidence'){
+    const g=D.graph||{}, dc=D.docs||{};
+    out.innerHTML=spin('writing the answer&hellip;  '+secs+'s')+
+      '<div class=meta>graph '+(g.total||0)+' rows in '+(g.ms||0)+
+      ' ms &middot; documents '+(dc.total||0)+' chunks in '+(dc.ms||0)+
+      ' ms</div>'+evidenceHtml();
+    return;
+  }
+  render(D);   // stage === 'answer'
 }
 
 function section(title,count,inner,open){
@@ -231,15 +297,22 @@ function render(d){
        d.sources.map(s=>'<span class=tag>'+esc(s)+'</span>').join('')+'</div>';
   h+='</div>';
 
-  const g=d.graph||{}, dc=d.docs||{};
-  g.rows=g.rows||[]; g.columns=g.columns||[]; dc.chunks=dc.chunks||[];
-  h+='<div class=meta>planned in '+d.plan_ms+' ms &middot; graph '+
+  const g=D.graph||{}, dc=D.docs||{};
+  h+='<div class=meta>planned in '+(d.plan_ms||0)+' ms &middot; graph '+
      (g.ms||0)+' ms &middot; documents '+(dc.ms||0)+
-     ' ms &middot; answered in '+d.answer_ms+' ms &middot; '+d.tokens+
-     ' tokens</div>';
+     ' ms &middot; answered in '+(d.answer_ms||0)+' ms &middot; '+
+     (d.tokens||0)+' tokens</div>';
+  h+=evidenceHtml();
+  out.innerHTML=h;
+}
 
-  // ---- graph evidence
-  let gi='<pre class=q>'+esc(d.cypher)+'</pre>';
+// Shared by the streaming view and the final one, so the evidence a reader
+// sees mid-flight is the same markup they end up with.
+function evidenceHtml(){
+  const g=D.graph||{}, dc=D.docs||{};
+  g.rows=g.rows||[]; g.columns=g.columns||[]; dc.chunks=dc.chunks||[];
+
+  let gi='<pre class=q>'+esc(D.cypher||'')+'</pre>';
   if(g.error) gi+='<div class=err>'+esc(g.error)+'</div>';
   else if(!g.total) gi+='<div class=none>The query ran and matched nothing. '+
     'That usually means the starting node was not found, not that the graph '+
@@ -252,24 +325,22 @@ function render(d){
     if(g.total>g.rows.length)
       gi+='<div class=meta>showing '+g.rows.length+' of '+g.total+'</div>';
   }
-  h+=section('Knowledge graph', (g.total||0)+' rows', gi, false);
 
-  // ---- document evidence
-  let di='<pre class="q v">'+esc(d.document_query)+
-    (d.section?'   [section: '+esc(d.section)+']':'')+'</pre>';
+  let di='<pre class="q v">'+esc(D.document_query||'')+
+    (D.section?'   [section: '+esc(D.section)+']':'')+'</pre>';
   if(dc.error) di+='<div class=err>'+esc(dc.error)+'</div>';
   else if(!dc.total) di+='<div class=none>Nothing scored above the 0.6 '+
     'relevance floor &mdash; the corpus has nothing to say about this.</div>';
   else dc.chunks.forEach(c=>{
     di+='<div class=chunk><div class=chead><span class=score>'+
-      c.score.toFixed(3)+'</span><span class=head>'+esc(c.heading)+
+      (c.score||0).toFixed(3)+'</span><span class=head>'+esc(c.heading)+
       '</span><span class=src>'+esc(c.source)+'</span></div>'+
       '<div class=file>'+esc(c.file)+'</div>'+
       '<div class=body>'+esc(c.text)+'</div></div>';
   });
-  h+=section('Regulatory documents', (dc.total||0)+' chunks', di, false);
 
-  out.innerHTML=h;
+  return section('Knowledge graph', (g.total||0)+' rows', gi, false)
+       + section('Regulatory documents', (dc.total||0)+' chunks', di, false);
 }
 </script>
 """
