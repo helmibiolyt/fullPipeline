@@ -18,6 +18,7 @@ that nothing reads.
 from __future__ import annotations
 
 import csv
+import re
 import json
 import pathlib
 from dataclasses import dataclass, field
@@ -143,6 +144,27 @@ for _etype, _cols in EDGE_COLUMNS.items():
     assert not _clash, f"{_etype} declares {_clash}, which PROV already adds"
 
 
+# A serialised lookup row where a value belongs.
+#
+# SFDA's API returns whole objects for fields that should be strings, and it
+# has done so for four different fields found one at a time: administration
+# route, dosage form, marketing status, and the marketing company - the last
+# nested, carrying an embedded country object with its own nameEn.
+#
+# Caught at the Writer rather than in each loader, because finding the fifth
+# by noticing it in a query result is not a process. A value that starts with
+# "{" and carries a nameEn is never a real name; the English name is the
+# value. Anything else is left exactly as it is.
+_LOOKUP_NAME = re.compile(r'"name[eE]n"\s*:\s*"([^"]*)"')
+
+
+def _unwrap_lookup(v: str) -> str:
+    if not v.startswith("{") or "ame" not in v:
+        return v
+    m = _LOOKUP_NAME.search(v)
+    return m.group(1).strip() if m and m.group(1).strip() else v
+
+
 @dataclass
 class Writer:
     """Collects nodes and edges, deduplicates, writes one CSV per label/type.
@@ -212,6 +234,7 @@ class Writer:
             if isinstance(v, str):
                 v = " ".join(v.split()) if ("\n" in v or "\t" in v
                                             or "\r" in v) else v.strip()
+                v = _unwrap_lookup(v)
             out[k] = v
         return out
 

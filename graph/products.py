@@ -572,7 +572,14 @@ def load_sfda(b):
         for one in _routes(rt):
             b.w.node("Route", f"ROUTE:{fold(one)}", source=L["sfda"], name=one)
             b.w.edge("HAS_ROUTE", key, f"ROUTE:{fold(one)}", source=L["sfda"])
-        comp = (row.get("company") or "").strip()
+        # Unwrapped like form, status and route: SFDA writes a whole lookup
+        # row here too, nested one level deeper - the company object carries
+        # an embedded country object. Stored raw it poisoned the KEY as well
+        # as the name, so 745 companies existed as
+        # COMPANY:id 10005 nameen hospira namear null countryid 81 country
+        # code gb ... instead of merging into the Hospira that other agencies
+        # already contribute.
+        comp = unwrap_lookup(row.get("company", ""))
         if comp:
             ckey = f"COMPANY:{norm_company(comp)}"
             b.w.node("Company", ckey, source=L["sfda"], name=comp, raw_names=comp)

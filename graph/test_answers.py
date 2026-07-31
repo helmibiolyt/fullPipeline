@@ -291,6 +291,19 @@ TRAPS = [
  ("symbol is searchable in full-text",
   "CALL db.index.fulltext.queryNodes('entity_names','EGFR') YIELD node "
   "WHERE node:Target RETURN count(node) AS n", lambda r: r[0]["n"] > 0),
+ # SFDA returns whole objects where strings belong, and it has done so for
+ # four fields found one at a time - route, form, marketing status, and the
+ # marketing company, that last one nested with an embedded country. This
+ # checks every property on every label rather than the four already known,
+ # so a fifth fails the import instead of turning up in a query result.
+ ("no property anywhere is a serialised object",
+  "MATCH (n) WITH n LIMIT 400000 "
+  "WHERE any(p IN keys(n) WHERE toString(n[p]) STARTS WITH '{') "
+  "RETURN count(n) AS n", lambda r: r[0]["n"] == 0),
+ ("company names are names, not lookup rows",
+  "MATCH (c:Company) WHERE c.name STARTS WITH '{' RETURN count(c) AS n",
+  lambda r: r[0]["n"] == 0),
+
  ("Product.form has no JSON blobs",
   "MATCH (p:Product) WHERE p.form STARTS WITH '{' RETURN count(p) AS n",
   lambda r: r[0]["n"] == 0),
