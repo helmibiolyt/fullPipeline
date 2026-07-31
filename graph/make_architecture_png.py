@@ -230,7 +230,7 @@ def main():
         yy = 0.383 - i * 0.024
         txt(ax, 0.510, yy, k, size=8.2, color=MUTED)
         txt(ax, 0.697, yy, v, size=8.2, color=TEXT, ha="right")
-    txt(ax, 0.510, 0.276,
+    txt(ax, 0.510, 0.300,
         "extract → chunk → embed → upsert\nIncremental by S3 ETag; only\n"
         "changed documents are re-embedded.", size=7.6, color=DIM)
 
@@ -281,8 +281,9 @@ def main():
         size=7.3, color=GREEN)
 
     # ---- flows into the two stores
-    arrow(ax, (0.449, 0.392), (0.60, 0.246), color=VIOLET, lw=2, rad=-0.12)
-    txt(ax, 0.452, 0.30, "documents", size=7.6, color=VIOLET)
+    # Stops at the Qdrant edge - drawn to 0.60 it ran through the box.
+    arrow(ax, (0.449, 0.392), (0.492, 0.335), color=VIOLET, lw=2, rad=-0.10)
+    txt(ax, 0.452, 0.352, "documents", size=7.6, color=VIOLET)
     # Routed above both cloud regions rather than across them - drawn through,
     # the line and its label sat on top of the AWS box and the AZURE heading.
     ax.plot([0.449, 0.462], [0.418, 0.712], color=BLUE, lw=2, zorder=4)
@@ -303,7 +304,7 @@ def main():
         "  · semantic search over :8000\n"
         "then answers from those two\nresult sets only, citing sources.",
         size=7.8, color=MUTED)
-    txt(ax, 0.279, 0.104,
+    txt(ax, 0.279, 0.118,
         "Joined by identifiers, not shared\nstorage — MHRA filenames carry "
         "the\nlicence number the graph indexes.", size=7.3, color=DIM)
 
