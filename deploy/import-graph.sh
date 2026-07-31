@@ -104,5 +104,35 @@ cypher-shell -a bolt://localhost:7687 -u neo4j -p "$NEO4J_PASSWORD" -d "$DB" \
 
 cypher-shell -a bolt://localhost:7687 -u neo4j -p "$NEO4J_PASSWORD" -d "$DB" \
   --non-interactive --format plain \
-  'MATCH (n) RETURN count(n) AS nodes;' 
-ok "imported $BUILD"
+  'MATCH (n) RETURN count(n) AS nodes;'
+
+# Answer-level tests, against the database that is now live.
+#
+# validate.py proves the build is well-formed, and it passed on a graph where
+# "what are the side effects of metformin" returned nothing - the reports hang
+# off the salt form, and an empty result is not a structural fault. So this
+# asks the questions instead: every label reachable the way a caller would
+# reach it, every relationship traversable, twelve real drugs answered across
+# nine question types, and each known trap asserted.
+#
+# It runs after the import because it needs a live database. A failure does
+# not roll back automatically - it tells you the graph is serving wrong or
+# empty answers, and the dump taken at the start of this script is the way
+# back.
+step "answer tests"
+if NEO4J_URI="bolt://localhost:7687" NEO4J_USER="neo4j" \
+   NEO4J_PASSWORD="$NEO4J_PASSWORD" NEO4J_DATABASE="$DB" \
+   "$VENV/bin/python" "$REPO/graph/test_answers.py"; then
+  ok "imported $BUILD - structure and answers both check out"
+else
+  echo
+  echo "  The import completed, but the graph gives wrong or empty answers."
+  echo "  Restore with:"
+  echo "    sudo systemctl stop neo4j"
+  # Defaulted inline: BACKUP_DIR is assigned inside the backup block, which
+  # is skipped on a first import, and an unset path in a recovery
+  # instruction is worse than no instruction.
+  echo "    sudo -u neo4j neo4j-admin database load $DB --from-path=${BACKUP_DIR:-/var/lib/neo4j/backups} --overwrite-destination=true"
+  echo "    sudo systemctl start neo4j"
+  exit 1
+fi
