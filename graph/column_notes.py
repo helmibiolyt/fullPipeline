@@ -64,14 +64,19 @@ SOURCE_PURPOSE: dict[str, str] = {
     "accessdata.fda.gov-orangebook": "Orange Book. Patents and exclusivities "
         "for small molecules - the only source of either. Now IP-blocked, so "
         "this data is frozen.",
-    "accessdata.fda.gov-purplebook": "Purple Book. Biologics licensures, "
-        "biosimilar relationships and their exclusivities.",
+    "purplebooksearch.fda.gov": "Purple Book. Biologics licensures, biosimilar "
+        "relationships and their exclusivities.",
     "ema.europa.eu": "European Medicines Agency. Product register plus EPAR "
         "documents.",
-    "mhra.gov.uk": "UK MHRA. Product register plus PAR/SPC/PIL documents; the "
-        "filenames embed the PL licence number.",
+    "products.mhra.gov.uk": "UK MHRA. Product register plus PAR, SPC and PIL "
+        "documents - 70,559 PDFs, the largest document source here. The "
+        "filename embeds the PL licence number, which is the only reliable "
+        "join from a document back to the graph.",
     "pmda.go.jp": "Japan PMDA. Review reports and package inserts.",
-    "hres.ca": "Health Canada Drug Product Database.",
+    "health-products.canada.ca": "Health Canada Drug Product Database. Already "
+        "a relational product schema - drug, ingredient, company, route and "
+        "therapeutic class as separate tables - which makes it the cleanest "
+        "product source in the lake.",
     # Safety
     "open.fda.gov": "openFDA. FAERS adverse event reports, recalls and "
         "shortages.",
@@ -104,6 +109,11 @@ SOURCE_PURPOSE: dict[str, str] = {
     "dha.gov.ae": "Dubai Health Authority.",
     "mohap.gov.ae": "UAE Ministry of Health and Prevention.",
     "sahatec.sa": "Saudi health technology listings.",
+    "doh.gov.ae": "Abu Dhabi Department of Health. Circulars and product "
+        "notices, documents only.",
+    "moh.gov.om": "Oman Ministry of Health. Regulatory notices, documents only.",
+    "moph.gov.qa": "Qatar Ministry of Public Health. Documents only.",
+    "nhra.bh": "Bahrain National Health Regulatory Authority. Documents only.",
     "nupco.com": "NUPCO procurement. Excluded - purchasing data, not "
         "regulatory fact.",
     "iso.org": "ISO standards abstracts.",
