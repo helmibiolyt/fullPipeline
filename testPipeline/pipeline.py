@@ -129,7 +129,8 @@ def gather(cypher: str, doc_query: str, section: str | None, k: int = 8):
             rows, ms = A.run_cypher(cypher)
             graph["rows"], graph["ms"] = rows, ms
         except Exception as e:                               # noqa: BLE001
-            graph["error"] = f"{type(e).__name__}: {str(e)[:200]}"
+            graph["error"] = f"{type(e).__name__}: {str(e)[:400]}"
+            graph["failed_cypher"] = cypher
 
     def _docs():
         try:
@@ -140,6 +141,65 @@ def gather(cypher: str, doc_query: str, section: str | None, k: int = 8):
 
     with cf.ThreadPoolExecutor(max_workers=2) as ex:
         list(ex.map(lambda f: f(), (_graph, _docs)))
+    return graph, docs
+
+
+# Errors the model can actually fix by rewriting. A connection failure or a
+# timeout is not one of them - retrying those just wastes a model call.
+_FIXABLE = ("SyntaxError", "TypeError", "ArgumentError", "ParameterMissing",
+            "InvalidArgument", "ProcedureCallFailed", "SemanticError")
+
+
+def gather_repaired(question: str, cypher: str, doc_query: str,
+                    section: str | None, k: int = 8):
+    """gather(), with one repair round if Neo4j rejects the query.
+
+    Neo4j's error is far more useful than any instruction in the prompt: it
+    names the variable, the line and the column. Feeding it back fixes the
+    kind of mistake no amount of prompting prevents - here, a second
+    `WITH node LIMIT 1` that dropped the collection built by the first half of
+    the query, because WITH resets scope to exactly what it lists.
+
+    Only the graph half is retried; the document search has already returned.
+    """
+    graph, docs = gather(cypher, doc_query, section, k)
+    err = graph.get("error", "")
+    if not err or not any(k_ in err for k_ in _FIXABLE):
+        return graph, docs
+
+    try:
+        data = _chat(
+            [{"role": "system",
+              "content": PLANNER_SYSTEM + "\n\nGRAPH SCHEMA\n"
+                         + graph_schema(live_counts(A.run_cypher))},
+             {"role": "user", "content": question},
+             {"role": "assistant", "content": "cypher:\n" + cypher},
+             {"role": "user",
+              "content": "Neo4j rejected that query:\n\n" + err +
+                         "\n\nRewrite it so it runs. Remember that WITH "
+                         "resets scope - anything you want to keep must be "
+                         "listed in every WITH that follows it. Keep the same "
+                         "document_query."}],
+            tools=PLAN_TOOL, max_tokens=PLAN_TOKENS)
+        calls = data["choices"][0]["message"].get("tool_calls") or []
+        if not calls:
+            return graph, docs
+        fixed = _parse_args(calls[0]["function"]["arguments"])
+        new_cypher = (fixed.get("cypher") or "").strip()
+        if not new_cypher or new_cypher == cypher:
+            return graph, docs
+        if check_directions(new_cypher):
+            return graph, docs
+        bad = A.check_cypher(new_cypher)
+        if bad:
+            return graph, docs
+        rows, ms = A.run_cypher(new_cypher)
+        graph.update({"rows": rows, "ms": ms, "error": "",
+                      "cypher": new_cypher, "repaired": True})
+    except Exception:                                        # noqa: BLE001
+        # The original error is the honest thing to report; a failed repair
+        # should not replace it with a confusing second one.
+        pass
     return graph, docs
 
 
@@ -185,6 +245,9 @@ def _evidence(graph: dict, docs: dict, max_rows=EVIDENCE_ROWS,
     elif not docs["chunks"]:
         out.append("no chunks above the 0.6 relevance floor")
     else:
+        out.append(f"{len(docs['chunks'])} chunks retrieved by similarity. "
+                   "Work through them one at a time and take only what "
+                   "answers the question:")
         for i, c in enumerate(docs["chunks"][:max_chunks], 1):
             agency = (c.get("source", "").split("/")[-1] or "?")
             score = c.get("score") or c.get("rerank_score") or 0
@@ -247,8 +310,9 @@ def run(question: str, k: int = 8) -> dict:
         out["document_query"] = args.get("document_query", "")
         out["section"] = args.get("section") or ""
 
-        graph, docs = gather(out["cypher"], out["document_query"],
-                             out["section"] or None, k)
+        graph, docs = gather_repaired(question, out["cypher"],
+                                      out["document_query"],
+                                      out["section"] or None, k)
         out["graph"] = {"rows": [{k2: A._fmt(v) for k2, v in r.items()}
                                  for r in graph["rows"][:PAGE_ROWS]],
                         "columns": list(graph["rows"][0].keys())
@@ -297,7 +361,8 @@ def run_streamed(question: str, k: int = 8):
     yield {"stage": "plan", "cypher": cypher, "document_query": dq,
            "section": section, "plan_ms": pms, "tokens": ptok}
 
-    graph, docs = gather(cypher, dq, section or None, k)
+    graph, docs = gather_repaired(question, cypher, dq,
+                                  section or None, k)
     yield {"stage": "evidence",
            "graph": {"rows": [{k2: A._fmt(v) for k2, v in r.items()}
                               for r in graph["rows"][:PAGE_ROWS]],
