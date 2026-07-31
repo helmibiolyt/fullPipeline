@@ -125,18 +125,18 @@ QUERY RECIPES — follow these shapes.
 
 Drugs against a protein:
     MATCH (s:Substance)-[:TARGETS]->(t:Target {{symbol:'EGFR'}})
-    RETURN DISTINCT s.name LIMIT 25
+    RETURN DISTINCT s.name LIMIT 500
 
 Where a drug is approved — Product.name is a BRAND name, so never filter
 products by an ingredient; traverse CONTAINS instead:
     MATCH (s:Substance {{norm_name:'atorvastatin'}})<-[:CONTAINS]-(p:Product)
     MATCH (p)-[:APPROVED_BY]->(a:RegulatoryAgency)
-    RETURN a.code, a.region, count(p) AS products ORDER BY products DESC LIMIT 25
+    RETURN a.code, a.region, count(p) AS products ORDER BY products DESC LIMIT 500
 
 Products in a country — via the agency, not APPROVED_IN (that points at a
 Region):
     MATCH (p:Product)-[:APPROVED_BY]->(:RegulatoryAgency {{code:'SFDA'}})
-    RETURN p.name, p.form LIMIT 25
+    RETURN p.name, p.form LIMIT 500
 
 Trials in a country or region:
     MATCH (t:ClinicalTrial)-[:CONDUCTED_IN]->(:Country {{key:'COUNTRY:SA'}})
@@ -145,24 +145,24 @@ Trials in a country or region:
 
 Trials of a drug, and trials of a disease:
     MATCH (s:Substance {{norm_name:'pembrolizumab'}})-[:TESTED_IN]->(t:ClinicalTrial)
-    RETURN t.registry, t.title, t.status LIMIT 25
+    RETURN t.registry, t.title, t.status LIMIT 500
     // by disease, with a phase filter:
     CALL db.index.fulltext.queryNodes('entity_names','breast cancer')
     YIELD node WHERE node:Disease WITH node AS d LIMIT 3
     MATCH (t:ClinicalTrial {{phase:'PHASE3'}})-[:STUDIES]->(d)
-    RETURN t.registry, t.title LIMIT 25
+    RETURN t.registry, t.title LIMIT 500
 
 Adverse events for a drug, and drugs for an organ class:
     MATCH (s:Substance {{norm_name:'ibuprofen'}})-[e:HAS_ADVERSE_EVENT]->(a:AdverseEvent)
-    RETURN a.term, e.report_count ORDER BY e.report_count DESC LIMIT 25
+    RETURN a.term, e.report_count ORDER BY e.report_count DESC LIMIT 500
     // the other direction, via the MedDRA organ class:
     MATCH (o:OrganClass) WHERE toLower(o.name) CONTAINS 'cardiac'
     MATCH (s:Substance)-[e:HAS_ADVERSE_EVENT]->(a:AdverseEvent)-[:IN_ORGAN_CLASS]->(o)
-    RETURN s.name, sum(e.report_count) AS reports ORDER BY reports DESC LIMIT 25
+    RETURN s.name, sum(e.report_count) AS reports ORDER BY reports DESC LIMIT 500
 
 Recalls naming a drug:
     MATCH (s:Substance {{norm_name:'valsartan'}})-[:SUBJECT_OF]->(e:RegulatoryEvent)
-    WHERE e.type = 'recall' RETURN e.name, e.status LIMIT 25
+    WHERE e.type = 'recall' RETURN e.name, e.status LIMIT 500
 
 An identifier of a drug:
     MATCH (s:Substance {{norm_name:'atorvastatin'}})-[:HAS_IDENTIFIER]->(i:Identifier)
@@ -170,7 +170,7 @@ An identifier of a drug:
 
 Variants in a gene:
     MATCH (v:Variant)-[:VARIANT_IN]->(:Target {{symbol:'BRAF'}})
-    RETURN v.name, v.clinical_significance LIMIT 25
+    RETURN v.name, v.clinical_significance LIMIT 500
 
 "IS THIS DRUG APPROVED" — there is no approved flag on Substance, and
 Substance has NO HAS_APPROVAL edge at all. A substance is approved when some
@@ -186,7 +186,7 @@ Comparing investigational compounds with approved ones — the shape behind
     WHERE appr <> inv AND EXISTS {{ (:Product)-[:CONTAINS]->(appr) }}
     RETURN m.name AS mechanism, appr.name AS approved_drug,
            collect(DISTINCT inv.name)[..3] AS investigational
-    LIMIT 25
+    LIMIT 500
 Note HAS_MECHANISM is only 7,442 edges, so mechanism-based comparison covers
 a small, well-characterised slice. TARGETS (11,236 edges) is the wider
 alternative when the question is really about what a drug acts on.
@@ -196,7 +196,7 @@ THINGS THAT WILL MISLEAD YOU
 * Target.symbol is populated for 5,902 of 16,624 nodes - the human proteins
   HGNC covers. Prefer it, it is exact and indexed:
       MATCH (s:Substance)-[:TARGETS]->(t:Target {{symbol:'EGFR'}})
-      RETURN DISTINCT s.name LIMIT 25
+      RETURN DISTINCT s.name LIMIT 500
   The other 10,722 are non-human or complexes and carry only a protein name.
   If a symbol lookup returns nothing, fall back to the full-text index with
   the protein name expanded - EGFR -> "epidermal growth factor receptor",
@@ -256,7 +256,12 @@ regulatory document would phrase it, not the way the user asked.
 
 WRITING CYPHER
 * Read-only. Never CREATE, MERGE, SET, DELETE, DROP or CALL apoc/db.create.
-* Always end with an explicit LIMIT (25 unless more is asked for).
+* Always end with an explicit LIMIT. Use 500 - the point of the limit is
+  to stop a runaway scan, NOT to shorten the answer. A low limit silently
+  truncates: 25 rows back from a question with 132 real matches reads as
+  '25 drugs do this', which is wrong.
+* A count or aggregate needs no LIMIT at all. Prefer count() when the
+  question asks how many - it is exact and costs one row.
 * Bound every traversal with explicit hops, never -[*]-.
 * Return named fields, not whole nodes.
 """

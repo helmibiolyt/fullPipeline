@@ -143,7 +143,16 @@ def gather(cypher: str, doc_query: str, section: str | None, k: int = 8):
     return graph, docs
 
 
-def _evidence(graph: dict, docs: dict, max_rows=25, max_chunks=6) -> str:
+# How many rows the ANSWERING model sees. Separate from the query's LIMIT on
+# purpose: the query should fetch everything that matches so the count is
+# true, while the model only needs enough rows to name examples. Conflating
+# the two is what made every answer say "25".
+EVIDENCE_ROWS = 40
+PAGE_ROWS = 200
+
+
+def _evidence(graph: dict, docs: dict, max_rows=EVIDENCE_ROWS,
+              max_chunks=6) -> str:
     """What the answering model is allowed to see."""
     out = ["=== KNOWLEDGE GRAPH ===",
            f"query: {' '.join(graph['cypher'].split())}"]
@@ -152,12 +161,22 @@ def _evidence(graph: dict, docs: dict, max_rows=25, max_chunks=6) -> str:
     elif not graph["rows"]:
         out.append("no rows - the query ran and matched nothing")
     else:
-        out.append(f"{len(graph['rows'])} rows:")
+        n = len(graph["rows"])
+        shown = min(n, max_rows)
+        # State the true total separately from the sample, so the model
+        # reports the count it was given rather than counting the lines it
+        # can see.
+        head = f"{n} rows matched"
+        if n > shown:
+            head += (f"; the first {shown} are listed below - when you give a "
+                     f"total, use {n}, not the number of lines here")
+        if _hit_limit(graph["cypher"], n):
+            head += (f". NOTE: that equals the query's LIMIT, so the real "
+                     f"total may be higher - say 'at least {n}'")
+        out.append(head + ":")
         for r in graph["rows"][:max_rows]:
             out.append("  " + json.dumps(
                 {k: A._fmt(v) for k, v in r.items()}, ensure_ascii=False))
-        if len(graph["rows"]) > max_rows:
-            out.append(f"  ... {len(graph['rows']) - max_rows} more")
 
     out += ["", "=== REGULATORY DOCUMENTS ===",
             f"search: {docs['query']}"]
@@ -174,6 +193,17 @@ def _evidence(graph: dict, docs: dict, max_rows=25, max_chunks=6) -> str:
             out.append(f"\n[{i}] {agency}  score {score:.3f}  {head}")
             out.append(f"    {body}")
     return "\n".join(out)
+
+
+def _hit_limit(cypher: str, n: int) -> bool:
+    """Did the result stop because it ran out of matches, or hit the LIMIT?
+
+    A query returning exactly its limit has almost certainly been truncated,
+    and the difference matters: "25 drugs target EGFR" and "at least 25" are
+    different claims.
+    """
+    m = re.findall(r"LIMIT\s+(\d+)", cypher, re.I)
+    return bool(m) and n == int(m[-1])
 
 
 def answer(question: str, graph: dict, docs: dict) -> tuple[str, list, int, int]:
@@ -220,7 +250,7 @@ def run(question: str, k: int = 8) -> dict:
         graph, docs = gather(out["cypher"], out["document_query"],
                              out["section"] or None, k)
         out["graph"] = {"rows": [{k2: A._fmt(v) for k2, v in r.items()}
-                                 for r in graph["rows"][:25]],
+                                 for r in graph["rows"][:PAGE_ROWS]],
                         "columns": list(graph["rows"][0].keys())
                         if graph["rows"] else [],
                         "total": len(graph["rows"]),
@@ -270,7 +300,7 @@ def run_streamed(question: str, k: int = 8):
     graph, docs = gather(cypher, dq, section or None, k)
     yield {"stage": "evidence",
            "graph": {"rows": [{k2: A._fmt(v) for k2, v in r.items()}
-                              for r in graph["rows"][:25]],
+                              for r in graph["rows"][:PAGE_ROWS]],
                      "columns": list(graph["rows"][0].keys())
                      if graph["rows"] else [],
                      "total": len(graph["rows"]), "ms": graph["ms"],
