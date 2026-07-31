@@ -74,6 +74,8 @@ DIRECTIONS THAT ARE ROUTINELY GOT BACKWARDS
   (:Substance)-[:TESTED_IN]->(:ClinicalTrial)    NOT Trial -> Substance
   (:Product)-[:CONTAINS]->(:Substance)           NOT Substance -> Product
   (:Product)-[:PROTECTED_BY]->(:Patent)          patents hang off PRODUCTS
+  (:Product)-[:HAS_APPROVAL]->(:Approval)        approvals hang off PRODUCTS
+                                                 — Substance has NONE, 0 edges
   (:Substance)-[:SUBJECT_OF]->(:RegulatoryEvent) recalls hang off SUBSTANCES
   (:Publication)-[:MENTIONS]->(:Substance)       NOT Substance -> Publication
   (anything)-[:HAS_IDENTIFIER]->(:Identifier)    NOT Identifier -> entity
@@ -169,6 +171,25 @@ An identifier of a drug:
 Variants in a gene:
     MATCH (v:Variant)-[:VARIANT_IN]->(:Target {{symbol:'BRAF'}})
     RETURN v.name, v.clinical_significance LIMIT 25
+
+"IS THIS DRUG APPROVED" — there is no approved flag on Substance, and
+Substance has NO HAS_APPROVAL edge at all. A substance is approved when some
+agency lists a product containing it:
+    WHERE EXISTS {{ (:Product)-[:CONTAINS]->(s) }}
+Use that as a filter, never a join to Approval from a Substance.
+
+Comparing investigational compounds with approved ones — the shape behind
+"which approved drugs work like something in trials":
+    MATCH (inv:Substance)-[:TESTED_IN]->(:ClinicalTrial {{phase:'PHASE2'}})
+    MATCH (inv)-[:HAS_MECHANISM]->(m:Mechanism)
+    MATCH (appr:Substance)-[:HAS_MECHANISM]->(m)
+    WHERE appr <> inv AND EXISTS {{ (:Product)-[:CONTAINS]->(appr) }}
+    RETURN m.name AS mechanism, appr.name AS approved_drug,
+           collect(DISTINCT inv.name)[..3] AS investigational
+    LIMIT 25
+Note HAS_MECHANISM is only 7,442 edges, so mechanism-based comparison covers
+a small, well-characterised slice. TARGETS (11,236 edges) is the wider
+alternative when the question is really about what a drug acts on.
 
 THINGS THAT WILL MISLEAD YOU
 

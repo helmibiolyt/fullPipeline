@@ -195,7 +195,15 @@ async function submit(){
     const r=await fetch('/ask',{method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({question,k:6})});
-    render(await r.json());
+    const data=await r.json();
+    try{ render(data); }
+    catch(e){
+      out.innerHTML='<div class=err>display error: '+esc(e.message)+
+        '<br><br>The answer came back fine &mdash; this is the page failing '+
+        'to draw it. Reload with Ctrl+F5 if you had an older version open.'+
+        '</div><pre class=q>'+esc(JSON.stringify(data,null,1).slice(0,1500))+
+        '</pre>';
+    }
   }catch(err){ out.innerHTML='<div class=err>'+esc(err)+'</div>'; }
   go.disabled=false;
 }
@@ -211,6 +219,8 @@ function section(title,count,inner,open){
 }
 
 function render(d){
+  if(!d || typeof d!=='object'){
+    out.innerHTML='<div class=err>unexpected response</div>'; return; }
   if(d.error){ out.innerHTML='<div class=err>'+esc(d.error)+'</div>'; return; }
 
   let h='<div class=answer>'+
@@ -222,6 +232,7 @@ function render(d){
   h+='</div>';
 
   const g=d.graph||{}, dc=d.docs||{};
+  g.rows=g.rows||[]; g.columns=g.columns||[]; dc.chunks=dc.chunks||[];
   h+='<div class=meta>planned in '+d.plan_ms+' ms &middot; graph '+
      (g.ms||0)+' ms &middot; documents '+(dc.ms||0)+
      ' ms &middot; answered in '+d.answer_ms+' ms &middot; '+d.tokens+
@@ -266,7 +277,16 @@ function render(d){
 
 @app.get("/", response_class=HTMLResponse)
 def page():
-    return PAGE
+    # No-store, because the page and its script are one document. An earlier
+    # version routed to a single store and read `d.rows` at the top level;
+    # after the response shape changed to nest rows under `graph`, a cached
+    # copy kept running the old script and failed with "Cannot read
+    # properties of undefined". The server is the only place that can stop a
+    # stale client, so it says so explicitly.
+    return HTMLResponse(PAGE, headers={
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+    })
 
 
 if __name__ == "__main__":
