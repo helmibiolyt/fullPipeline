@@ -24,6 +24,7 @@ L = {
     "ca_ther":    "Regulatory_Approvals/health-products.canada.ca/canada_dpd_data/ther.csv",
     "ca_route":   "Regulatory_Approvals/health-products.canada.ca/canada_dpd_data/route.csv",
     "ca_status":  "Regulatory_Approvals/health-products.canada.ca/canada_dpd_data/status.csv",
+    "ca_form":    "Regulatory_Approvals/health-products.canada.ca/canada_dpd_data/form.csv",
     "mhra":       "Regulatory_Approvals/products.mhra.gov.uk/mhra_data/raw_metadata.csv",
     "ema":        "Regulatory_Approvals/ema.europa.eu/ema_data/ema_medicines.csv",
     "ob":         "Regulatory_Approvals/accessdata.fda.gov-orangebook/orangebook_data/orange_book_unified.csv",
@@ -91,17 +92,10 @@ def _route_name(raw) -> str:
 
     Taken literally that becomes the Route node's name, so 8,138 products sat
     on routes called '{"id": 9016, ...}' and none of them merged with Canada's
-    "ORAL". The readable value is nameEn.
+    "ORAL". Shares unwrap_lookup with form and status, which turned out to
+    have the same problem - two copies of this would drift.
     """
-    v = (raw or "").strip()
-    if not v:
-        return ""
-    if v.startswith("{"):
-        try:
-            return (json.loads(v).get("nameEn") or "").strip()
-        except (ValueError, AttributeError):
-            return ""
-    return v
+    return unwrap_lookup(raw)
 
 
 def load_vocab(b):
@@ -137,6 +131,38 @@ def load_vocab(b):
     b._done("vocab", t0, n)
 
 
+_JSON_NAME = re.compile(r'"name[eE]n"\s*:\s*"([^"]+)"', re.I)
+
+
+def unwrap_lookup(raw: str) -> str:
+    """SFDA writes a whole lookup ROW where a value belongs.
+
+    Its `pharmaceuticalForm` and `marketingStatus` arrive as a serialised
+    object rather than the thing it describes:
+
+        {"ID": 10028, "NAMEAR": "...", "NAMEEN": "FILM-COATED TABLET", ...}
+
+    Stored as-is, every distinct lookup id became a distinct "form", the
+    Arabic label rode along inside it, and no two agencies could ever agree on
+    a form. The English name is the value; take it and drop the wrapper.
+    """
+    s = (raw or "").strip()
+    if not s.startswith("{"):
+        return s
+    m = _JSON_NAME.search(s)
+    if m:
+        return m.group(1).strip()
+    try:
+        d = json.loads(s.replace("TRUE", "true").replace("NULL", "null")
+                       .replace("FALSE", "false"))
+        for k in ("nameEn", "NAMEEN", "name_en", "nameEN"):
+            if isinstance(d, dict) and d.get(k):
+                return str(d[k]).strip()
+    except Exception:                                        # noqa: BLE001
+        pass
+    return ""            # a wrapper with no readable name is not a value
+
+
 def norm_form(raw: str) -> str:
     """Dosage form to one casing.
 
@@ -145,7 +171,7 @@ def norm_form(raw: str) -> str:
     are the same form, and left alone they split every count by dosage form
     into two rows that look like different products.
     """
-    s = " ".join((raw or "").split())
+    s = " ".join(unwrap_lookup(raw).split())
     return s.upper() if s else ""
 
 
@@ -198,6 +224,17 @@ def load_canada(b):
     # own, so the read is recorded explicitly or the coverage check calls it
     # unread.
     b.w.sid(L["ca_ingred"])
+
+    # PRODUCT_CATEGORIZATION is "Human" or "Veterinary" - the product class,
+    # not a dosage form. Using it wrote HUMAN into form on every Canadian
+    # product. The real form is a separate table, keyed by DRUG_CODE.
+    form_by_code: dict[str, str] = {}
+    for row in lake.stream_csv(L["ca_form"], limit=b.limit):
+        c = (row.get("DRUG_CODE") or "").strip()
+        f = (row.get("PHARMACEUTICAL_FORM_EN") or "").strip()
+        if c and f:
+            form_by_code.setdefault(c, f)
+
     keep = {c for c, ings in ing_by_code.items() if b.wanted(*ings)}
     n = 0
     for row in lake.stream_csv(L["ca_drug"], limit=b.limit):
@@ -210,7 +247,7 @@ def load_canada(b):
         _product(b, key, "HC", L["ca_drug"], ing_by_code.get(code, []),
                  name=row.get("BRAND_NAME", ""), brand_name=row.get("BRAND_NAME", ""),
                  status=row.get("STATUS_CATEGORY", ""),
-                 form=row.get("PRODUCT_CATEGORIZATION", ""))
+                 form=form_by_code.get(code, ""))
         b.w.identifier(key, "CA_DIN", din, source=L["ca_drug"])
         b.ca_code_key[code] = key
 
@@ -526,7 +563,7 @@ def load_sfda(b):
                  name=trade, brand_name=trade,
                  strength=row.get("strength", ""),
                  form=row.get("pharmaceuticalForm", ""),
-                 status=row.get("marketingStatus", ""))
+                 status=unwrap_lookup(row.get("marketingStatus", "")))
         for atc in (row.get("atcCode1", ""), row.get("atcCode2", "")):
             if (atc or "").strip():
                 if atc.strip() in b.atc_codes:

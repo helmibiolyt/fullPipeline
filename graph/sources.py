@@ -134,6 +134,12 @@ INCLUDED: list[dict] = [
          note="Canadian marketing authorisation holders. Names are "
               "normalised by norm_company(), so Pfizer Inc. and Pfizer "
               "Canada ULC do not become two companies."),
+    dict(file="Regulatory_Approvals/health-products.canada.ca/canada_dpd_data/form.csv",
+         rows=None, builds=["node:Product"],
+         note="Dosage form per DRUG_CODE. Read because drug.csv's "
+              "PRODUCT_CATEGORIZATION is 'Human' or 'Veterinary' - a product "
+              "class, not a form - and using it wrote HUMAN into form on "
+              "every Canadian product."),
     dict(file="Regulatory_Approvals/health-products.canada.ca/canada_dpd_data/ther.csv",
          rows=58_174, builds=["edge:IN_CLASS"], note="TC_ATC -> DrugClass."),
     dict(file="Regulatory_Approvals/health-products.canada.ca/canada_dpd_data/status.csv",
