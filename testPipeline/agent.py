@@ -52,6 +52,26 @@ MAX_DOCS = 4
 MAX_SECONDS = 90
 STEP_TOKENS = 4000
 
+#: Consecutive calls to one store before it is withheld for a single step.
+#:
+#: All seven false denials on the 116-question benchmark had the same shape:
+#: four graph queries in a row, no document search, then "no data found". The
+#: model does not treat its own run of failures as evidence about which store
+#: it should be asking - it rewrites the Cypher again.
+#:
+#: The first attempt at a fix keyed on consecutive EMPTY results, and it never
+#: fired: the model interleaves hits and misses, so two zeros rarely land in a
+#: row. The second raised both caps to 6 on the theory that a shared ceiling
+#: would let the question decide the split. Measured on "what oligonucleotide
+#: therapies are available", that was worse, not better - it spent all six on
+#: the graph and never reached the documents, while the 4+4 split reached them
+#: at step five and came back with the approved products by name.
+#:
+#: So the limit is on the RUN, not on the misses and not on the total. What
+#: went wrong was never four graph calls; it was four graph calls before
+#: anything else was tried.
+RUN_BEFORE_SWITCH = 3
+
 TOOLS = [
     {
         "type": "function",
@@ -342,7 +362,8 @@ def _run_docs(args: dict, k: int) -> tuple[str, dict]:
 
 
 def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
-        max_graph: int | None = None, max_docs: int | None = None) -> dict:
+        max_graph: int | None = None, max_docs: int | None = None,
+        switch_on_miss: bool = True) -> dict:
     """Answer a question, deciding the lookups as it goes.
 
     allow/max_* exist so the same loop can be run with one store removed. That
@@ -369,6 +390,9 @@ def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
     usable = TOOLS if allow is None else [
         t for t in TOOLS
         if t["function"]["name"] in {_NAME.get(a, a) for a in allow}]
+    usable_names = {t["function"]["name"] for t in usable}
+
+    run_of = {"query_graph": 0, "search_documents": 0}
 
     try:
         for step in range(MAX_STEPS):
@@ -376,6 +400,26 @@ def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
             offered = [] if over else [
                 t for t in usable
                 if used[t["function"]["name"]] < limits[t["function"]["name"]]]
+
+            # After a run of calls to one store, that store is withheld for a
+            # single step, so the next lookup has to go to the other one. Not
+            # a ban and not a reordering - the model still chooses, it just
+            # cannot spend the whole budget in one place before the other has
+            # been tried once. Withholding for one step is enough: the run
+            # counter resets, and it is free to go back.
+            if switch_on_miss and len(offered) > 1:
+                stuck = [n for n, c in run_of.items() if c >= RUN_BEFORE_SWITCH]
+                if stuck:
+                    kept = [t for t in offered
+                            if t["function"]["name"] not in stuck]
+                    if kept:                      # never withhold everything
+                        offered = kept
+                        # The counter is NOT cleared here. Withholding a tool
+                        # from the offered list is a hint, not a guarantee -
+                        # the model calls it anyway often enough - and clearing
+                        # the run on the hint meant the check at dispatch saw
+                        # zero and let the call through. That is why the rule
+                        # never once fired on a `gggg` question.
             if not offered:
                 out["steps"].append({"step": len(out["steps"]) + 1,
                                      "tool": "budget",
@@ -416,6 +460,8 @@ def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
                     args, result = {}, f"could not read arguments: {e}"
                     rec = {"tool": fn, "error": str(e)[:120], "query": ""}
                 else:
+                    other = ("search_documents" if fn == "query_graph"
+                             else "query_graph")
                     if fn in limits and used[fn] >= limits[fn]:
                         # Belt and braces: the tool was withdrawn above, so
                         # reaching here means the model called it anyway. The
@@ -425,12 +471,38 @@ def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
                                   f"already have.")
                         rec = {"tool": fn, "query": "", "total": 0, "ms": 0,
                                "error": "budget exhausted", "why": ""}
+                    elif (switch_on_miss and fn in run_of
+                          and run_of[fn] >= RUN_BEFORE_SWITCH
+                          and other in usable_names
+                          and used[other] < limits[other]):
+                        # Withholding the tool between steps was not enough:
+                        # the model emits several calls in ONE assistant turn,
+                        # so a run of four graph queries can happen before the
+                        # loop gets to decide anything. The rule has to live
+                        # where the call is dispatched.
+                        #
+                        # Refused, not silently dropped - the protocol needs a
+                        # reply per call id, and the model needs to know why.
+                        result = (f"Not yet - that is {run_of[fn]} calls to the "
+                                  f"same store in a row and the other one has "
+                                  f"not been tried. Use {other} for this "
+                                  f"lookup. If it has nothing either, then the "
+                                  f"data really is absent and you can say so.")
+                        rec = {"tool": "graph" if fn == "query_graph" else "documents",
+                               "query": "", "total": 0, "ms": 0,
+                               "error": "switched: same store 3x running",
+                               "why": args.get("why", "")}
+                        run_of[fn] = 0
                     elif fn == "query_graph":
                         used[fn] += 1
                         result, rec = _run_graph(args)
+                        run_of[fn] += 1
+                        run_of["search_documents"] = 0
                     elif fn == "search_documents":
                         used[fn] += 1
                         result, rec = _run_docs(args, k)
+                        run_of[fn] += 1
+                        run_of["query_graph"] = 0
                     else:
                         result, rec = f"unknown tool {fn}", {"tool": fn}
                 rec["step"] = len(out["steps"]) + 1

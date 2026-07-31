@@ -43,11 +43,16 @@ import bench as B                                              # noqa: E402
 #: Each arm is (name, allow, max_graph, max_docs). The two single-store arms
 #: keep the same total budget as the mixed ones, so a win is not just a bigger
 #: allowance.
+#: `split` is the old 4+4 per-store budget with no miss handling - the shape
+#: that produced six of the seven false denials. `agentic` is the same loop
+#: with a shared ceiling and the switch-on-repeated-miss rule. They differ in
+#: nothing else, so the difference between them IS the value of the rule.
 ARMS = [
-    ("graph",    ("graph",),             8, 0),
-    ("docs",     ("documents",),         0, 8),
-    ("parallel", ("graph", "documents"), 1, 1),
-    ("agentic",  ("graph", "documents"), 4, 4),
+    ("graph",    ("graph",),             8, 0, False),
+    ("docs",     ("documents",),         0, 8, False),
+    ("parallel", ("graph", "documents"), 1, 1, False),
+    ("split",    ("graph", "documents"), 4, 4, False),
+    ("agentic",  ("graph", "documents"), 6, 6, True),
 ]
 
 
@@ -56,9 +61,10 @@ def _evidence(res: dict) -> int:
                if s.get("tool") in ("graph", "documents"))
 
 
-def run_arm(name: str, allow, mg: int, md: int, q: str, k: int) -> dict:
+def run_arm(name: str, allow, mg: int, md: int, sw: bool, q: str, k: int) -> dict:
     try:
-        res = AG.run(q, k=k, allow=allow, max_graph=mg, max_docs=md)
+        res = AG.run(q, k=k, allow=allow, max_graph=mg, max_docs=md,
+                     switch_on_miss=sw)
     except Exception as e:                                     # noqa: BLE001
         return {"arm": name, "fatal": f"{type(e).__name__}: {e}",
                 "evidence": 0, "denies": True, "seq": "", "ms": 0, "tokens": 0}
@@ -74,8 +80,8 @@ def compare(cat: str, q: str, k: int) -> dict:
     arms = {}
     # Sequential across arms on purpose: the arms share a rate limit, and a
     # timeout in one would otherwise be scored as that arm losing.
-    for name, allow, mg, md in ARMS:
-        arms[name] = run_arm(name, allow, mg, md, q, k)
+    for name, allow, mg, md, sw in ARMS:
+        arms[name] = run_arm(name, allow, mg, md, sw, q, k)
 
     best = max(a["evidence"] for a in arms.values())
     # The finding that needs no judge: an arm that reported absence while
