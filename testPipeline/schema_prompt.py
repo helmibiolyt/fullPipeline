@@ -65,31 +65,110 @@ def graph_schema(counts: dict[str, int] | None = None) -> str:
     return f"""NODE LABELS  (label, live count, properties besides `key`)
 {nodes}
 
-RELATIONSHIPS
+RELATIONSHIPS — the arrow direction is exact. Writing one backwards returns
+zero rows and no error, which is the most common way a query fails here.
 {edges}
+
+DIRECTIONS THAT ARE ROUTINELY GOT BACKWARDS
+  (:ClinicalTrial)-[:SPONSORED_BY]->(:Company)   NOT Company -> Trial
+  (:Substance)-[:TESTED_IN]->(:ClinicalTrial)    NOT Trial -> Substance
+  (:Product)-[:CONTAINS]->(:Substance)           NOT Substance -> Product
+  (:Product)-[:PROTECTED_BY]->(:Patent)          patents hang off PRODUCTS
+  (:Substance)-[:SUBJECT_OF]->(:RegulatoryEvent) recalls hang off SUBSTANCES
+  (:Publication)-[:MENTIONS]->(:Substance)       NOT Substance -> Publication
+  (anything)-[:HAS_IDENTIFIER]->(:Identifier)    NOT Identifier -> entity
 
 HOW TO FIND A STARTING NODE — this is where queries fail, not traversal.
 
 1. Exact identifier, when the question contains one:
-     MATCH (i:Identifier {{value:'NCT01045135'}})<-[:HAS_IDENTIFIER]-(t) RETURN t
+     MATCH (e)-[:HAS_IDENTIFIER]->(:Identifier {{value:'NCT01045135'}}) RETURN e
    Identifier.value is indexed. Schemes: UNII, CAS, CHEMBL_ID, INCHIKEY, NCT,
    MESH, ICD11, UNIPROT, RXCUI, SPL_SETID, ATC, CLINVAR, PMID, DOI, CA_DIN,
    MHRA_PL, FDA_APPL_NO, NDC, EMA_PRODUCT.
 
-2. A drug or disease name — use the full-text index, ALWAYS with a label
-   filter:
-     CALL db.index.fulltext.queryNodes('entity_names', 'atorvastatin')
-     YIELD node, score WHERE node:Substance
-     RETURN node.name, score LIMIT 5
-   Indexes: entity_names (Substance, Product, Disease, Target, Company,
-   Mechanism, DrugClass, OrganClass, Variant — on name and synonyms),
-   document_titles (Publication, ClinicalTrial — on title),
-   reaction_terms (AdverseEvent — on term).
-   Without the label filter, "lung cancer" returns companies with it in their
-   name ahead of the disease. Fuzzy matching works: 'pembrolizimab~'.
-
-3. Substance also has an indexed lowercase `norm_name`:
+2. A drug by name — Substance has an indexed lowercase `norm_name`. Use it:
      MATCH (s:Substance {{norm_name:'atorvastatin'}})
+   NEVER `WHERE s.name = 'atorvastatin'` — stored names are upper or mixed
+   case, so equality on a lowercase string matches nothing.
+
+3. Anything else by name — the full-text index, ALWAYS with a label filter:
+     CALL db.index.fulltext.queryNodes('entity_names','breast cancer')
+     YIELD node WHERE node:Disease
+     WITH node AS d LIMIT 3
+     MATCH ...
+   Indexes: entity_names (Substance, Product, Disease, Target, Company,
+   Mechanism, DrugClass, OrganClass, Variant — name, synonyms and symbol),
+   document_titles (Publication, ClinicalTrial — title), reaction_terms
+   (AdverseEvent — term). Without the label filter "lung cancer" returns
+   companies. Fuzzy works: 'pembrolizimab~'.
+
+REAL VALUES — use these exactly, never invent one.
+  Region.name    Asia · Central Asia · Europe · Latin America · MENA/GCC ·
+                 North America · Oceania · South Asia · Sub-Saharan Africa
+                 A COUNTRY IS NOT A REGION. Saudi Arabia is
+                 (:Country {{key:'COUNTRY:SA'}}); country keys are ISO-2.
+  RegulatoryAgency.code  FDA EMA MHRA PMDA HC SFDA NHRA DHA DOH MOH-OM MOPH-QA
+  RegulatoryEvent.type   recall · shortage · orphan_designation · referral ·
+                 safety_alert · dhpc · paediatric_investigation_plan
+  ClinicalTrial.registry  lowercase: clinicaltrials.gov · chictr · ctri · irct
+                 · eu_ctr · anzctr · isrctn · ctis · drks · nl-omon
+  ClinicalTrial.phase   PHASE1 PHASE2 PHASE3 PHASE4 EARLY_PHASE1
+                 PHASE1_PHASE2 PHASE2_PHASE3 PHASE3_PHASE4, or "" where no
+                 phase applies. These are normalised - equality works.
+  ClinicalTrial.status  COMPLETED RECRUITING NOT_YET_RECRUITING
+                 ACTIVE_NOT_RECRUITING ENROLLING_BY_INVITATION TERMINATED
+                 WITHDRAWN SUSPENDED
+
+QUERY RECIPES — follow these shapes.
+
+Drugs against a protein:
+    MATCH (s:Substance)-[:TARGETS]->(t:Target {{symbol:'EGFR'}})
+    RETURN DISTINCT s.name LIMIT 25
+
+Where a drug is approved — Product.name is a BRAND name, so never filter
+products by an ingredient; traverse CONTAINS instead:
+    MATCH (s:Substance {{norm_name:'atorvastatin'}})<-[:CONTAINS]-(p:Product)
+    MATCH (p)-[:APPROVED_BY]->(a:RegulatoryAgency)
+    RETURN a.code, a.region, count(p) AS products ORDER BY products DESC LIMIT 25
+
+Products in a country — via the agency, not APPROVED_IN (that points at a
+Region):
+    MATCH (p:Product)-[:APPROVED_BY]->(:RegulatoryAgency {{code:'SFDA'}})
+    RETURN p.name, p.form LIMIT 25
+
+Trials in a country or region:
+    MATCH (t:ClinicalTrial)-[:CONDUCTED_IN]->(:Country {{key:'COUNTRY:SA'}})
+    RETURN count(DISTINCT t) AS trials
+    // region: -[:CONDUCTED_IN]->(:Country)-[:IN_REGION]->(:Region {{name:'MENA/GCC'}})
+
+Trials of a drug, and trials of a disease:
+    MATCH (s:Substance {{norm_name:'pembrolizumab'}})-[:TESTED_IN]->(t:ClinicalTrial)
+    RETURN t.registry, t.title, t.status LIMIT 25
+    // by disease, with a phase filter:
+    CALL db.index.fulltext.queryNodes('entity_names','breast cancer')
+    YIELD node WHERE node:Disease WITH node AS d LIMIT 3
+    MATCH (t:ClinicalTrial {{phase:'PHASE3'}})-[:STUDIES]->(d)
+    RETURN t.registry, t.title LIMIT 25
+
+Adverse events for a drug, and drugs for an organ class:
+    MATCH (s:Substance {{norm_name:'ibuprofen'}})-[e:HAS_ADVERSE_EVENT]->(a:AdverseEvent)
+    RETURN a.term, e.report_count ORDER BY e.report_count DESC LIMIT 25
+    // the other direction, via the MedDRA organ class:
+    MATCH (o:OrganClass) WHERE toLower(o.name) CONTAINS 'cardiac'
+    MATCH (s:Substance)-[e:HAS_ADVERSE_EVENT]->(a:AdverseEvent)-[:IN_ORGAN_CLASS]->(o)
+    RETURN s.name, sum(e.report_count) AS reports ORDER BY reports DESC LIMIT 25
+
+Recalls naming a drug:
+    MATCH (s:Substance {{norm_name:'valsartan'}})-[:SUBJECT_OF]->(e:RegulatoryEvent)
+    WHERE e.type = 'recall' RETURN e.name, e.status LIMIT 25
+
+An identifier of a drug:
+    MATCH (s:Substance {{norm_name:'atorvastatin'}})-[:HAS_IDENTIFIER]->(i:Identifier)
+    WHERE i.scheme = 'UNII' RETURN i.value LIMIT 5
+
+Variants in a gene:
+    MATCH (v:Variant)-[:VARIANT_IN]->(:Target {{symbol:'BRAF'}})
+    RETURN v.name, v.clinical_significance LIMIT 25
 
 THINGS THAT WILL MISLEAD YOU
 
@@ -125,97 +204,99 @@ always end with LIMIT.
 """
 
 
-ROUTER_SYSTEM = """You are a router for a biomedical intelligence platform.
-You have exactly two capabilities and no others.
 
-You NEVER answer the user's question yourself. You never explain, never
-summarise, never apologise, never write prose. You emit exactly one tool call
-and nothing else. If a question seems unanswerable, still pick the better of
-the two tools and make the best attempt — a query returning nothing is a
-useful result here.
 
-CHOOSING BETWEEN THE TWO
+# --------------------------------------------------------------------------
+# Stage 1: plan. Both stores are queried on every question, never one.
+#
+# An earlier version made the model choose between them. That was wrong twice
+# over: it forced a judgement call the model often got wrong, and it threw
+# away half the evidence even when it chose correctly. The graph knows THAT a
+# drug causes a reaction and in how many reports; the label says what the
+# manufacturer WROTE about it. A good answer usually wants both.
+PLANNER_SYSTEM = """You write the two queries that will answer a question
+about drugs, trials, regulation and safety.
 
-query_graph — the question is about a RELATIONSHIP, a COUNT, or a
-  STRUCTURED FACT that lives in a field:
-    which drugs target this protein · where is this approved · how many
-    trials in a region · what class is this drug · which company sponsors ·
-    what adverse events are reported · what variants sit in this gene ·
-    which patents protect this product · what is this drug's mechanism
+You NEVER answer the question here. You emit one tool call containing both
+queries and nothing else.
 
-search_documents — the question is about what a DOCUMENT SAYS, in prose:
-    contraindications · warnings · dosing and posology · side effects as
-    written on a label · how a product should be stored · what an assessment
-    report concluded · special populations · interactions
+You must always produce BOTH:
 
-The distinction that matters: the graph knows THAT a drug causes a reaction
-and how many reports exist. The documents know what the LABEL SAYS about it,
-in the manufacturer's own words. "Which drugs cause QT prolongation" is the
-graph. "What does the sertraline label say about QT prolongation" is
-documents.
+  cypher          a read-only Cypher query against the knowledge graph, for
+                  relationships, counts and structured facts
+  document_query  a search phrase for 3.24M chunks of regulatory documents
+                  (labels, assessment reports, patient leaflets), for what a
+                  document actually says
+
+Write each one as if it were the only source you had. If a question leans
+towards one side, still write the other - a query that returns nothing costs
+one round trip and is itself informative. Phrase document_query the way a
+regulatory document would phrase it, not the way the user asked.
 
 WRITING CYPHER
 * Read-only. Never CREATE, MERGE, SET, DELETE, DROP or CALL apoc/db.create.
-* Always end with an explicit LIMIT (25 unless the user asks for more).
+* Always end with an explicit LIMIT (25 unless more is asked for).
 * Bound every traversal with explicit hops, never -[*]-.
-* Return named fields, not whole nodes, so the output is readable.
+* Return named fields, not whole nodes.
 """
 
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "query_graph",
-            "description": ("Run a read-only Cypher query against the Neo4j "
-                            "knowledge graph. Use for relationships, counts "
-                            "and structured facts."),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "cypher": {
-                        "type": "string",
-                        "description": "A read-only Cypher query ending in LIMIT.",
-                    },
-                    "why": {
-                        "type": "string",
-                        "description": "One short sentence: why the graph and not documents.",
-                    },
+PLAN_TOOL = [{
+    "type": "function",
+    "function": {
+        "name": "gather",
+        "description": ("Query both stores. Always supply both a Cypher "
+                        "query and a document search phrase."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "cypher": {
+                    "type": "string",
+                    "description": "Read-only Cypher ending in LIMIT.",
                 },
-                "required": ["cypher", "why"],
+                "document_query": {
+                    "type": "string",
+                    "description": ("Search phrase for the document corpus, "
+                                    "worded as a regulatory document would."),
+                },
+                "section": {
+                    "type": "string",
+                    "description": ("Optional document section filter: "
+                                    "indications, contraindications, posology, "
+                                    "undesirable_effects, warnings, "
+                                    "interactions, pregnancy, overdose, "
+                                    "storage."),
+                },
             },
+            "required": ["cypher", "document_query"],
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_documents",
-            "description": ("Semantic search over 3.24M chunks of regulatory "
-                            "documents (labels, assessment reports, patient "
-                            "leaflets). Use for what a document says."),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": ("The search text. Write it as the "
-                                        "document would phrase it, not as the "
-                                        "user asked it."),
-                    },
-                    "section": {
-                        "type": "string",
-                        "description": ("Optional section filter: indications, "
-                                        "contraindications, posology, "
-                                        "undesirable_effects, warnings, "
-                                        "interactions, pregnancy, overdose, "
-                                        "storage."),
-                    },
-                    "why": {
-                        "type": "string",
-                        "description": "One short sentence: why documents and not the graph.",
-                    },
-                },
-                "required": ["query", "why"],
-            },
-        },
-    },
-]
+}]
+
+# --------------------------------------------------------------------------
+# Stage 2: answer. The model sees only what the two stores returned.
+ANSWER_SYSTEM = """You answer using ONLY the two result sets provided.
+
+You have no other knowledge. If the results do not contain the answer, say so
+plainly - do not fill the gap from memory. An honest "the graph returned no
+trials for this" is worth more than a fluent guess, because the whole point of
+this system is that every claim is traceable to a row or a document.
+
+HOW TO WRITE IT
+* Lead with the answer in one or two sentences. No preamble.
+* Then the detail that supports it. Use a short list where there are several
+  items; prose where there is one thing to say.
+* Attribute inline as you go: (graph) for a fact from the knowledge graph,
+  (MHRA), (EMA), (PMDA) and so on for a document, naming the agency the chunk
+  came from.
+* Give numbers exactly as they appear. Never round a count, never invent one.
+* Where the two sources disagree, say so and give both. That is a finding, not
+  a problem to smooth over.
+* Where one source returned nothing, say which - it tells the reader where the
+  answer's limits are.
+* No markdown headings. Plain paragraphs and simple dashes for lists.
+* Be brief. Six sentences is usually plenty.
+
+Finish with one line beginning exactly "SOURCES: " listing what you actually
+used - the graph, and the agencies whose documents you quoted. If you used
+nothing, write "SOURCES: none".
+"""

@@ -40,8 +40,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 load_dotenv(HERE / ".env")
 
-from schema_prompt import (ROUTER_SYSTEM, TOOLS, graph_schema,  # noqa: E402
-                           live_counts)
+
 
 # Two providers, one shape. Both speak the OpenAI chat-completions dialect and
 # both honour tool_choice="required", which is the property this pipeline is
@@ -116,93 +115,38 @@ def check_cypher(q: str) -> str | None:
 
 
 # --------------------------------------------------------------------------
-def route(question: str, verbose=False) -> dict:
-    """Ask Groq which of the two stores to use, and for the query to run."""
-    if not GROQ_KEY:
-        sys.exit(f"no API key for provider {PROVIDER!r} - set "
-                 f"{'MINIMAX_API_KEY' if PROVIDER == 'minimax' else 'GROQ_API_KEY'} "
-                 f"in testPipeline/.env")
-
-    body = {
-        "model": GROQ_MODEL,
-        "messages": [
-            {"role": "system",
-             "content": ROUTER_SYSTEM + "\n\nGRAPH SCHEMA\n"
-                        + graph_schema(live_counts(run_cypher))},
-            {"role": "user", "content": question},
-        ],
-        "tools": TOOLS,
-        # required, not auto: the model must call one of the two. Without this
-        # it will happily answer from its own knowledge, which is the one
-        # thing this pipeline exists to prevent.
-        "tool_choice": "required",
-        "temperature": 0.1,
-    }
-    t0 = time.time()
-    # The free tier allows 12,000 tokens per minute and this prompt is ~2,800,
-    # so about four questions a minute. Groq states the exact wait it wants in
-    # the error body; honour that rather than guessing, and retry rather than
-    # dying halfway through a probe run.
-    for attempt in range(6):
-        r = requests.post(GROQ_URL, json=body, timeout=90,
-                          headers={"Authorization": f"Bearer {GROQ_KEY}"})
-        if r.status_code != 429:
-            break
-        wait = 8.0
-        try:
-            msg = r.json()["error"]["message"]
-            m = re.search(r"try again in ([\d.]+)s", msg)
-            if m:
-                wait = float(m.group(1)) + 0.6
-        except Exception:                                    # noqa: BLE001
-            pass
-        wait = min(wait * (1 + attempt * 0.4), 45)
-        if verbose:
-            print(dim(f"  rate limited, waiting {wait:.1f}s"))
-        time.sleep(wait)
-    if r.status_code != 200:
-        sys.exit(f"{PROVIDER} {r.status_code}: {r.text[:400]}")
-    data = r.json()
-    # MiniMax answers 200 even when it refuses: insufficient balance, an
-    # invalid key and a rate limit all arrive here rather than as a status.
-    br = data.get("base_resp") or {}
-    if br.get("status_code"):
-        sys.exit(f"{PROVIDER}: {br.get('status_msg')} "
-                 f"(code {br['status_code']})")
-    msg = data["choices"][0]["message"]
-    calls = msg.get("tool_calls") or []
-    if not calls:
-        # Should be impossible with tool_choice=required, but a model that
-        # talks instead of routing is exactly the failure worth surfacing.
-        return {"error": "the model answered instead of routing",
-                "said": (msg.get("content") or "")[:400]}
-
-    call = calls[0]["function"]
-    try:
-        args = json.loads(call["arguments"])
-    except json.JSONDecodeError as e:
-        return {"error": f"unparseable tool arguments: {e}",
-                "said": call["arguments"][:400]}
-    usage = data.get("usage", {})
-    return {"tool": call["name"], "args": args,
-            "ms": int((time.time() - t0) * 1000),
-            "tokens": usage.get("total_tokens", 0)}
-
-
-# --------------------------------------------------------------------------
 _driver = None
 
 
-def run_cypher(q: str) -> tuple[list[dict], int]:
+def run_cypher(q: str, _retry=True) -> tuple[list[dict], int]:
+    """Run a read query, reconnecting once if the pooled connection is dead.
+
+    The driver is held for the process lifetime, so a Neo4j restart - an
+    import replaces the store and bounces the service - leaves every pooled
+    connection defunct. The driver does not always recover on its own, and the
+    failure surfaces as ServiceUnavailable on the next question rather than at
+    the moment the server went away.
+    """
     global _driver
     from neo4j import GraphDatabase
+    from neo4j.exceptions import ServiceUnavailable, SessionExpired
     if _driver is None:
         _driver = GraphDatabase.driver(NEO4J_URI,
                                        auth=(NEO4J_USER, NEO4J_PASSWORD))
     t0 = time.time()
-    with _driver.session(database=NEO4J_DB,
-                         default_access_mode="READ") as s:
-        rows = [dict(r) for r in s.run(q)]
+    try:
+        with _driver.session(database=NEO4J_DB,
+                             default_access_mode="READ") as s:
+            rows = [dict(r) for r in s.run(q)]
+    except (ServiceUnavailable, SessionExpired):
+        if not _retry:
+            raise
+        try:
+            _driver.close()
+        except Exception:                                    # noqa: BLE001
+            pass
+        _driver = None
+        return run_cypher(q, _retry=False)
     return rows, int((time.time() - t0) * 1000)
 
 
@@ -275,73 +219,69 @@ def show_docs(res: dict, ms: int, limit: int):
 
 # --------------------------------------------------------------------------
 def ask(question: str, limit: int, k: int, show_cypher: bool = True):
-    print()
-    print(bold(f"❯ {question}"))
+    """Ask both stores and print the synthesised answer plus its evidence."""
+    import pipeline
 
-    r = route(question)
-    if "error" in r:
-        print(red(f"  router failed: {r['error']}"))
-        if r.get("said"):
-            print(dim(f"  it said: {r['said'][:200]}"))
+    print()
+    print(bold(f"> {question}"))
+    d = pipeline.run(question, k=k)
+    if d["error"]:
+        print(red(f"  {d['error']}"))
         return
 
-    tool, args = r["tool"], r["args"]
-    tag = (blue("GRAPH") if tool == "query_graph" else violet("DOCUMENTS"))
-    print(f"  {tag}  {dim(args.get('why', ''))}")
-    print(dim(f"  routed in {r['ms']} ms · {r['tokens']} tokens · "
-              f"{GROQ_MODEL}"))
+    print(dim(f"  planned in {d['plan_ms']} ms · answered in {d['answer_ms']} ms"
+              f" · {d['tokens']} tokens · {d['model']}"))
+    print()
+    for line in textwrap.wrap(d["answer"], 96) or ["(no answer)"]:
+        print("  " + line)
+    if d["sources"]:
+        print()
+        print("  " + green("sources: ") + dim(", ".join(d["sources"])))
 
-    try:
-        if tool == "query_graph":
-            q = args.get("cypher", "").strip()
-            bad = check_cypher(q)
-            if bad:
-                print(red(f"  REFUSED — {bad}"))
-                print(dim("  " + q[:300]))
-                return
-            if show_cypher:
-                print()
-                for line in q.splitlines():
-                    print(dim("  │ ") + line)
-            print()
-            rows, ms = run_cypher(q)
-            show_graph(rows, ms, limit)
-        else:
-            q = args.get("query", "")
-            sec = args.get("section")
-            print(dim(f'  │ search "{q}"' + (f"  section={sec}" if sec else "")))
-            res, ms = run_search(q, sec, k)
-            show_docs(res, ms, limit)
-    except Exception as e:                                   # noqa: BLE001
-        print(red(f"  {type(e).__name__}: {str(e)[:300]}"))
+    g, dc = d["graph"], d["docs"]
+    print()
+    print(blue(f"  GRAPH  {g.get('total', 0)} rows in {g.get('ms', 0)} ms")
+          + dim(f"   {' '.join(d['cypher'].split())[:88]}"))
+    if g.get("error"):
+        print(red(f"    {g['error']}"))
+    for r in g.get("rows", [])[:limit]:
+        print(dim("    " + " · ".join(f"{v}" for v in r.values())[:100]))
+
+    print(violet(f"  DOCS   {dc.get('total', 0)} chunks in {dc.get('ms', 0)} ms")
+          + dim(f"   \"{d['document_query']}\""))
+    if dc.get("error"):
+        print(red(f"    {dc['error']}"))
+    for c in dc.get("chunks", [])[:limit]:
+        src = c["source"].split("/")[-1]
+        print(dim(f"    {c['score']:.3f}  {src}  {c['heading'][:40]}"))
 
 
 BANNER = f"""{bold('biolyt · test pipeline')}
-{dim('The LLM only ever does one of two things: query the graph, or search the')}
-{dim('documents. It never answers. You see the raw result of its choice.')}
+{dim('Every question queries BOTH the knowledge graph and the document store.')}
+{dim('The answer is written only from what they return, with its sources.')}
 
   {blue('graph')}      {NEO4J_URI}  db={NEO4J_DB}
   {violet('documents')}  {VECTOR_API}
-  {dim('router')}     {GROQ_MODEL}
+  {dim('model')}      {GROQ_MODEL}  {dim(f'via {PROVIDER}')}
 
 {dim('type a question, or  :q  to quit')}"""
 
 EXAMPLES = [
     "which drugs target EGFR",
     "what are the contraindications of sertraline",
-    "how many clinical trials are running in Saudi Arabia",
-    "what does the label say about taking ibuprofen in pregnancy",
+    "what are the side effects of atorvastatin",
+    "how many trials are running in the MENA region",
+    "what does the label say about ibuprofen in pregnancy",
     "what adverse events are reported for pembrolizumab",
-    "which companies sponsor the most trials for NSCLC",
 ]
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("question", nargs="*", help="ask once and exit")
-    ap.add_argument("--limit", type=int, default=12,
-                    help="rows or chunks to display")
-    ap.add_argument("-k", type=int, default=6, help="chunks to retrieve")
+    ap.add_argument("--limit", type=int, default=8,
+                    help="evidence rows or chunks to list")
+    ap.add_argument("-k", type=int, default=8, help="chunks to retrieve")
     ap.add_argument("--examples", action="store_true",
                     help="run the built-in example questions")
     a = ap.parse_args()
@@ -361,7 +301,8 @@ def main():
     print(BANNER)
     while True:
         try:
-            q = input(f"\n{bold('›')} ").strip()
+            print()
+            q = input(bold("> ")).strip()
         except (EOFError, KeyboardInterrupt):
             print()
             break
