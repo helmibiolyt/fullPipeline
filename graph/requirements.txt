@@ -6,3 +6,10 @@
 # make_schema_png.py, which draws the documentation diagram and is not part of
 # building or validating the graph.
 boto3>=1.34
+
+# Needed by test_answers.py, which import-graph.sh runs against the live
+# database once the store has been replaced. The build itself never talks to
+# Neo4j - it writes CSVs - but the answer tests have to, and a fresh host
+# that skips this fails the import at the last step rather than at setup.
+neo4j>=5.0
+python-dotenv>=1.0
