@@ -1,8 +1,19 @@
 #!/usr/bin/env bash
 # Stand up a graph build host from nothing.
 #
-#     scp -r graph/ ubuntu@<host>:~/          # or git clone
-#     ssh ubuntu@<host> 'bash ~/graph/bootstrap.sh'
+#     ssh <host> 'git clone https://github.com/helmibiolyt/fullPipeline.git'
+#     ssh <host> 'bash ~/fullPipeline/graph/bootstrap.sh'
+#
+# CLONE, never scp. This header used to suggest `scp -r graph/ host:~/`, and
+# that copy outlived its usefulness: a ~/graph directory sat on the Azure host
+# for a day holding every module at an older revision, plus a duplicate of
+# automation/.env with live AWS keys in it. Nothing executed it - the deploy
+# scripts all cd to $REPO - but a stale second copy of the build is exactly
+# the thing that is impossible to reason about later, and the instructions
+# here were what put it there.
+#
+# Prefer deploy/graph-host.sh over this script for a real host; it also
+# installs Neo4j and writes the config. This one is the minimal path.
 #
 # The build is deliberately cheap to move: it reads the lake from S3 and writes
 # CSVs to local disk, holding no state between runs and depending on nothing on
