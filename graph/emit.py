@@ -193,8 +193,31 @@ class Writer:
             self.dropped[k] = 0
         return self._writers[k], self._seen[k], k
 
+    @staticmethod
+    def _clean(props: dict) -> dict:
+        """Trim whitespace and flatten embedded newlines on every value.
+
+        Applied centrally rather than per loader, because a source that pads a
+        field is not a loader's problem to remember - and the cost of missing
+        it is invisible: " Tablet" and "Tablet" are two values to a GROUP BY,
+        so a count silently splits in two. This found 4,091 trial titles and
+        257 event names carrying stray whitespace.
+
+        Only whitespace is touched. Placeholder-looking values are left alone
+        on purpose: Country.iso2 'NA' is Namibia, not a missing value, and a
+        blanket rule for 'NA' would delete it.
+        """
+        out = {}
+        for k, v in props.items():
+            if isinstance(v, str):
+                v = " ".join(v.split()) if ("\n" in v or "\t" in v
+                                            or "\r" in v) else v.strip()
+            out[k] = v
+        return out
+
     def node(self, label: str, key: str, source: str = "", **props) -> bool:
         """Emit one node. Returns False if the key was already written."""
+        props = self._clean(props)
         cols = NODE_COLUMNS.get(label)
         if cols is None:
             raise KeyError(f"unknown node label {label!r} - add it to NODE_COLUMNS")

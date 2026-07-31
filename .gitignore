@@ -62,3 +62,6 @@ graph/*.log
 *.key
 *.p12
 id_rsa*
+
+# Test pipeline secrets: Groq key, Neo4j password.
+testPipeline/.env

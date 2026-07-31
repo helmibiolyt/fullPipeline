@@ -36,6 +36,11 @@ TYPED = {
     "score": "float",
     "enrollment": "int",
     "max_phase": "float",       # ChEMBL writes 4.0, and "" for unknown
+    # Found by graph/audit_quality.py: both were stored as text, so a range
+    # filter compared them lexically - "9" sorts above "100", and
+    # `year > '1998'` silently excludes 2001.
+    "level": "int",             # ATC depth, 1-5
+    "year": "int",              # publication year
 }
 
 # Property renames applied in the header only. `key` is the node id and `type`

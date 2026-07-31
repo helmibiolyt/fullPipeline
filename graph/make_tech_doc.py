@@ -69,9 +69,12 @@ EDGES: dict[str, tuple[str, str, str, str]] = {
         "Product", "Route", "structured",
         "Administration route, normalised by fold()."),
     "IN_CLASS": (
-        "Substance | DrugClass", "DrugClass", "resolver | structured",
-        "ATC classification, and the ATC tree's own parent links. Both "
-        "directions of the same hierarchy."),
+        "Substance | Product | DrugClass", "DrugClass",
+        "resolver | structured",
+        "ATC classification. Runs from a Substance, from a Product where the "
+        "agency classified the product rather than the ingredient (28,579 of "
+        "these, mostly Health Canada and EMA), and from a DrugClass to its "
+        "own parent in the ATC tree."),
     "HAS_MODALITY": (
         "Substance", "Modality", "structured",
         "Small molecule, antibody, protein. Eleven values."),

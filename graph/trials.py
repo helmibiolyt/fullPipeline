@@ -28,6 +28,121 @@ import countries
 import lake
 from normalise import fold, norm_company
 
+# --------------------------------------------------------------------------
+# Nine registries describe the same three facts in their own words. Left raw,
+# `phase` held 112 distinct values for what are really six, `status` held 46
+# for about ten, and `registry` spelled itself two ways in four cases. Every
+# one of those splits a GROUP BY and makes an equality filter silently miss:
+# `{phase:'Phase 3'}` matched 10,268 rows out of roughly 57,000 real phase-3
+# trials.
+#
+# These map to a canonical form. The registry's own wording is not preserved -
+# provenance already records which file each row came from, and the raw value
+# has no analytical use once it is understood.
+
+_PHASE_PAT = [
+    # Order matters: the combined phases must be tested before the single
+    # ones, or "PHASE1 | PHASE2" is read as phase 1.
+    (r"\b(early[\s_-]*phase[\s_-]*1|early[\s_-]*phase[\s_-]*i)\b", "EARLY_PHASE1"),
+    (r"(phase\s*1\s*[|/&+,-]\s*(phase\s*)?2|1\s*-\s*2\b|i\s*/\s*ii\b)", "PHASE1_PHASE2"),
+    (r"(phase\s*2\s*[|/&+,-]\s*(phase\s*)?3|2\s*-\s*3\b|ii\s*/\s*iii\b)", "PHASE2_PHASE3"),
+    (r"(phase\s*3\s*[|/&+,-]\s*(phase\s*)?4|3\s*-\s*4\b|iii\s*/\s*iv\b)", "PHASE3_PHASE4"),
+    (r"(phase[\s_-]*4|phase[\s_-]*iv|therapeutic use)", "PHASE4"),
+    (r"(phase[\s_-]*3|phase[\s_-]*iii|therapeutic confirmatory)", "PHASE3"),
+    (r"(phase[\s_-]*2|phase[\s_-]*ii|therapeutic exploratory)", "PHASE2"),
+    (r"(phase[\s_-]*1|phase[\s_-]*i\b|human pharmacology)", "PHASE1"),
+    (r"^\s*0\s*$", "PHASE0"),
+    (r"^\s*4\s*$", "PHASE4"),
+    (r"^\s*3\s*$", "PHASE3"),
+    (r"^\s*2\s*$", "PHASE2"),
+    (r"^\s*1\s*$", "PHASE1"),
+]
+
+# Values meaning "no phase applies". Stored as "" rather than kept, so a
+# filter on phase does not return 409,721 rows that assert nothing.
+_PHASE_NONE = {
+    "na", "n/a", "n.a.", "not applicable", "not specified", "none",
+    "unknown", "not available", "others", "other", "0", "",
+}
+
+_STATUS_MAP = {
+    "completed": "COMPLETED", "complete": "COMPLETED", "ended": "COMPLETED",
+    "finished": "COMPLETED", "trial now transitioned": "COMPLETED",
+    "recruiting": "RECRUITING", "ongoing recruiting": "RECRUITING",
+    "authorised recruiting": "RECRUITING", "open public recruiting": "RECRUITING",
+    "not yet recruiting": "NOT_YET_RECRUITING", "pending": "NOT_YET_RECRUITING",
+    "authorised recruitment pending": "NOT_YET_RECRUITING",
+    "not recruiting": "ACTIVE_NOT_RECRUITING",
+    "active not recruiting": "ACTIVE_NOT_RECRUITING",
+    "ongoing": "ACTIVE_NOT_RECRUITING",
+    "ongoing recruitment ended": "ACTIVE_NOT_RECRUITING",
+    "enrolling by invitation": "ENROLLING_BY_INVITATION",
+    "terminated": "TERMINATED", "prematurely ended": "TERMINATED",
+    "stopped": "TERMINATED", "stopped early": "TERMINATED",
+    "withdrawn": "WITHDRAWN", "not authorised": "WITHDRAWN",
+    "suspended": "SUSPENDED", "temporary halt": "SUSPENDED",
+    "temporarily halted": "SUSPENDED", "deferred": "SUSPENDED",
+    "unknown": "", "withheld": "", "not available": "",
+}
+
+
+def norm_phase(raw: str) -> str:
+    """112 registry spellings -> one of eight canonical values, or ""."""
+    s = (raw or "").strip()
+    if s.lower() in _PHASE_NONE:
+        return ""
+    low = s.lower()
+    # The Indian registry writes every phase on one line with Yes/No against
+    # each; only the Yes matters.
+    if "yes" in low and "phase" in low:
+        picked = [tag for pat, tag in _PHASE_PAT[4:9]
+                  if re.search(pat.replace(r"\b", ""), low)
+                  and re.search(pat.split(")")[0].strip("(") + r"[^:]*:\s*yes",
+                                low)]
+        if picked:
+            return picked[0]
+    for pat, tag in _PHASE_PAT:
+        if re.search(pat, low):
+            return tag
+    return ""
+
+
+def norm_status(raw: str) -> str:
+    """46 registry spellings -> one of ten canonical values, or ""."""
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    key = re.sub(r"[^a-z0-9 ]+", " ", s.lower())
+    key = " ".join(key.split())
+    if key in _STATUS_MAP:
+        return _STATUS_MAP[key]
+    # Registry-specific prose that still carries the state.
+    for frag, tag in (("no longer in eu", "WITHDRAWN"),
+                      ("not available", ""), ("available", "")):
+        if frag in key:
+            return tag
+    return s.upper().replace(" ", "_").replace("-", "_")
+
+
+# One registry, two names. Case folding alone leaves these split, because WHO
+# writes the registry's full title where the native file writes its short one.
+_REGISTRY_ALIAS = {
+    "clinical trials information system": "ctis",
+    "eu clinical trials register": "eu_ctr",
+    "eudract": "eu_ctr",
+    "german clinical trials register": "drks",
+    "clinicaltrials.gov ": "clinicaltrials.gov",
+    "nct": "clinicaltrials.gov",
+}
+
+
+def norm_registry(raw: str) -> str:
+    """Registry names differ by case across sources - anzctr/ANZCTR,
+    chictr/ChiCTR, ctri/CTRI - and by wording where WHO uses the full title.
+    Lowercase short form is the canonical value."""
+    s = " ".join((raw or "").split()).lower()
+    return _REGISTRY_ALIAS.get(s, s)
+
 L = {
     "ctgov":  "Clinical_Trials_Pipeline_Intelligence/clinicaltrials.gov/clinicaltrials_data/clinicaltrials_all.csv",
     "who":    "Clinical_Trials_Pipeline_Intelligence/trialsearch.who.int/who_trials_csv/who_trials.csv",
@@ -132,7 +247,15 @@ def _same_study(b, key, other, source):
 def _trial(b, key, registry, source, sponsor="", conditions="", interventions="",
            iso=(), **props):
     """One trial node plus its edges. Shared by all nine registries."""
-    b.w.node("ClinicalTrial", key, source=source, registry=registry, **props)
+    # Normalise here rather than in each loader: this is the one funnel every
+    # registry passes through, so a tenth registry gets the same treatment
+    # without anyone remembering to add it.
+    if "phase" in props:
+        props["phase"] = norm_phase(props["phase"])
+    if "status" in props:
+        props["status"] = norm_status(props["status"])
+    b.w.node("ClinicalTrial", key, source=source,
+             registry=norm_registry(registry), **props)
 
     if sponsor and len(sponsor) > 2:
         ckey = f"COMPANY:{norm_company(sponsor)}"

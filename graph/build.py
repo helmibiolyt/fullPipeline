@@ -286,6 +286,33 @@ class Build:
                 uniprot_by_chembl.setdefault(ct, acc)
 
         self.w.sid(umap_key)     # read into memory only; record it as read
+
+        # Gene symbols must be known BEFORE the Target node is written.
+        #
+        # HGNC loads later, inside disease.ALL, and used to call node() again
+        # to "enrich" the Target with its symbol. That call did nothing: the
+        # Writer is append-once, so a second node() on an existing key returns
+        # False and drops the properties on the floor. The result was
+        # Target.symbol declared, indexed, documented - and null on all 16,624
+        # nodes, which reads at query time as "the graph has no EGFR" rather
+        # than as a defect.
+        #
+        # Reading HGNC here costs one pass over 42k rows and makes the symbol
+        # available at creation time, which is the only moment it can land.
+        hgnc_key = LAKE.get("hgnc") or (
+            "Targets_Genomics_Biomarkers/genenames.org/data/complete_set/"
+            "hgnc_complete_set.csv")
+        symbol_by_acc: dict[str, str] = {}
+        for row in lake.stream_csv(hgnc_key):
+            sym = (row.get("symbol") or "").strip()
+            if not sym:
+                continue
+            for a in (row.get("uniprot_ids") or "").replace('"', "").split("|"):
+                a = a.strip()
+                if a:
+                    symbol_by_acc.setdefault(a, sym)
+        self.stats["hgnc_symbols_available"] = len(symbol_by_acc)
+
         key = LAKE["targets"]
         n = 0
         for row in lake.stream_csv(key, limit=self.limit):
@@ -297,6 +324,7 @@ class Build:
             tkey = f"UNIPROT:{acc}" if acc else f"CHEMBL_TARGET:{cid}"
             n += 1
             self.w.node("Target", tkey, source=key,
+                        symbol=symbol_by_acc.get(acc, "") if acc else "",
                         name=row.get("pref_name", ""),
                         organism=row.get("organism", ""),
                         target_type=row.get("target_type", ""))

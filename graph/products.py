@@ -137,8 +137,24 @@ def load_vocab(b):
     b._done("vocab", t0, n)
 
 
+def norm_form(raw: str) -> str:
+    """Dosage form to one casing.
+
+    Ten agencies each pick their own: 'TABLET' (41,604) and 'Tablet' (26),
+    'INJECTABLE' (16,665) and 'Injectable' (129), across 22 such pairs. They
+    are the same form, and left alone they split every count by dosage form
+    into two rows that look like different products.
+    """
+    s = " ".join((raw or "").split())
+    return s.upper() if s else ""
+
+
 def _product(b, key, agency, source, contains, **props):
     """Emit a Product, its agency edges, and its CONTAINS edges."""
+    # One funnel for ten agencies, so a form written a new way by an eleventh
+    # is normalised without touching that loader.
+    if "form" in props:
+        props["form"] = norm_form(props["form"])
     b.w.node("Product", key, source=source, agency=agency, **props)
     b.w.edge("APPROVED_BY", key, f"AGENCY:{agency}", match_method="derived",
              source=source)
