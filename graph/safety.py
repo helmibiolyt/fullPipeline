@@ -295,9 +295,10 @@ def load_faers(b):
             continue
         akey = f"AE:{rf}"
         b.w.node("AdverseEvent", akey, source="faers", term=terms[rf])
-        b.w.edge("HAS_ADVERSE_EVENT", skey, akey, match_method="aggregated",
-                 source="faers", report_count=cnt, serious_count=ser,
-                 death_count=dth)
+        for k in b.with_parent(skey):
+            b.w.edge("HAS_ADVERSE_EVENT", k, akey, match_method="aggregated",
+                     source="faers", report_count=cnt, serious_count=ser,
+                     death_count=dth)
     b.stats["faers_reports_counted"] = n
     b.stats["faers_pairs_total"] = len(pairs)
     b.stats[f"faers_pairs_dropped_below_{MIN_REPORTS}"] = dropped

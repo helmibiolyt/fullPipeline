@@ -75,6 +75,7 @@ class Build:
         self.mesh_by_name: dict[str, str] = {}      # folded name -> Disease key
         self.efo_mesh: dict[str, str] = {}          # EFO/MONDO id -> MeSH key
         self.symbol_target: dict[str, str] = {}     # gene symbol -> Target key
+        self.salt_parent: dict[str, str] = {}       # salt key -> parent key
         self.ensg_target: dict[str, str] = {}       # ENSG id -> Target key
         self.skipped_targets: set[str] = set()      # HGNC genes ChEMBL lacks
         self.rxcui_key: dict[str, str] = {}         # RXCUI -> Substance key
@@ -111,6 +112,30 @@ class Build:
             return True
         blob = fold(f"{interventions} {title}")
         return any(s in blob for s in self.slice)
+
+    def with_parent(self, skey: str) -> list[str]:
+        """A substance key, plus its parent if it is a salt.
+
+        ChEMBL and FAERS annotate whichever form the source happened to name,
+        which is usually the salt or the hydrate. Left alone, that puts the
+        pharmacology on a node nobody asks for: `atorvastatin` had no
+        mechanism because it sits on `atorvastatin calcium anhydrous`, and
+        `metformin` had no adverse events because all 1,370 hang off
+        `metformin hydrochloride`. Measured across the graph, 1,006 parent
+        substances lacked a mechanism a salt form carried, 707 lacked targets,
+        632 lacked indications and 533 lacked adverse events.
+
+        A salt and its parent share an active moiety, so the target, the
+        mechanism, the indication and the reported reaction belong to both.
+        The salt keeps its own edge as well - a product contains the salt and
+        the strength on the label is the salt's - so nothing is lost, and
+        IS_SALT_OF still records which is which.
+
+        One hop only. Salt-of-a-salt does not occur in ChEMBL's hierarchy and
+        chaining would risk a cycle.
+        """
+        parent = self.salt_parent.get(skey)
+        return [skey, parent] if parent and parent != skey else [skey]
 
     def _step(self, name):
         t0 = time.time()
@@ -174,8 +199,36 @@ class Build:
             cas = (row.get("cas_number") or "").strip()
             if cas:
                 self.w.identifier(skey, "CAS", cas, source=key)
-            # resolver: preferred name first so it wins over synonyms
+            # Preferred name only, in this pass. See below.
             self.r.add(name, unii)
+
+        # Second pass for synonyms, after every preferred name is registered.
+        #
+        # Adding a row's synonyms immediately after its own preferred name
+        # only orders them WITHIN a row. Across rows it is file order, and
+        # Resolver.add is first-writer-wins - so a synonym on an early row
+        # beats a preferred name on a later one.
+        #
+        # That is not hypothetical. METFORMIN C-11, a carbon-11 radiotracer,
+        # sits at row 18,440 with a synonym folding to "metformin"; plain
+        # Metformin is at row 32,329. The tracer took the name, so ChEMBL's
+        # metformin molecule resolved to it - CHEMBL1431 landed on the tracer,
+        # the real Metformin node got no ChEMBL id at all, and every ChEMBL
+        # annotation for metformin attached to the wrong substance. The salt
+        # hierarchy then read "metformin hydrochloride IS_SALT_OF METFORMIN
+        # C-11", which is how it was found.
+        #
+        # Streaming the file twice rather than holding 173k synonym lists:
+        # the file is 53 MB and this host has been driven into swap before by
+        # keeping rows in memory.
+        for row in lake.stream_csv(key, limit=self.limit):
+            unii = (row.get("unii") or "").strip()
+            name = (row.get("preferred_name") or "").strip()
+            if not unii or not name:
+                continue
+            syns = split_synonyms(row.get("synonyms", ""))
+            if not self.wanted(name, *syns):
+                continue
             for s in syns:
                 self.r.add(s, unii)
         self._done("gsrs", t0, n)
@@ -359,10 +412,12 @@ class Build:
                 mkey = f"MECH:{fold(moa)}"
                 self.w.node("Mechanism", mkey, source=key, name=moa,
                             action_type=action)
-                self.w.edge("HAS_MECHANISM", skey, mkey, source=key)
+                for k in self.with_parent(skey):
+                    self.w.edge("HAS_MECHANISM", k, mkey, source=key)
             tkey = self.tid_key.get((row.get("tid") or "").strip())
             if tkey:
-                self.w.edge("TARGETS", skey, tkey, source=key)
+                for k in self.with_parent(skey):
+                    self.w.edge("TARGETS", k, tkey, source=key)
         self._done("chembl_mechanisms", t0, n)
 
     # ---- driver ----------------------------------------------------------

@@ -167,8 +167,9 @@ def load_indications(b):
         # endpoint; the Writer keeps the richer mesh version if it exists.
         b.w.node("Disease", dkey, source=key, name=heading or row.get("efo_term", ""),
                  vocabulary="MeSH" if mesh else "EFO")
-        b.w.edge("INDICATED_FOR", skey, dkey, match_method="structured",
-                 source=key, )
+        for k in b.with_parent(skey):
+            b.w.edge("INDICATED_FOR", k, dkey, match_method="structured",
+                     source=key)
     b._done("chembl_indications", t0, n)
 
 
@@ -265,11 +266,13 @@ def load_opentargets_drugs(b):
                      vocabulary="MeSH" if dkey.startswith("MESH:") else "EFO")
             if how != "own" and ind != dkey:
                 b.w.identifier(dkey, "EFO", ind, source=key, match_method=how)
-            b.w.edge("INDICATED_FOR", skey, dkey, match_method="structured",
-                     source=key)
+            for k in b.with_parent(skey):
+                b.w.edge("INDICATED_FOR", k, dkey, match_method="structured",
+                         source=key)
         tkey = b.symbol_target.get((row.get("target_symbol") or "").strip().upper())
         if tkey:
-            b.w.edge("TARGETS", skey, tkey, match_method="symbol", source=key)
+            for k in b.with_parent(skey):
+                b.w.edge("TARGETS", k, tkey, match_method="symbol", source=key)
     b._done("opentargets_drugs", t0, n)
 
 

@@ -100,6 +100,12 @@ def load_hierarchy(b):
         # contains the salt, and the strength on the label is the salt's. Two
         # nodes with a stated edge keeps both facts.
         b.w.edge("IS_SALT_OF", skey, pkey, match_method="structured", source=key)
+        # Held so later loaders can attach a salt's pharmacology to its parent
+        # as well. ChEMBL and FAERS annotate whichever form the source named,
+        # so without this the parent - the name everyone actually asks about -
+        # carries nothing. See Build.with_parent.
+        b.salt_parent[skey] = pkey
+    b.stats["salt_parent_pairs"] = len(b.salt_parent)
     b._done("chembl_hierarchy", t0, n)
 
 
