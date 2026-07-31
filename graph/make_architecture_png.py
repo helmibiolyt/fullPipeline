@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
-"""Draw the whole platform: scrapers, S3, both clouds, both stores.
+"""Draw the platform: scrapers, S3, both clouds, both stores.
 
     python graph/make_architecture_png.py
 
-One picture answering "where does anything actually run". The two clouds are
-drawn as the enclosing regions they are, because which side of that boundary a
-box sits on is the fact that explains most of the design - the graph host
-holds no irreplaceable state and is thrown away and rebuilt, the vector host
-holds ~27 GB of embeddings and has to be migrated.
+Read left to right in four numbered stages. The clouds are drawn as the
+regions that enclose things, because which side of that boundary a box sits on
+explains most of the design - the graph host derives everything from S3 and is
+thrown away and rebuilt, the vector host holds embeddings that cost GPU-hours
+and must be migrated.
 
-Figures are read from the live graph where possible so the diagram cannot
-drift; if the database is unreachable it falls back to a dated snapshot and
-says so on the image.
+Kept deliberately sparse. An earlier version put a paragraph in every box and
+became unreadable; the detail belongs in GRAPH_TECHNICAL.pdf, and a diagram
+that has to be studied is not doing its job. Each box gets a title, a handful
+of figures, and at most one line of prose.
+
+Node and edge totals are read from the live graph, so the picture cannot drift
+from the database. If it is unreachable the image says so.
 """
 from __future__ import annotations
 
@@ -20,313 +24,289 @@ import sys
 
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt                              # noqa: E402
+import matplotlib.pyplot as plt                                # noqa: E402
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch  # noqa: E402
 
 HERE = pathlib.Path(__file__).resolve().parent
 OUT = HERE / "architecture.png"
 
-# Palette shared with the deck, so the two read as one system.
-INK     = "#070c18"
-PANEL   = "#111a2b"
-PANEL2  = "#18243a"
-LINE    = "#25334d"
-TEXT    = "#ecf1f9"
-MUTED   = "#93a6c4"
-DIM     = "#63768f"
-BLUE    = "#4c8dff"      # the graph
-VIOLET  = "#a78bfa"      # the document store
-CYAN    = "#22d3ee"      # acquisition
-GREEN   = "#34d399"      # orchestration
-AMBER   = "#fbbf24"
-AWS     = "#ff9900"
-AZURE   = "#3aa0ff"
+INK    = "#080d1a"
+PANEL  = "#121c2f"
+PANEL2 = "#1a2740"
+LINE   = "#27364f"
+TEXT   = "#eef2f9"
+MUTED  = "#9bafcb"
+DIM    = "#65788f"
+BLUE   = "#5b9bff"     # the graph
+VIOLET = "#b39bfb"     # the document store
+CYAN   = "#2ad7f0"     # collection
+GREEN  = "#3ddba4"     # orchestration
+AMBER  = "#fcc63a"
+AWS    = "#ff9f2e"
+AZURE  = "#41a7ff"
 
 
-def live_figures() -> dict:
-    """Node and edge totals from Neo4j, or a dated snapshot."""
-    snap = {"nodes": "13.7M", "edges": "16.8M", "trials": "1.02M",
-            "note": "snapshot 2026-07-31"}
+def live() -> dict:
+    snap = {"nodes": "13.68M", "edges": "16.82M", "note": "snapshot 2026-07-31"}
     try:
         sys.path.insert(0, str(HERE.parent / "testPipeline"))
-        import ask as A                                      # noqa: PLC0415
+        import ask as A                                        # noqa: PLC0415
         n, _ = A.run_cypher("MATCH (n) RETURN count(n) AS n")
         e, _ = A.run_cypher("MATCH ()-[r]->() RETURN count(r) AS n")
-        t, _ = A.run_cypher("MATCH (n:ClinicalTrial) RETURN count(n) AS n")
-        m = lambda v: f"{v/1_000_000:.2f}M" if v >= 1_000_000 else f"{v:,}"
-        return {"nodes": m(n[0]["n"]), "edges": m(e[0]["n"]),
-                "trials": m(t[0]["n"]), "note": "live"}
-    except Exception:                                        # noqa: BLE001
+        f = lambda v: f"{v/1_000_000:.2f}M"
+        return {"nodes": f(n[0]["n"]), "edges": f(e[0]["n"]), "note": "live"}
+    except Exception:                                          # noqa: BLE001
         return snap
 
 
-def box(ax, x, y, w, h, *, fill=PANEL, edge=None, lw=1.2, r=0.018, z=2):
-    p = FancyBboxPatch((x, y), w, h,
-                       boxstyle=f"round,pad=0,rounding_size={r}",
-                       facecolor=fill, edgecolor=edge or LINE,
-                       linewidth=lw, zorder=z)
-    ax.add_patch(p)
-    return p
+def box(ax, x, y, w, h, accent, fill=PANEL, lw=1.1, edge=None):
+    ax.add_patch(FancyBboxPatch(
+        (x, y), w, h, boxstyle="round,pad=0,rounding_size=0.014",
+        facecolor=fill, edgecolor=edge or LINE, linewidth=lw, zorder=2))
+    if accent:                       # the coloured spine down the left edge
+        ax.add_patch(FancyBboxPatch(
+            (x, y), 0.0035, h, boxstyle="round,pad=0,rounding_size=0.001",
+            facecolor=accent, edgecolor="none", zorder=3))
 
 
-def bar(ax, x, y, h, color, w=0.004, z=3):
-    ax.add_patch(FancyBboxPatch((x, y), w, h,
-                                boxstyle="round,pad=0,rounding_size=0.002",
-                                facecolor=color, edgecolor="none", zorder=z))
-
-
-def txt(ax, x, y, s, size=9, color=TEXT, weight="normal", ha="left",
-        va=None, family="DejaVu Sans", z=5):
-    """Text at (x, y).
-
-    A multi-line block hangs DOWN from its anchor by default. Centred - which
-    is matplotlib's behaviour and was the original default here - a five-line
-    paragraph climbs half its height above the anchor and lands on the heading
-    above it. Every overlap in the first render was that.
-    """
+def t(ax, x, y, s, size=9, color=TEXT, w="normal", ha="left", va=None, z=5):
+    # Multi-line text hangs down from its anchor. Matplotlib centres it, which
+    # drops a paragraph on top of the heading above it.
     if va is None:
         va = "top" if "\n" in s else "center"
-    ax.text(x, y, s, fontsize=size, color=color, fontweight=weight, ha=ha,
-            va=va, family=family, zorder=z, linespacing=1.45)
+    ax.text(x, y, s, fontsize=size, color=color, fontweight=w, ha=ha, va=va,
+            family="DejaVu Sans", zorder=z, linespacing=1.5)
 
 
-def arrow(ax, xy0, xy1, color=LINE, lw=1.6, style="-|>", rad=0.0, z=4,
-          ls="-"):
+def rows(ax, x, y, right, pairs, gap=0.030, size=9.2):
+    """A label/value list - the densest readable way to show figures."""
+    for i, (k, v) in enumerate(pairs):
+        yy = y - i * gap
+        t(ax, x, yy, k, size=size, color=MUTED)
+        t(ax, right, yy, v, size=size, color=TEXT, w="bold", ha="right")
+
+
+def flow(ax, x0, y0, x1, y1, color, lw=2.4, rad=0.0, ls="-"):
     ax.add_patch(FancyArrowPatch(
-        xy0, xy1, arrowstyle=style, mutation_scale=12, color=color,
-        linewidth=lw, zorder=z, linestyle=ls,
-        connectionstyle=f"arc3,rad={rad}", shrinkA=2, shrinkB=2))
+        (x0, y0), (x1, y1), arrowstyle="-|>", mutation_scale=15, color=color,
+        linewidth=lw, zorder=4, linestyle=ls,
+        connectionstyle=f"arc3,rad={rad}", shrinkA=3, shrinkB=3))
 
 
-def cloud(ax, x, y, w, h, label, color):
-    """A dashed region marking which cloud something runs in."""
+def stage(ax, x, y, n, label, color):
+    """A numbered stage marker above a column."""
+    ax.add_patch(plt.Circle((x, y), 0.0105, facecolor=color, edgecolor="none",
+                            zorder=5))
+    t(ax, x, y - 0.0005, str(n), size=9.5, color=INK, w="bold", ha="center")
+    t(ax, x + 0.019, y, label, size=11, color=color, w="bold")
+
+
+def region(ax, x, y, w, h, label, color):
     ax.add_patch(FancyBboxPatch(
-        (x, y), w, h, boxstyle="round,pad=0,rounding_size=0.02",
-        facecolor="none", edgecolor=color, linewidth=1.6,
-        linestyle=(0, (6, 4)), zorder=1, alpha=0.85))
-    txt(ax, x + 0.012, y + h - 0.022, label, size=10.5, color=color,
-        weight="bold")
+        (x, y), w, h, boxstyle="round,pad=0,rounding_size=0.016",
+        facecolor="#0d1424", edgecolor=color, linewidth=1.5,
+        linestyle=(0, (7, 5)), zorder=1))
+    t(ax, x + w - 0.014, y + h - 0.026, label, size=10.5, color=color,
+      w="bold", ha="right")
 
 
 def main():
-    fig = live_figures()
-    f, ax = plt.subplots(figsize=(19.2, 10.4), dpi=150)
-    f.patch.set_facecolor(INK)
+    g = live()
+    fig, ax = plt.subplots(figsize=(20, 10.2), dpi=150)
+    fig.patch.set_facecolor(INK)
     ax.set_facecolor(INK)
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.axis("off")
+    ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.axis("off")
 
-    txt(ax, 0.028, 0.962, "Biolyt — platform architecture", size=17,
-        weight="bold")
-    txt(ax, 0.028, 0.934,
-        "49 scrapers → one S3 lake → a knowledge graph and a document store, "
-        "kept current by dataset-triggered pipelines", size=10.2, color=MUTED)
-    txt(ax, 0.972, 0.962, f"figures: {fig['note']}", size=8.5, color=DIM,
-        ha="right")
+    t(ax, 0.030, 0.960, "Biolyt — platform architecture", size=19, w="bold")
+    t(ax, 0.030, 0.928,
+      "49 scrapers  →  one S3 lake  →  a knowledge graph and a document "
+      "store, kept current without anyone touching them",
+      size=11, color=MUTED)
+    t(ax, 0.970, 0.960, f"figures: {g['note']}", size=9, color=DIM, ha="right")
 
-    # ---------------------------------------------------------- 1. sources
-    box(ax, 0.028, 0.60, 0.20, 0.285, fill=PANEL)
-    bar(ax, 0.028, 0.60, 0.285, CYAN)
-    txt(ax, 0.045, 0.862, "SOURCES", size=9.5, color=CYAN, weight="bold")
-    txt(ax, 0.045, 0.838, "49 scrapers · 8 categories", size=9, color=TEXT)
-    cats = [("Drug & substance", "5"), ("Clinical trials", "9"),
-            ("Regulatory approvals", "7"), ("Safety / PV", "2"),
-            ("Targets & genomics", "5"), ("Ontologies", "3"),
-            ("Literature", "4"), ("MENA / GCC", "6")]
-    for i, (c, n) in enumerate(cats):
-        yy = 0.812 - i * 0.0235
-        txt(ax, 0.045, yy, c, size=8.2, color=MUTED)
-        txt(ax, 0.218, yy, n, size=8.2, color=DIM, ha="right")
-    txt(ax, 0.045, 0.622, "41 in use · 8 excluded, with reasons", size=7.8,
-        color=DIM)
+    # Column geometry.
+    #
+    # Every y is chosen against a budget rather than by eye: the cloud regions
+    # occupy 0.270-0.855, the stage markers sit clear above them at 0.900, and
+    # the CSV flow runs in the corridor between so it crosses nothing. The
+    # first version packed text into heights nobody had checked and five cards
+    # overflowed their boxes.
+    C = [0.030, 0.268, 0.505, 0.742]
+    W = 0.212
+    PAD = 0.018
+    R_TOP, R_BOT = 0.855, 0.270
 
-    # ------------------------------------------------- 2. the scraper DAG
-    box(ax, 0.028, 0.30, 0.20, 0.265, fill=PANEL2)
-    bar(ax, 0.028, 0.30, 0.265, GREEN)
-    txt(ax, 0.045, 0.542, "scrapers_pipeline", size=9.5, color=GREEN,
-        weight="bold")
-    txt(ax, 0.045, 0.519, "@weekly — the only clock", size=8.4, color=MUTED)
-    stages = [("hydrate", "restore cursors + last CSV"),
-              ("scrape", "API, bulk file or pages"),
-              ("normalise", "CSV with a stable header"),
-              ("stage", "write under _runs/<id>/"),
-              ("commit", "copy to the stable key"),
-              ("emit", "Dataset(s3://moine-data/…)")]
-    for i, (s, d) in enumerate(stages):
-        yy = 0.489 - i * 0.0295
-        txt(ax, 0.048, yy, f"{i+1}", size=7.6, color=GREEN, weight="bold")
-        txt(ax, 0.063, yy, s, size=8.4, color=TEXT, weight="bold")
-        txt(ax, 0.115, yy, d, size=7.6, color=DIM)
-    txt(ax, 0.045, 0.313, "a commit REPLACES — no incremental append",
-        size=7.6, color=AMBER)
+    stage(ax, C[0] + 0.010, 0.900, 1, "COLLECT", CYAN)
+    stage(ax, C[1] + 0.010, 0.900, 2, "LAND", AWS)
+    stage(ax, C[2] + 0.010, 0.900, 3, "PROCESS", GREEN)
+    stage(ax, C[3] + 0.010, 0.900, 4, "SERVE", BLUE)
 
-    arrow(ax, (0.128, 0.598), (0.128, 0.568), color=CYAN, lw=2)
+    # ---------------------------------------------------------- 1 COLLECT
+    box(ax, C[0], 0.600, W, 0.255, CYAN)
+    t(ax, C[0] + PAD, 0.828, "49 scrapers", size=13, w="bold")
+    t(ax, C[0] + PAD, 0.803, "one folder and a manifest each", size=8.6,
+      color=DIM)
+    rows(ax, C[0] + PAD, 0.773, C[0] + W - PAD,
+         [("Clinical trials", "9"), ("Regulatory approvals", "7"),
+          ("MENA / GCC", "6"), ("Drug & substance", "5"),
+          ("Targets & genomics", "5"), ("Literature", "4"),
+          ("Ontologies", "3"), ("Safety / PV", "2")], gap=0.0200, size=8.6)
+    t(ax, C[0] + PAD, 0.617, "41 in use  \u00b7  8 excluded, with reasons",
+      size=8.4, color=CYAN)
 
-    # ------------------------------------------------------------- 3. S3
-    box(ax, 0.262, 0.585, 0.185, 0.30, fill=PANEL2, edge=AWS, lw=1.4)
-    bar(ax, 0.262, 0.585, 0.30, AWS)
-    txt(ax, 0.279, 0.862, "S3 · moine-data", size=10, color=AWS,
-        weight="bold")
-    txt(ax, 0.279, 0.838, "the one place data lands", size=8.4, color=MUTED)
-    for i, (k, v) in enumerate([("CSV files", "432"),
-                                ("documents (PDF)", "93,505"),
-                                ("sources", "49"),
-                                ("categories", "8")]):
-        yy = 0.806 - i * 0.026
-        txt(ax, 0.279, yy, k, size=8.4, color=MUTED)
-        txt(ax, 0.437, yy, v, size=8.4, color=TEXT, ha="right", weight="bold")
-    txt(ax, 0.279, 0.688,
-        "Full snapshots, overwritten each run.\nNo history is kept, and no\n"
-        "double counting is possible.", size=7.8, color=DIM)
-    txt(ax, 0.279, 0.612, "_LATEST.json records the current run", size=7.6,
-        color=DIM)
+    box(ax, C[0], 0.335, W, 0.245, GREEN, fill=PANEL2)
+    t(ax, C[0] + PAD, 0.552, "scrapers_pipeline", size=12, w="bold",
+      color=GREEN)
+    t(ax, C[0] + PAD, 0.527, "@weekly \u2014 the only clock in the system",
+      size=8.6, color=DIM)
+    for i2, (st, d) in enumerate(
+            [("hydrate", "restore cursors"), ("scrape", "fetch"),
+             ("normalise", "stable CSV header"), ("stage", "write aside"),
+             ("commit", "publish atomically"), ("emit", "dataset event")]):
+        yy = 0.492 - i2 * 0.0232
+        t(ax, C[0] + 0.020, yy, str(i2 + 1), size=8, color=GREEN, w="bold")
+        t(ax, C[0] + 0.034, yy, st, size=8.8, w="bold")
+        t(ax, C[0] + 0.100, yy, d, size=8.2, color=DIM)
+    t(ax, C[0] + PAD, 0.350, "a commit REPLACES \u2014 never appends",
+      size=8.4, color=AMBER)
 
-    arrow(ax, (0.232, 0.43), (0.352, 0.43), color=GREEN, lw=1.8, rad=-0.0)
-    arrow(ax, (0.352, 0.43), (0.352, 0.578), color=GREEN, lw=1.8)
-    txt(ax, 0.238, 0.447, "publish", size=7.8, color=GREEN)
+    # ------------------------------------------------------------- 2 LAND
+    box(ax, C[1], 0.600, W, 0.255, AWS, fill=PANEL2, edge=AWS, lw=1.4)
+    t(ax, C[1] + PAD, 0.828, "S3  \u00b7  moine-data", size=13, w="bold",
+      color=AWS)
+    t(ax, C[1] + PAD, 0.803, "the one place data lands", size=8.6, color=DIM)
+    rows(ax, C[1] + PAD, 0.766, C[1] + W - PAD,
+         [("CSV files", "432"), ("documents", "93,505"),
+          ("sources", "49"), ("categories", "8")], gap=0.031, size=9.6)
+    t(ax, C[1] + PAD, 0.652,
+      "Full snapshots, overwritten each run.\nNo append, so no double "
+      "counting.", size=8.4, color=MUTED)
 
-    # ------------------------------------------- 4. dataset events fan out
-    box(ax, 0.262, 0.30, 0.185, 0.255, fill=PANEL)
-    bar(ax, 0.262, 0.30, 0.255, GREEN)
-    txt(ax, 0.279, 0.532, "Dataset events", size=9.5, color=GREEN,
-        weight="bold")
-    txt(ax, 0.279, 0.508,
-        "Each commit emits one event.\nThe sync pipelines have NO\n"
-        "clock — they wake when data\nactually lands, so a sync\n"
-        "cannot race its own scrape.",
-        size=8, color=MUTED)
-    txt(ax, 0.279, 0.398, "graph_sync", size=8.6, color=BLUE, weight="bold")
-    txt(ax, 0.437, 0.398, "35 CSV sources", size=8, color=DIM, ha="right")
-    txt(ax, 0.279, 0.374, "vector_store_sync", size=8.6, color=VIOLET,
-        weight="bold")
-    txt(ax, 0.437, 0.374, "10 doc sources", size=8, color=DIM, ha="right")
-    txt(ax, 0.279, 0.335,
-        "DatasetAny (OR). A plain list\nmeans AND — it would fire never.",
-        size=7.5, color=AMBER)
+    box(ax, C[1], 0.335, W, 0.245, GREEN)
+    t(ax, C[1] + PAD, 0.552, "Dataset events", size=12, w="bold", color=GREEN)
+    t(ax, C[1] + PAD, 0.527, "each commit emits exactly one", size=8.6,
+      color=DIM)
+    t(ax, C[1] + PAD, 0.489, "graph_sync", size=10, w="bold", color=BLUE)
+    t(ax, C[1] + W - PAD, 0.489, "35 CSV sources", size=8.6, color=MUTED,
+      ha="right")
+    t(ax, C[1] + PAD, 0.457, "vector_store_sync", size=10, w="bold",
+      color=VIOLET)
+    t(ax, C[1] + W - PAD, 0.457, "10 doc sources", size=8.6, color=MUTED,
+      ha="right")
+    t(ax, C[1] + PAD, 0.420,
+      "No clock of their own \u2014 they wake when\ndata lands, so a sync "
+      "cannot race the\nscrape that feeds it.", size=8.4, color=MUTED)
 
-    # ================================================== AWS region
-    cloud(ax, 0.478, 0.055, 0.245, 0.60, "AWS  ·  us-east-1", AWS)
+    # --------------------------------------------------------- 3 PROCESS
+    region(ax, C[2] - 0.014, R_BOT, W + 0.028, R_TOP - R_BOT, "AWS", AWS)
 
-    box(ax, 0.494, 0.455, 0.213, 0.155, fill=PANEL)
-    bar(ax, 0.494, 0.455, 0.155, GREEN)
-    txt(ax, 0.510, 0.585, "Airflow 2.10", size=9.5, color=GREEN,
-        weight="bold")
-    txt(ax, 0.510, 0.562, "scheduler · webserver · Postgres", size=7.8,
-        color=MUTED)
-    txt(ax, 0.510, 0.535,
-        "Runs BOTH sync DAGs. Drives the\ngraph host over SSH — a local\n"
-        "BashOperator has no graph code,\nno Neo4j and no spare memory.",
-        size=7.6, color=DIM)
+    box(ax, C[2], 0.700, W, 0.135, GREEN)
+    t(ax, C[2] + PAD, 0.812, "Airflow", size=12.5, w="bold", color=GREEN)
+    t(ax, C[2] + PAD, 0.788, "scheduler \u00b7 webserver \u00b7 Postgres",
+      size=8.4, color=DIM)
+    t(ax, C[2] + PAD, 0.760,
+      "Runs both sync pipelines and drives\nthe Azure host over SSH.",
+      size=8.4, color=MUTED)
 
-    box(ax, 0.494, 0.232, 0.213, 0.205, fill=PANEL)
-    bar(ax, 0.494, 0.232, 0.205, VIOLET)
-    txt(ax, 0.510, 0.410, "Qdrant — document store", size=9.5, color=VIOLET,
-        weight="bold")
-    for i, (k, v) in enumerate([("chunks", "3,240,756"),
-                                ("documents", "92,397"),
-                                ("model", "bge-m3, 1024-d"),
-                                ("on disk", "~27 GB")]):
-        yy = 0.383 - i * 0.024
-        txt(ax, 0.510, yy, k, size=8.2, color=MUTED)
-        txt(ax, 0.697, yy, v, size=8.2, color=TEXT, ha="right")
-    txt(ax, 0.510, 0.300,
-        "extract → chunk → embed → upsert\nIncremental by S3 ETag; only\n"
-        "changed documents are re-embedded.", size=7.6, color=DIM)
+    box(ax, C[2], 0.480, W, 0.195, VIOLET)
+    t(ax, C[2] + PAD, 0.650, "Qdrant", size=12.5, w="bold", color=VIOLET)
+    t(ax, C[2] + PAD, 0.626, "document store", size=8.4, color=DIM)
+    rows(ax, C[2] + PAD, 0.594, C[2] + W - PAD,
+         [("chunks", "3,240,756"), ("documents", "92,397"),
+          ("model", "bge-m3"), ("on disk", "~27 GB")], gap=0.026, size=9.2)
+    t(ax, C[2] + PAD, 0.502, "extract \u2192 chunk \u2192 embed "
+      "\u2192 upsert", size=8.2, color=DIM)
 
-    box(ax, 0.494, 0.085, 0.213, 0.135, fill=PANEL2)
-    bar(ax, 0.494, 0.085, 0.135, VIOLET)
-    txt(ax, 0.510, 0.196, "search API  :8000", size=9.2, color=VIOLET,
-        weight="bold")
-    txt(ax, 0.510, 0.172,
-        "POST /search — filtered hybrid\nretrieval with rerank, 0.6 floor.\n"
-        "Returns chunks with provenance.", size=7.6, color=DIM)
-    txt(ax, 0.510, 0.108, "irreplaceable state — back up before replacing",
-        size=7.4, color=AMBER)
+    box(ax, C[2], 0.290, W, 0.165, VIOLET, fill=PANEL2)
+    t(ax, C[2] + PAD, 0.430, "search API   :8000", size=11.5, w="bold",
+      color=VIOLET)
+    t(ax, C[2] + PAD, 0.400,
+      "Filtered hybrid retrieval with rerank\nand a fixed 0.6 relevance "
+      "floor.\nReturns chunks with provenance.", size=8.4, color=MUTED)
+    t(ax, C[2] + PAD, 0.304, "irreplaceable \u2014 back up before replacing",
+      size=8.2, color=AMBER)
 
-    # ================================================== Azure region
-    cloud(ax, 0.742, 0.055, 0.232, 0.60, "AZURE  ·  graph host", AZURE)
+    # ----------------------------------------------------------- 4 SERVE
+    region(ax, C[3] - 0.014, R_BOT, W + 0.028, R_TOP - R_BOT, "AZURE", AZURE)
 
-    box(ax, 0.757, 0.395, 0.201, 0.215, fill=PANEL)
-    bar(ax, 0.757, 0.395, 0.215, BLUE)
-    txt(ax, 0.772, 0.585, "graph build", size=9.5, color=BLUE, weight="bold")
-    txt(ax, 0.772, 0.562, "2 vCPU · 16 GB · 29 GB disk", size=7.8,
-        color=MUTED)
-    for i, (s, d) in enumerate([("build", "stream 96 CSVs → node/edge tables"),
-                                ("validate", "integrity, fixtures, coverage"),
-                                ("stage", "types, headers, newlines"),
-                                ("import", "neo4j-admin, replaces the store"),
-                                ("test", "182 answer checks, or it fails")]):
-        yy = 0.532 - i * 0.0255
-        txt(ax, 0.772, yy, s, size=8.2, color=TEXT, weight="bold")
-        txt(ax, 0.828, yy, d, size=7.4, color=DIM)
-    txt(ax, 0.772, 0.405, "~35 min end to end · rebuilt, never patched",
-        size=7.5, color=DIM)
+    box(ax, C[3], 0.620, W, 0.215, BLUE)
+    t(ax, C[3] + PAD, 0.812, "graph build", size=12.5, w="bold", color=BLUE)
+    t(ax, C[3] + PAD, 0.788, "2 vCPU \u00b7 16 GB \u00b7 rebuilt, never "
+      "patched", size=8.4, color=DIM)
+    for i2, (st, d) in enumerate(
+            [("build", "96 CSVs \u2192 tables"),
+             ("validate", "or it stops here"),
+             ("import", "replaces the store"),
+             ("test", "182 answer checks")]):
+        yy = 0.753 - i2 * 0.027
+        t(ax, C[3] + PAD, yy, st, size=9.2, w="bold")
+        t(ax, C[3] + 0.086, yy, d, size=8.4, color=DIM)
+    t(ax, C[3] + PAD, 0.636, "~35 minutes end to end", size=8.4, color=BLUE)
 
-    box(ax, 0.757, 0.145, 0.201, 0.225, fill=PANEL)
-    bar(ax, 0.757, 0.145, 0.225, BLUE)
-    txt(ax, 0.772, 0.345, "Neo4j 5.26 — knowledge graph", size=9.5,
-        color=BLUE, weight="bold")
-    for i, (k, v) in enumerate([("nodes", fig["nodes"]),
-                                ("relationships", fig["edges"]),
-                                ("entity types", "22"),
-                                ("relationship types", "32"),
-                                ("full-text indexes", "3"),
-                                ("entity embeddings", "40,432 SapBERT")]):
-        yy = 0.317 - i * 0.0235
-        txt(ax, 0.772, yy, k, size=8.2, color=MUTED)
-        txt(ax, 0.948, yy, v, size=8.2, color=TEXT, ha="right")
-    txt(ax, 0.772, 0.172,
-        "bolt :7687\nno irreplaceable state — rebuildable from S3 in ~35 min",
-        size=7.3, color=GREEN)
+    box(ax, C[3], 0.290, W, 0.305, BLUE)
+    t(ax, C[3] + PAD, 0.568, "Neo4j", size=12.5, w="bold", color=BLUE)
+    t(ax, C[3] + PAD, 0.544, "knowledge graph   \u00b7   bolt :7687",
+      size=8.4, color=DIM)
+    rows(ax, C[3] + PAD, 0.508, C[3] + W - PAD,
+         [("nodes", g["nodes"]), ("relationships", g["edges"]),
+          ("entity types", "22"), ("relationship types", "32"),
+          ("full-text indexes", "3"), ("embeddings", "40,432")],
+         gap=0.028, size=9.2)
+    t(ax, C[3] + PAD, 0.332,
+      "No irreplaceable state \u2014 every node is\nderived from S3 and "
+      "rebuildable.", size=8.4, color=GREEN)
 
-    # ---- flows into the two stores
-    # Stops at the Qdrant edge - drawn to 0.60 it ran through the box.
-    arrow(ax, (0.449, 0.392), (0.492, 0.335), color=VIOLET, lw=2, rad=-0.10)
-    txt(ax, 0.452, 0.352, "documents", size=7.6, color=VIOLET)
-    # Routed above both cloud regions rather than across them - drawn through,
-    # the line and its label sat on top of the AWS box and the AZURE heading.
-    ax.plot([0.449, 0.462], [0.418, 0.712], color=BLUE, lw=2, zorder=4)
-    ax.plot([0.462, 0.858], [0.712, 0.712], color=BLUE, lw=2, zorder=4)
-    arrow(ax, (0.858, 0.712), (0.858, 0.660), color=BLUE, lw=2)
-    txt(ax, 0.520, 0.742,
-        "CSV  ·  graph_sync drives the Azure host over SSH",
-        size=7.8, color=BLUE)
+    # ------------------------------------------------------------- flows
+    flow(ax, C[0] + W, 0.728, C[1] - 0.003, 0.728, CYAN)
+    flow(ax, C[0] + 0.106, 0.580, C[0] + 0.106, 0.596, CYAN, lw=2)
+    flow(ax, C[1] + 0.106, 0.580, C[1] + 0.106, 0.596, GREEN, lw=2)
 
-    # ---- consumer
-    box(ax, 0.262, 0.062, 0.185, 0.205, fill=PANEL2)
-    bar(ax, 0.262, 0.062, 0.205, AMBER)
-    txt(ax, 0.279, 0.248, "Research agent / test rig", size=9.5, color=AMBER,
-        weight="bold")
-    txt(ax, 0.279, 0.228,
-        "Every question queries BOTH:\n"
-        "  · Cypher over bolt :7687\n"
-        "  · semantic search over :8000\n"
-        "then answers from those two\nresult sets only, citing sources.",
-        size=7.8, color=MUTED)
-    txt(ax, 0.279, 0.118,
-        "Joined by identifiers, not shared\nstorage — MHRA filenames carry "
-        "the\nlicence number the graph indexes.", size=7.3, color=DIM)
+    # Documents: straight in, at a height clear of both AWS cards.
+    flow(ax, C[1] + W, 0.470, C[2] - 0.016, 0.470, VIOLET)
+    t(ax, C[1] + W + 0.006, 0.452, "documents", size=8.4, color=VIOLET)
 
-    arrow(ax, (0.449, 0.15), (0.492, 0.15), color=AMBER, lw=1.5, ls="--")
-    arrow(ax, (0.449, 0.20), (0.755, 0.235), color=AMBER, lw=1.5, ls="--",
-          rad=-0.06)
+    # CSV: up into the corridor above both regions, across, and down - drawn
+    # straight it went through the AWS box and its label sat on the heading.
+    XR = C[1] + W + 0.006
+    ax.plot([C[1] + W, XR], [0.500, 0.500], color=BLUE, lw=2.4, zorder=4)
+    ax.plot([XR, XR], [0.500, 0.872], color=BLUE, lw=2.4, zorder=4)
+    ax.plot([XR, C[3] + 0.106], [0.872, 0.872], color=BLUE, lw=2.4, zorder=4)
+    flow(ax, C[3] + 0.106, 0.872, C[3] + 0.106, 0.842, BLUE)
+    t(ax, C[2] + 0.030, 0.884,
+      "CSV  \u00b7  graph_sync drives the Azure host over SSH", size=8.6,
+      color=BLUE)
 
-    # ---- footnote
-    txt(ax, 0.028, 0.032,
-        "Two clouds because the memory profiles conflict: Qdrant holds ~8 GB "
-        "of vectors resident and Neo4j wants 4 GB heap + 4 GB page cache, so "
-        "on one 16 GB box the larger evicts the smaller.",
-        size=8, color=DIM)
-    txt(ax, 0.028, 0.012,
-        "The asymmetry that matters: the graph host derives everything from "
-        "S3 and is thrown away and rebuilt; the vector host holds embeddings "
-        "that cost GPU-hours and must be migrated.",
-        size=8, color=DIM)
+    # --------------------------------------------------------- the consumer
+    box(ax, C[0], 0.095, W + 0.237, 0.150, AMBER, fill=PANEL2)
+    t(ax, C[0] + PAD, 0.220, "Research agent", size=12.5, w="bold",
+      color=AMBER)
+    t(ax, C[0] + PAD, 0.192,
+      "Every question queries BOTH stores, then answers only from what they "
+      "returned \u2014\nCypher over bolt :7687 and semantic search over "
+      ":8000, with the sources named.\nThe two are joined by identifiers, "
+      "not shared storage: an MHRA filename\ncarries the licence number the "
+      "graph indexes.", size=8.8, color=MUTED)
 
-    f.savefig(OUT, facecolor=INK, bbox_inches="tight", pad_inches=0.22)
-    print(f"wrote {OUT}  ({OUT.stat().st_size/1024:.0f} KB)  figures: "
-          f"{fig['note']}")
+    flow(ax, C[0] + W + 0.239, 0.170, C[2] + 0.100, 0.282, AMBER, lw=1.8,
+         ls=(0, (5, 4)), rad=-0.15)
+    flow(ax, C[0] + W + 0.239, 0.150, C[3] + 0.100, 0.282, AMBER, lw=1.8,
+         ls=(0, (5, 4)), rad=-0.07)
+
+    # ------------------------------------------------------------ footnote
+    t(ax, 0.030, 0.055,
+      "Two clouds because the memory profiles conflict — Qdrant holds ~8 GB "
+      "of vectors resident and Neo4j wants 4 GB heap plus 4 GB page cache, so "
+      "on one 16 GB box the larger evicts the smaller.",
+      size=9, color=DIM)
+    t(ax, 0.030, 0.030,
+      "The asymmetry that matters — the graph host can be destroyed and "
+      "rebuilt from S3 in half an hour; the vector host holds embeddings that "
+      "cost GPU-hours and has to be migrated.",
+      size=9, color=DIM)
+
+    fig.savefig(OUT, facecolor=INK, bbox_inches="tight", pad_inches=0.25)
+    print(f"wrote {OUT}  ({OUT.stat().st_size/1024:.0f} KB)  "
+          f"figures: {g['note']}")
 
 
 if __name__ == "__main__":
