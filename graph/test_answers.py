@@ -297,6 +297,22 @@ TRAPS = [
  ("Product.form is not the product class",
   "MATCH (p:Product) WHERE p.form IN ['HUMAN','VETERINARY'] RETURN count(p) AS n",
   lambda r: r[0]["n"] == 0),
+ # Trial keys. trial_key exists to deduplicate a study registered in its own
+ # registry and again in WHO ICTRP, and four registries fell straight through
+ # it: ANZCTR writes a bare 14-digit number where WHO writes ACTRN..., CTIS
+ # prefixes its own ids with a literal "CTIS" where WHO does not. The same
+ # study became two nodes - 3,690 of a 4,000 ANZCTR sample, 6,618 CTIS.
+ ("no trial falls through to the TRIAL: fallback namespace",
+  "MATCH (t:ClinicalTrial) WHERE t.key STARTS WITH 'TRIAL:' "
+  "RETURN count(t) AS n", lambda r: r[0]["n"] == 0),
+ ("ANZCTR ids are keyed the way WHO writes them",
+  "MATCH (t:ClinicalTrial) WHERE t.registry='anzctr' AND "
+  "NOT t.key STARTS WITH 'ACTRN:' RETURN count(t) AS n",
+  lambda r: r[0]["n"] == 0),
+ ("CTIS is one namespace, not two spellings",
+  "MATCH (t:ClinicalTrial) WHERE t.key STARTS WITH 'CTIS:CTIS' "
+  "RETURN count(t) AS n", lambda r: r[0]["n"] == 0),
+
  ("a country is reachable and is not a region",
   "MATCH (c:Country {key:'COUNTRY:SA'})-[:IN_REGION]->(r:Region) "
   "RETURN r.name AS region", lambda r: r and r[0]["region"] == "MENA/GCC"),

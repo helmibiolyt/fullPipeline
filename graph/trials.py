@@ -166,7 +166,25 @@ _PREFIX = [
     ("CRIS", "CRIS"), ("REBEC", "RBR"),
 ]
 _EUDRACT = re.compile(r"(\d{4}-\d{6}-\d{2})")
-_CTIS = re.compile(r"^(\d{4}-\d{6}-\d{2}-\d{2})$")
+_CTIS = re.compile(r"^(?:CTIS)?(\d{4}-\d{6}-\d{2}-\d{2})$")
+
+# Ids a registry writes WITHOUT the prefix that WHO ICTRP writes WITH.
+#
+# This is where deduplication was silently failing. ANZCTR's own file gives
+# "12605000001695" while WHO gives "ACTRN12605000001695", so the same study
+# landed as TRIAL:12605000001695 and ACTRN:ACTRN12605000001695 - two nodes,
+# identical titles. 3,690 of a 4,000-row sample were duplicated that way, and
+# 6,618 CTIS studies likewise, because CTIS's own file prefixes the id with a
+# literal "CTIS" that the bare-format pattern rejected.
+#
+# Anchored patterns, not prefixes: a bare 14-digit number means nothing on its
+# own, so the rule has to be the exact shape or it will claim ids belonging to
+# a registry added later.
+_BARE = [
+    (re.compile(r"^\d{14}$"), "ACTRN", "ACTRN"),   # ANZCTR, WHO adds ACTRN
+    (re.compile(r"^NL-OMON\d+$"), "NL-OMON", ""),  # Dutch, self-identifying
+    (re.compile(r"^PER-\d{3}-\d{2}$"), "REPEC", ""),   # Peru
+]
 
 
 def trial_key(raw: str) -> str:
@@ -195,8 +213,13 @@ def trial_key(raw: str) -> str:
         return ""
     if s.startswith("JPRN-"):            # WHO's prefix for all Japanese registries
         s = s[5:]
-    if _CTIS.match(s):                   # 4 groups = CTIS, before EudraCT's 3
-        return f"CTIS:{s}"
+    m = _CTIS.match(s)                   # 4 groups = CTIS, before EudraCT's 3
+    if m:
+        # The captured group, not the whole string: CTIS's own file writes a
+        # literal "CTIS" in front of the id and WHO does not, so returning `s`
+        # here produced CTIS:CTIS2022-... alongside CTIS:2022-... - the two
+        # spellings of one study, as two nodes.
+        return f"CTIS:{m.group(1)}"
     if s.startswith("EUCTR") or _EUDRACT.fullmatch(s) or s.startswith("20") and _EUDRACT.match(s):
         m = _EUDRACT.search(s)
         if m:                            # drop WHO's trailing country suffix
@@ -204,6 +227,11 @@ def trial_key(raw: str) -> str:
     for pref, ns in _PREFIX:
         if s.startswith(pref):
             return f"{ns}:{s}"
+    # Registries whose own file omits the prefix WHO ICTRP writes. `add` is
+    # that prefix, so the key matches what the WHO row produces.
+    for pat, ns, add in _BARE:
+        if pat.fullmatch(s):
+            return f"{ns}:{add}{s}"
     return f"TRIAL:{s}"
 
 
