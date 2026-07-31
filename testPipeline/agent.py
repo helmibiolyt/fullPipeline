@@ -27,6 +27,7 @@ has.
 from __future__ import annotations
 
 import json
+import re
 import time
 
 import ask as A
@@ -149,6 +150,72 @@ Finish with one line beginning exactly "SOURCES: " naming what you used.
 """
 
 
+_TRAILING_LIMIT = re.compile(r"\bLIMIT\s+\d+\s*;?\s*$", re.I)
+
+#: Counting stops here. A mechanism class with 1.6M rows is "more than we can
+#: show" whether the number is 1.6M or 100k, and the count must not cost more
+#: than the query it is explaining.
+COUNT_CEILING = 200_000
+
+
+def _true_total(cypher: str) -> int | None:
+    """How many rows the query would have returned without its LIMIT.
+
+    Telling the model "TRUNCATED" was not enough - it truncated on 14 of 22
+    benchmark questions and then wrote conclusions about what was absent. A
+    warning is advice; a number is evidence. Asked which trials share a
+    mechanism with epilepsy drugs it saw 50 rows and reported that seven of
+    eight mechanisms had none. The real figure was 5,017, and this is how it
+    finds that out without reading 5,017 rows.
+
+    Returns None when the count itself will not run, which is fine: the
+    warning still stands, it just has no number attached.
+    """
+    body = _TRAILING_LIMIT.sub("", cypher.strip()).strip()
+    if not body:
+        return None
+    # An explicit variable scope: CALL {...} without one is deprecated in 5.26
+    # and prints a notification per call. Nothing is imported, so the scope is
+    # empty. The inner ORDER BY is left alone - it is legal inside a subquery
+    # and stripping it would need to know where the clause ends.
+    counted = (f"CALL () {{ {body} }} WITH 1 AS x LIMIT {COUNT_CEILING} "
+               f"RETURN count(x) AS total")
+    # Checked AFTER wrapping, not before: the bare body has had its LIMIT
+    # removed, so check_cypher would refuse it as "no LIMIT and not an
+    # aggregate" and every count would silently return None.
+    if A.check_cypher(counted):
+        return None
+    try:
+        rows, _ = A.run_cypher(counted)
+    except Exception:                                          # noqa: BLE001
+        return None
+    return rows[0]["total"] if rows else None
+
+
+def _breakdown(cypher: str, col: str, cap: int = 30) -> list[dict] | None:
+    """Group the FULL result by one column, ignoring the LIMIT.
+
+    The warning was not enough on its own. Told that 50 rows were 50 furosemide
+    out of 2,866, the model still answered from the 50 - a warning is something
+    to weigh, and rows in front of it are something to read. So the missing
+    distribution is computed and handed over as data, at which point there is
+    nothing to weigh: the eight mechanisms and their real counts are simply
+    there, next to the rows that only showed one of them.
+    """
+    body = _TRAILING_LIMIT.sub("", cypher.strip()).strip()
+    if not body or not col.isidentifier():
+        return None
+    q = (f"CALL () {{ {body} }} RETURN `{col}` AS value, count(*) AS n "
+         f"ORDER BY n DESC LIMIT {cap}")
+    if A.check_cypher(q):
+        return None
+    try:
+        rows, _ = A.run_cypher(q)
+    except Exception:                                          # noqa: BLE001
+        return None
+    return rows or None
+
+
 def _run_graph(args: dict) -> tuple[str, dict]:
     """Execute Cypher, returning (text for the model, record for the page)."""
     cypher = (args.get("cypher") or "").strip()
@@ -189,13 +256,53 @@ def _run_graph(args: dict) -> tuple[str, dict]:
     shown = rows[:P.EVIDENCE_ROWS]
     body = "\n".join("  " + json.dumps({k: A._fmt(v) for k, v in r.items()},
                                        ensure_ascii=False) for r in shown)
+    truncated = P._hit_limit(cypher, len(rows))
     head = f"{len(rows)} rows matched"
     if len(rows) > len(shown):
-        head += (f"; first {len(shown)} shown - use {len(rows)} as the total, "
+        # Only claim len(rows) is the total when it actually is one. On a
+        # truncated result the real figure comes from the count below, and two
+        # different totals in the same message is worse than none.
+        head += (f"; first {len(shown)} shown" if truncated else
+                 f"; first {len(shown)} shown - use {len(rows)} as the total, "
                  f"not the number of lines here")
-    if P._hit_limit(cypher, len(rows)):
-        head += ". That equals the LIMIT, so the real total may be higher"
-    return f"{head}:\n{body}", rec
+
+    # A truncated result and a complete one look identical, and the model reads
+    # the gap as absence. Asked which trials share a mechanism with epilepsy
+    # drugs, it got LIMIT 50 rows that were 50/50 furosemide, and reported that
+    # seven of the eight mechanisms had no trials at all. They had 5,017.
+    #
+    # So the warning leads instead of trailing, and it names the collapse: when
+    # few distinct values fill the whole limit, the rows that did not fit are
+    # the answer. Aggregating is the fix, not a bigger LIMIT - the model cannot
+    # read 5,000 rows either.
+    warn = ""
+    if truncated:
+        total = _true_total(cypher)
+        rec["true_total"] = total
+        if total is None:
+            warn = ("TRUNCATED - this is exactly the LIMIT, so rows were cut "
+                    "and you cannot tell what is missing. ")
+        else:
+            more = f"{total:,}" + ("+" if total >= COUNT_CEILING else "")
+            warn = (f"TRUNCATED - you saw {len(rows)} of {more} matching rows. "
+                    f"Use {more} as the total. Do NOT describe anything as "
+                    f"absent on the strength of these {len(rows)} rows. ")
+        cols = list(rows[0].keys())
+        skewed = [c for c in cols
+                  if 0 < len({str(r.get(c)) for r in rows}) <= max(2, len(rows) // 10)]
+        for c in skewed[:2]:
+            got = _breakdown(cypher, c)
+            if not got:
+                continue
+            rec.setdefault("breakdowns", {})[c] = got
+            seen_here = len({str(r.get(c)) for r in rows})
+            warn += (f"The {len(rows)} rows above show only {seen_here} "
+                     f"distinct '{c}' - a few values ate the whole limit. "
+                     f"Here is '{c}' over ALL {more if total else 'matching'} "
+                     f"rows, which is what you must answer from:\n"
+                     + "\n".join(f"    {A._fmt(g['value'])}: {g['n']}"
+                                 for g in got) + "\n")
+    return f"{warn}{head}:\n{body}", rec
 
 
 def _run_docs(args: dict, k: int) -> tuple[str, dict]:
@@ -263,9 +370,16 @@ def run(question: str, k: int = 6) -> dict:
                                      "why": "lookups exhausted - answering now",
                                      "query": "", "total": 0, "ms": 0,
                                      "error": ""})
+            # The FIRST step must call a tool. Left on "auto" the model
+            # occasionally answered a question outright - "which companies
+            # develop therapies against the same pathway" came back fluent,
+            # sourced from nothing, with zero lookups recorded. That is the one
+            # behaviour this pipeline exists to rule out, so it is forced
+            # rather than requested. Later steps stay "auto" so it can stop.
             data = P._chat(
                 messages, tools=offered or None,
-                tool_choice="auto" if offered else None,
+                tool_choice=("required" if step == 0 and offered
+                             else "auto" if offered else None),
                 max_tokens=STEP_TOKENS)
             out["tokens"] += data.get("usage", {}).get("total_tokens", 0)
             msg = data["choices"][0]["message"]
@@ -290,18 +404,20 @@ def run(question: str, k: int = 6) -> dict:
                     args, result = {}, f"could not read arguments: {e}"
                     rec = {"tool": fn, "error": str(e)[:120], "query": ""}
                 else:
-                    if fn in used:
-                        used[fn] += 1
-                    if fn in limits and used[fn] > limits[fn]:
+                    if fn in limits and used[fn] >= limits[fn]:
                         # Belt and braces: the tool was withdrawn above, so
-                        # reaching here means the model called it anyway.
+                        # reaching here means the model called it anyway. The
+                        # counter is NOT bumped - a refused call was not spent,
+                        # and counting it printed "graph 5/4" on the page.
                         result = (f"No {fn} calls left. Answer from what you "
                                   f"already have.")
                         rec = {"tool": fn, "query": "", "total": 0, "ms": 0,
                                "error": "budget exhausted", "why": ""}
                     elif fn == "query_graph":
+                        used[fn] += 1
                         result, rec = _run_graph(args)
                     elif fn == "search_documents":
+                        used[fn] += 1
                         result, rec = _run_docs(args, k)
                     else:
                         result, rec = f"unknown tool {fn}", {"tool": fn}

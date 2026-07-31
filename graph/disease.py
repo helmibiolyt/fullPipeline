@@ -167,9 +167,20 @@ def load_indications(b):
         # endpoint; the Writer keeps the richer mesh version if it exists.
         b.w.node("Disease", dkey, source=key, name=heading or row.get("efo_term", ""),
                  vocabulary="MeSH" if mesh else "EFO")
+        # max_phase_for_ind is the whole difference between "approved for" and
+        # "has been tried in". It is per PAIR, not per drug - 4,458 of the
+        # 10,073 molecules here carry more than one value across their own
+        # indications - so it is the only column that can tell the two apart.
+        # Dropping it made tocilizumab an epilepsy drug: it has a real phase 2
+        # trial in refractory status epilepticus, and without the phase the
+        # edge is indistinguishable from levetiracetam's.
+        #
+        # Only 8,683 of 60,055 rows are phase 4. Read the other 86% as
+        # approvals and the graph answers a question nobody asked.
+        phase = (row.get("max_phase_for_ind") or "").strip()
         for k in b.with_parent(skey):
             b.w.edge("INDICATED_FOR", k, dkey, match_method="structured",
-                     source=key)
+                     source=key, max_phase=phase)
     b._done("chembl_indications", t0, n)
 
 
@@ -266,6 +277,13 @@ def load_opentargets_drugs(b):
                      vocabulary="MeSH" if dkey.startswith("MESH:") else "EFO")
             if how != "own" and ind != dkey:
                 b.w.identifier(dkey, "EFO", ind, source=key, match_method=how)
+            # No max_phase here on purpose, though the column exists. OT's
+            # max_phase is the DRUG's furthest phase, not this indication's:
+            # zero of 3,087 drugs vary across their own indication rows, so
+            # every row of an approved drug reads APPROVAL whatever the
+            # indication. Writing it would mark every condition atorvastatin
+            # was ever studied in as approved. Null here means unknown, which
+            # is the truth - ChEMBL is the only source that knows.
             for k in b.with_parent(skey):
                 b.w.edge("INDICATED_FOR", k, dkey, match_method="structured",
                          source=key)

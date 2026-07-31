@@ -270,6 +270,32 @@ SOFT = {"mechanism", "targets", "indications"}
 # TRAP - the specific ways this graph misleads. Each asserts the CORRECT
 # behaviour, so a regression shows up as a failure.
 TRAPS = [
+ # "which drugs are approved for epilepsy" returned tocilizumab, bevacizumab
+ # and doxycycline, because INDICATED_FOR carried no phase and 86% of ChEMBL's
+ # indication rows are investigational. These four assert the phase is there,
+ # that it separates the two populations, and that it lands on the source that
+ # actually knows.
+ ("INDICATED_FOR carries max_phase",
+  "MATCH ()-[e:INDICATED_FOR]->() WHERE e.max_phase IS NOT NULL "
+  "RETURN count(e) AS n", lambda r: r[0]["n"] > 50_000),
+ ("max_phase separates approved from investigational",
+  "MATCH ()-[e:INDICATED_FOR]->() WHERE e.max_phase IS NOT NULL "
+  "RETURN e.max_phase AS p, count(*) AS n ORDER BY n DESC",
+  lambda r: len(r) >= 5 and any(float(x["p"]) == 4 for x in r)
+            and sum(x["n"] for x in r if float(x["p"]) == 4)
+                < sum(x["n"] for x in r) * 0.3),
+ ("phase 4 excludes the drugs that only have trials in the disease",
+  "MATCH (s:Substance)-[e:INDICATED_FOR]->(d:Disease) "
+  "WHERE toLower(d.name) CONTAINS 'epilep' AND e.max_phase = 4.0 "
+  "RETURN collect(DISTINCT s.norm_name) AS names",
+  lambda r: not any(n and n.startswith(("tocilizumab", "bevacizumab",
+                                        "daratumumab", "doxycycline",
+                                        "empagliflozin"))
+                    for n in r[0]["names"])),
+ ("opentargets edges leave max_phase null rather than lie",
+  "MATCH ()-[e:INDICATED_FOR]->() WHERE e.source = 's16' "
+  "RETURN count(e) AS total, count(e.max_phase) AS phased",
+  lambda r: r[0]["total"] > 10_000 and r[0]["phased"] == 0),
  ("salt forms carry the safety data",
   "MATCH (s:Substance) WHERE s.norm_name STARTS WITH 'metformin' "
   "MATCH (s)-[e:HAS_ADVERSE_EVENT]->() RETURN count(e) AS n", lambda r: r[0]["n"] > 100),

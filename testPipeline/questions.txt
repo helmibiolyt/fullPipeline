@@ -1,0 +1,169 @@
+# The question bank the research agent will actually face.
+#
+# Lines starting with # open a category. Blank lines are ignored. The point of
+# keeping it as data rather than a Python list: it is the spec, and it should
+# be editable by someone who is not going to read bench.py.
+#
+# Categories are ordered roughly by hop count - the single-store questions
+# first, the multi-hop ones last - because the interesting question is not
+# "can it answer" but "at what depth does it stop being able to".
+
+# Drug Discovery
+What drugs are available for Alzheimer's disease?
+Which drugs are currently in clinical trials for Parkinson's disease?
+Are there any new treatments for glioblastoma?
+What drugs target EGFR?
+Which drugs inhibit PD-1?
+What is the mechanism of action of atorvastatin?
+What diseases is pembrolizumab approved to treat?
+What is the difference between aspirin and ibuprofen?
+Which drugs belong to the statin class?
+Which antibody drugs are approved for multiple sclerosis?
+
+# Clinical Trials
+Are there any recruiting clinical trials for ALS?
+What phase is the latest trial for Huntington's disease?
+Which companies are sponsoring Alzheimer's clinical trials?
+What countries are participating in Parkinson's clinical trials?
+Which trials study amyotrophic lateral sclerosis?
+Which drugs failed in Phase III trials?
+What clinical trials are investigating gene therapy?
+
+# Regulatory Approval
+Is rimegepant FDA approved?
+When was pembrolizumab first approved?
+Which drugs were approved by the FDA in 2025?
+Which drugs are approved in Europe but not in the US?
+What countries have approved atorvastatin?
+Has lenalidomide received orphan drug designation?
+
+# Diseases
+What treatments are available for epilepsy?
+Which diseases have the highest number of ongoing clinical trials?
+What drugs are approved for migraine prevention?
+What investigational drugs target Alzheimer's disease?
+What biomarkers are associated with Parkinson's disease?
+
+# Targets and Mechanisms
+Which drugs target HER2?
+What proteins are targeted by cancer therapies?
+Which drugs act on dopamine receptors?
+What drugs inhibit JAK1?
+What drugs target amyloid beta?
+
+# Drug Classes
+What drugs belong to the beta blocker class?
+Which ACE inhibitors are FDA approved?
+What monoclonal antibodies are available for cancer?
+Which kinase inhibitors target EGFR?
+What drugs are classified as anticonvulsants?
+
+# Companies
+Which companies are developing Alzheimer's drugs?
+What drugs has Pfizer developed?
+Which company sponsors the most oncology trials?
+What pipeline does Roche have for neurology?
+Which biotech companies are working on gene therapy?
+
+# Route of Administration
+Which drugs are administered orally?
+Which migraine drugs are available as nasal sprays?
+Are there injectable treatments for Alzheimer's disease?
+Which drugs are available as intravenous infusions?
+What oral medications treat epilepsy?
+
+# Modalities
+Which approved drugs are monoclonal antibodies?
+Which gene therapies have FDA approval?
+What vaccines are currently in Phase III trials?
+Which approved therapies are small molecules?
+What oligonucleotide therapies are available?
+
+# Safety
+What are the common adverse effects of atorvastatin?
+Which drugs have liver toxicity warnings?
+Has lenalidomide received a boxed warning?
+Which adverse events were reported in pembrolizumab clinical trials?
+
+# Comparative
+Which drug has more clinical trials: pembrolizumab or nivolumab?
+How do semaglutide and liraglutide differ?
+Which treatment for epilepsy has fewer reported adverse events?
+What are the differences between oral and injectable therapies?
+
+# Multi-hop
+Which FDA-approved drugs targeting EGFR are being tested in Phase III clinical trials for glioblastoma?
+Which companies are developing monoclonal antibodies for Alzheimer's disease?
+Which approved Parkinson's drugs target dopamine receptors?
+What small-molecule drugs for epilepsy are currently recruiting participants in Europe?
+Which Phase III trials are sponsored by Pfizer for breast cancer?
+Which approved drugs share the same molecular target as pembrolizumab?
+What gene therapies have received FDA approval for rare neurological diseases?
+Which drugs developed by Novartis are approved in both the US and Europe?
+Which companies have the largest oncology clinical trial pipeline?
+Which diseases have investigational therapies but no approved treatments?
+
+# Repositioning
+Which FDA-approved drugs target proteins implicated in Alzheimer's disease but are currently approved for other indications?
+Which investigational drugs share the same molecular target as approved Parkinson's disease therapies?
+Are there approved oncology drugs that could potentially be repurposed for glioblastoma based on shared targets?
+Which approved drugs have mechanisms of action similar to compounds currently in Phase II clinical trials?
+Which drugs targeting the same protein have different approval outcomes across diseases?
+
+# Clinical Development
+Which companies have the highest number of Phase III trials targeting Alzheimer's disease?
+Which diseases have the highest percentage of failed Phase III clinical trials?
+Which molecular targets are associated with the highest clinical trial success rates?
+Which investigational therapies have been tested in the greatest number of countries?
+
+# Regulatory Intelligence
+Which therapies received accelerated approval based on surrogate clinical endpoints?
+Which orphan-designated drugs have subsequently received full regulatory approval?
+Which drugs have expanded their approved indications after initial approval?
+Which drugs have multiple regulatory approvals across different therapeutic areas?
+
+# Mechanism and Target Analysis
+Which molecular targets are shared between Alzheimer's disease and Parkinson's disease therapies?
+Which targets are associated with the greatest number of approved drugs?
+Which protein targets are currently being investigated despite previous trial failures?
+Which drugs targeting the same receptor have significantly different clinical outcomes?
+
+# Company Intelligence
+Which pharmaceutical companies are developing therapies targeting the same molecular pathway?
+Which companies focus primarily on monoclonal antibodies for oncology?
+Which sponsors have the largest pipeline of first-in-class therapies?
+
+# Competitive Landscape
+Which companies are competing in the GLP-1 receptor agonist market?
+Which investigational therapies directly compete with pembrolizumab?
+Which companies are simultaneously targeting EGFR with different therapeutic modalities?
+Which diseases have the highest concentration of competing drug developers?
+
+# Trial Analytics
+Which diseases have the highest number of recruiting Phase III trials?
+Which clinical trials investigate multiple molecular targets simultaneously?
+Which diseases have the greatest geographic diversity in clinical trial participation?
+
+# Graph Multi-hop
+Which FDA-approved small-molecule drugs developed by Pfizer target EGFR and are indicated for lung cancer?
+Which antibody therapies approved in Europe are currently being evaluated for additional neurological indications?
+Which companies sponsor Phase III trials involving JAK inhibitors administered orally?
+Which approved drugs targeting PD-1 are being investigated in combination with CTLA-4 inhibitors?
+Which investigational Alzheimer's therapies target proteins already validated in approved Parkinson's drugs?
+Which clinical trials evaluate drugs sharing mechanisms with FDA-approved epilepsy treatments?
+Which monoclonal antibodies developed by Roche have received approvals in more than three regions?
+Which drugs approved for autoimmune diseases are currently being investigated for oncology indications?
+
+# Research
+Which diseases share the greatest number of therapeutic molecular targets?
+Which targets are linked to both oncology and neurology drug development?
+Which mechanisms of action are unique to approved therapies versus investigational therapies?
+Which diseases have the most diverse therapeutic modalities?
+Which approved drugs have generated the largest number of follow-on clinical trials?
+
+# Decision Support
+If a company wants to develop an Alzheimer's therapy, which molecular targets have the highest historical regulatory success rate?
+Which diseases have significant unmet medical need based on many failed trials but few approved drugs?
+Which drug classes show the highest probability of regulatory approval after successful Phase II trials?
+Which companies have expertise developing therapies against a specific molecular target?
+Which existing drugs are the strongest candidates for repositioning into new disease areas based on shared targets, mechanisms, and ongoing clinical evidence?

@@ -99,7 +99,7 @@ EDGE_COLUMNS: dict[str, list[str]] = {
     "IN_CLASS":          ["src", "dst", "match_method"],
     "HAS_MODALITY":      ["src", "dst", "match_method"],
     "HAS_ROUTE":         ["src", "dst", "match_method"],
-    "INDICATED_FOR":     ["src", "dst", "match_method"],
+    "INDICATED_FOR":     ["src", "dst", "match_method", "max_phase"],
     "ASSOCIATED_WITH":   ["src", "dst", "match_method", "score"],
     "SUBTYPE_OF":        ["src", "dst", "match_method"],
     "IS_SALT_OF":        ["src", "dst", "match_method"],
