@@ -193,69 +193,75 @@ function show(d) {
     return;
   }
 
-  const g  = d.graph || {};
-  const dc = d.docs  || {};
-  g.rows = g.rows || []; g.columns = g.columns || []; dc.chunks = dc.chunks || [];
-
   let h = '<div class=answer>';
   const paras = (d.answer || '(the model returned nothing)').split(/\n{2,}/);
   paras.forEach(p => { h += '<p>' + esc(p) + '</p>'; });
   if (d.sources && d.sources.length) {
     h += '<div class=srcs><em>SOURCES</em>';
-    d.sources.forEach(s => { h += '<span class=tag>' + esc(s) + '</span>'; });
+    d.sources.forEach(x => { h += '<span class=tag>' + esc(x) + '</span>'; });
     h += '</div>';
   }
   h += '</div>';
 
-  h += '<div class=meta>' + (Math.round(d.total_ms / 100) / 10) +
-       's total &middot; graph ' + (g.ms || 0) + ' ms &middot; documents ' +
-       (dc.ms || 0) + ' ms &middot; ' + (d.tokens || 0) + ' tokens</div>';
+  const steps = d.steps || [];
+  const b = d.budget || {};
+  h += '<div class=meta>' + (Math.round(d.total_ms / 100) / 10) + 's &middot; ' +
+       steps.filter(x => x.tool !== 'budget').length + ' lookups' +
+       (b.graph ? ' (graph ' + esc(b.graph) + ', documents ' +
+                  esc(b.documents) + ')' : '') +
+       ' &middot; ' + (d.tokens || 0) + ' tokens</div>';
 
-  // ---- knowledge graph
-  let gi = '<pre class=q>' + esc(d.cypher || '') + '</pre>';
-  if (g.error) {
-    gi += '<div class=err>' + esc(g.error) + '</div>';
-  } else if (!g.total) {
-    gi += '<div class=none>The query ran and matched nothing.</div>';
-  } else {
-    gi += '<table><tr>';
-    g.columns.forEach(c => { gi += '<th>' + esc(c) + '</th>'; });
-    gi += '</tr>';
-    g.rows.forEach(r => {
-      gi += '<tr>';
-      g.columns.forEach(c => { gi += '<td>' + esc(r[c]) + '</td>'; });
-      gi += '</tr>';
-    });
-    gi += '</table>';
-    // Every row that came back is in the table. The only thing that can hide
-    // one is the query's own LIMIT, so say so when the result sits exactly on
-    // it - "238 rows" and "at least 238" are different claims.
-    if (d.truncated) {
-      gi += '<div class=none>The result is exactly the query\'s LIMIT, so ' +
-            'there may be more matches than these ' + g.total + '. Ask for ' +
-            'a count if you need the true total.</div>';
+  // One panel per lookup, in the order the agent made them - the sequence is
+  // the interesting part now that it is free to chain and retry.
+  steps.forEach(st => {
+    if (st.tool === 'budget') {
+      h += '<div class=none>' + esc(st.why) + '</div>';
+      return;
     }
-  }
-  h += panel('Knowledge graph', (g.total || 0) + ' rows', gi);
+    const isGraph = st.tool === 'graph';
+    const n = isGraph ? (st.total || 0) + ' rows'
+                      : (st.total || 0) + ' chunks';
+    let inner = '<pre class="q' + (isGraph ? '' : ' v') + '">' +
+                esc(st.query || '') +
+                (st.section ? '   [section: ' + esc(st.section) + ']' : '') +
+                '</pre>';
 
-  // ---- documents
-  let di = '<pre class="q v">' + esc(d.document_query || '') +
-           (d.section ? '   [section: ' + esc(d.section) + ']' : '') + '</pre>';
-  if (dc.error) {
-    di += '<div class=err>' + esc(dc.error) + '</div>';
-  } else if (!dc.total) {
-    di += '<div class=none>Nothing scored above the 0.6 relevance floor.</div>';
-  } else {
-    dc.chunks.forEach(c => {
-      di += '<div class=chunk><div class=chead>' +
-            '<span class=score>' + (c.score || 0).toFixed(3) + '</span>' +
-            '<span class=head>' + esc(c.heading) + '</span>' +
-            '<span class=src>' + esc(c.source) + '</span></div>' +
-            '<div class=file>' + esc(c.file) + '</div>' +
-            '<div class=body>' + esc(c.text) + '</div></div>';
-    });
-  }
-  h += panel('Regulatory documents', (dc.total || 0) + ' chunks', di);
+    if (st.error) {
+      inner += '<div class=err>' + esc(st.error) + '</div>';
+    } else if (isGraph) {
+      const rows = st.rows || [], cols = st.columns || [];
+      if (!st.total) {
+        inner += '<div class=none>Matched nothing.</div>';
+      } else {
+        inner += '<div class=tblwrap><table><tr>';
+        cols.forEach(c => { inner += '<th>' + esc(c) + '</th>'; });
+        inner += '</tr>';
+        rows.forEach(r => {
+          inner += '<tr>';
+          cols.forEach(c => { inner += '<td>' + esc(r[c]) + '</td>'; });
+          inner += '</tr>';
+        });
+        inner += '</table></div>';
+      }
+    } else {
+      if (!st.total) {
+        inner += '<div class=none>Nothing above the 0.6 relevance floor.</div>';
+      }
+      (st.chunks || []).forEach(c => {
+        inner += '<div class=chunk><div class=chead>' +
+                 '<span class=score>' + (c.score || 0).toFixed(3) + '</span>' +
+                 '<span class=head>' + esc(c.heading) + '</span>' +
+                 '<span class=src>' + esc(c.source) + '</span></div>' +
+                 '<div class=file>' + esc(c.file) + '</div>' +
+                 '<div class=body>' + esc(c.text) + '</div></div>';
+      });
+    }
+
+    const label = (isGraph ? 'Knowledge graph' : 'Regulatory documents');
+    const title = st.step + '. ' + label +
+                  (st.why ? ' &mdash; ' + esc(st.why) : '');
+    h += panel(title, n, inner);
+  });
 
   out.innerHTML = h;
 }

@@ -29,6 +29,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import ask as A                                             # noqa: E402
+import agent as AG                                          # noqa: E402
 import pipeline as P                                        # noqa: E402
 
 app = FastAPI(title="Biolyt · ask")
@@ -47,7 +48,14 @@ def health():
 
 @app.post("/ask")
 def ask(req: Ask):
-    return JSONResponse(P.run(req.question, k=req.k))
+    """Answer a question.
+
+    The agent decides which stores to consult, in what order, and whether one
+    result should shape the next lookup - a fixed graph-then-documents plan
+    cannot answer "what do the labels say about drugs that target EGFR",
+    because the drug names ARE the search terms.
+    """
+    return JSONResponse(AG.run(req.question, k=req.k))
 
 
 @app.post("/ask/stream")
