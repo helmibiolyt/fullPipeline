@@ -351,14 +351,18 @@ TRAPS = [
  # The systemic one, found by asking real questions: ChEMBL and FAERS
  # annotate whichever salt or hydrate form the source named, not the parent.
  # Any query anchored on an exact norm_name silently misses them.
- ("drug questions need a name prefix, not exact equality",
-  "MATCH (s:Substance {norm_name:'atorvastatin'}) "
-  "OPTIONAL MATCH (s)-[m:HAS_MECHANISM]->() "
-  "WITH count(m) AS exact "
-  "MATCH (w:Substance) WHERE w.norm_name STARTS WITH 'atorvastatin' "
-  "OPTIONAL MATCH (w)-[m2:HAS_MECHANISM]->() "
-  "RETURN exact, count(m2) AS prefix",
-  lambda r: r[0]["exact"] == 0 and r[0]["prefix"] > 0),
+ # The parent node must carry the pharmacology itself. ChEMBL and FAERS
+ # annotate whichever salt form the source named, so before the rollup
+ # `atorvastatin` had no mechanism and `metformin` no adverse events - the
+ # names everyone actually asks about answered nothing. An earlier version of
+ # this check asserted that broken state and started failing once it was
+ # fixed, which is its own lesson: a test written against a bug outlives it.
+ ("a drug carries its own mechanism, not only its salt",
+  "MATCH (s:Substance {norm_name:'atorvastatin'})-[m:HAS_MECHANISM]->() "
+  "RETURN count(m) AS n", lambda r: r[0]["n"] > 0),
+ ("a drug carries its own adverse events",
+  "MATCH (s:Substance {norm_name:'metformin'})-[e:HAS_ADVERSE_EVENT]->() "
+  "RETURN count(e) AS n", lambda r: r[0]["n"] > 1000),
  ("whitespace is stripped from trial titles",
   "MATCH (t:ClinicalTrial) WHERE t.title <> trim(t.title) RETURN count(t) AS n",
   lambda r: r[0]["n"] == 0),
@@ -422,6 +426,21 @@ def main():
     drv = GraphDatabase.driver(URI, auth=(USER, PWD))
     r = Runner(drv, a.verbose)
     t0 = time.time()
+
+    # Full-text indexes are created by schema.cypher and populate in the
+    # background. Querying one before it is ONLINE raises
+    # ProcedureCallFailed, so running immediately after an import failed two
+    # reachability checks on a graph that was correct seconds later.
+    for _ in range(60):
+        try:
+            st = r.q("SHOW INDEXES YIELD name, type, state "
+                     "WHERE type = 'FULLTEXT' RETURN state")
+            if st and all(x["state"] == "ONLINE" for x in st):
+                break
+        except Exception:                                    # noqa: BLE001
+            pass
+        print(dim("  waiting for the full-text indexes to come online"))
+        time.sleep(5)
 
     if a.only in (None, "reach"):
         print(bold(f"\nREACH  ({len(REACH)} lookups)"))

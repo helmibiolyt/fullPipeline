@@ -183,7 +183,9 @@ _CTIS = re.compile(r"^(?:CTIS)?(\d{4}-\d{6}-\d{2}-\d{2})$")
 _BARE = [
     (re.compile(r"^\d{14}$"), "ACTRN", "ACTRN"),   # ANZCTR, WHO adds ACTRN
     (re.compile(r"^NL-OMON\d+$"), "NL-OMON", ""),  # Dutch, self-identifying
-    (re.compile(r"^PER-\d{3}-\d{2}$"), "REPEC", ""),   # Peru
+    # The trailing letter is a split registration: PER-002-99-A and -B
+    # are two arms of one study, and both are real REPEC ids.
+    (re.compile(r"^PER-\d{3}-\d{2}(-[A-Z])?$"), "REPEC", ""),  # Peru
 ]
 
 
