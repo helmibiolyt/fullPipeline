@@ -341,8 +341,15 @@ def _run_docs(args: dict, k: int) -> tuple[str, dict]:
     return "\n".join(out), rec
 
 
-def run(question: str, k: int = 6) -> dict:
-    """Answer a question, deciding the lookups as it goes."""
+def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
+        max_graph: int | None = None, max_docs: int | None = None) -> dict:
+    """Answer a question, deciding the lookups as it goes.
+
+    allow/max_* exist so the same loop can be run with one store removed. That
+    is how strategy.py measures whether a route is worth taking: if the
+    graph-only arm says "no trials found" and the both-stores arm returns
+    forty, the first arm is wrong, and no judge had to be asked.
+    """
     t0 = time.time()
     out = {"question": question, "answer": "", "sources": [], "steps": [],
            "error": "", "tokens": 0, "model": A.GROQ_MODEL,
@@ -356,13 +363,18 @@ def run(question: str, k: int = 6) -> dict:
     ]
 
     used = {"query_graph": 0, "search_documents": 0}
-    limits = {"query_graph": MAX_GRAPH, "search_documents": MAX_DOCS}
+    limits = {"query_graph": MAX_GRAPH if max_graph is None else max_graph,
+              "search_documents": MAX_DOCS if max_docs is None else max_docs}
+    _NAME = {"graph": "query_graph", "documents": "search_documents"}
+    usable = TOOLS if allow is None else [
+        t for t in TOOLS
+        if t["function"]["name"] in {_NAME.get(a, a) for a in allow}]
 
     try:
         for step in range(MAX_STEPS):
             over = time.time() - t0 > MAX_SECONDS
             offered = [] if over else [
-                t for t in TOOLS
+                t for t in usable
                 if used[t["function"]["name"]] < limits[t["function"]["name"]]]
             if not offered:
                 out["steps"].append({"step": len(out["steps"]) + 1,
