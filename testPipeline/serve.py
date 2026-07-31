@@ -96,6 +96,13 @@ def page():
 
 
 if __name__ == "__main__":
+    # Runs in the FOREGROUND on purpose. Launched detached - nohup, or a
+    # background job - it outlives the terminal and ignores Ctrl+C, and the
+    # only way to stop it is to find whatever process holds port 8080.
+    #
+    #     python testPipeline/serve.py     Ctrl+C stops it
+    #     testPipeline\serve.bat stop      if one is already detached
     import uvicorn
-    print("\n  http://localhost:8080\n")
+    print("\n  http://localhost:8080")
+    print("  Ctrl+C to stop\n")
     uvicorn.run(app, host="127.0.0.1", port=8080, log_level="warning")
