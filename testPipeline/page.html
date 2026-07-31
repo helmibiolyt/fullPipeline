@@ -1,0 +1,279 @@
+<!doctype html><meta charset=utf-8>
+<title>Biolyt · ask</title>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<style>
+:root{--ink:#070c18;--panel:#111a2b;--line:#25334d;--text:#ecf1f9;
+ --muted:#93a6c4;--dim:#63768f;--blue:#4c8dff;--violet:#a78bfa;
+ --green:#34d399;--amber:#fbbf24;--red:#f87171}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink);color:var(--text);
+ font:15px/1.6 -apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:1000px;margin:0 auto;padding:34px 22px 90px}
+header{display:flex;align-items:baseline;gap:13px;flex-wrap:wrap;
+ border-bottom:1px solid var(--line);padding-bottom:15px;margin-bottom:24px}
+h1{font-size:19px;margin:0}
+.sub{color:var(--muted);font-size:13px}
+.pill{font-size:11px;color:var(--dim);border:1px solid var(--line);
+ padding:2px 9px;border-radius:99px}
+form{display:flex;gap:10px}
+input[type=text]{flex:1;background:var(--panel);border:1px solid var(--line);
+ color:var(--text);padding:15px 17px;border-radius:11px;font-size:16px;
+ outline:none;font-family:inherit}
+input[type=text]:focus{border-color:var(--blue)}
+button{background:var(--blue);border:0;color:#04142e;font-weight:700;
+ padding:0 26px;border-radius:11px;cursor:pointer;font-size:15px;
+ font-family:inherit}
+button:disabled{opacity:.45;cursor:default}
+.ex{margin:13px 0 0;display:flex;gap:8px;flex-wrap:wrap}
+.ex b{font-weight:500;font-size:12.5px;color:var(--dim);
+ border:1px solid var(--line);padding:5px 11px;border-radius:99px;
+ cursor:pointer}
+.ex b:hover{border-color:var(--blue);color:var(--text)}
+#out{margin-top:28px}
+.answer{background:var(--panel);border-radius:13px;padding:22px 24px;
+ border-left:3px solid var(--green);font-size:15.5px;line-height:1.7}
+.answer p{margin:0 0 12px}.answer p:last-child{margin:0}
+.srcs{margin-top:16px;padding-top:14px;border-top:1px solid var(--line);
+ display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.srcs em{font-style:normal;color:var(--dim);font-size:12px;letter-spacing:.5px}
+.tag{font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:6px;
+ background:rgba(52,211,153,.15);color:var(--green)}
+.meta{color:var(--dim);font-size:12px;margin:12px 2px 0}
+.ev{margin-top:26px}
+.evh{display:flex;align-items:center;gap:10px;cursor:pointer;padding:11px 0;
+ border-top:1px solid var(--line);user-select:none}
+.evh:hover .t{color:var(--text)}
+.evh .t{font-size:13px;font-weight:600;color:var(--muted)}
+.evh .n{font-size:12px;color:var(--dim);margin-left:auto}
+.car{color:var(--dim);font-size:11px;transition:transform .15s}
+.open .car{transform:rotate(90deg)}
+.evb{display:none;padding:4px 0 18px}
+.open .evb{display:block}
+pre.q{background:#0c1424;border-left:3px solid var(--blue);margin:0 0 14px;
+ padding:12px 14px;border-radius:8px;overflow-x:auto;font-size:12.5px;
+ color:var(--muted);font-family:Consolas,monospace;white-space:pre-wrap;
+ word-break:break-word}
+pre.q.v{border-left-color:var(--violet)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;color:var(--blue);font-weight:600;padding:8px 10px;
+ border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid #162033;color:var(--muted);
+ vertical-align:top}
+td:first-child{color:var(--text)}
+tr:hover td{background:var(--panel)}
+.chunk{background:var(--panel);border-radius:9px;padding:13px 15px;
+ margin-bottom:10px;border-left:3px solid var(--violet)}
+.chead{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;
+ margin-bottom:6px}
+.score{color:var(--violet);font-weight:700;font-size:12.5px}
+.src{color:var(--dim);font-size:11.5px}
+.head{color:var(--text);font-size:12.5px;font-weight:600}
+.file{color:var(--dim);font-size:11px;font-family:Consolas,monospace;
+ margin-bottom:7px;word-break:break-all}
+.body{font-size:13px;color:var(--muted);line-height:1.6}
+.err{background:rgba(248,113,113,.1);border-left:3px solid var(--red);
+ padding:13px 16px;border-radius:8px;color:#ffc9c9;font-size:14px}
+.none{background:rgba(251,191,36,.09);border-left:3px solid var(--amber);
+ padding:11px 14px;border-radius:8px;color:#ffe6a8;font-size:13px}
+.spin{color:var(--muted);font-size:14px;display:flex;align-items:center;
+ gap:9px}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--blue);
+ animation:p 1s infinite}
+.dot:nth-child(2){animation-delay:.15s}.dot:nth-child(3){animation-delay:.3s}
+@keyframes p{0%,100%{opacity:.25}50%{opacity:1}}
+footer{margin-top:44px;color:var(--dim);font-size:12px;
+ border-top:1px solid var(--line);padding-top:14px}
+</style>
+
+<div class=wrap>
+<header>
+  <h1>Ask</h1>
+  <span class=sub>every question queries the knowledge graph <b>and</b> the
+    regulatory documents</span>
+  <span class=pill id=router>&hellip;</span>
+</header>
+
+<form id=f>
+  <input type=text id=q autocomplete=off spellcheck=false
+         placeholder="e.g. what are the side effects of atorvastatin">
+  <button id=go type=submit>Ask</button>
+</form>
+<div class=ex id=ex></div>
+<div id=out></div>
+
+<footer>
+  Neo4j on Azure &middot; 3.24M document chunks on AWS &middot;
+  <span id=model></span>. The model sees only what the two stores return
+  &mdash; nothing is answered from its own knowledge.
+</footer>
+</div>
+
+<script>
+// Plain fetch. This lives in its own .html file rather than inside a Python
+// string: every time the page was generated from Python, an escape sequence
+// got eaten somewhere between the two languages and the whole script failed
+// to parse, which shows up as a button that does nothing at all.
+const EXAMPLES = [
+  "what are the side effects of atorvastatin",
+  "which drugs target EGFR",
+  "what are the contraindications of sertraline",
+  "how many trials are running in the MENA region",
+  "what does the label say about ibuprofen in pregnancy",
+  "which pathogenic variants are implicated in cystic fibrosis"
+];
+
+const out = document.getElementById('out');
+const qEl = document.getElementById('q');
+const go  = document.getElementById('go');
+
+fetch('/health').then(r => r.json()).then(h => {
+  document.getElementById('router').textContent = h.model;
+  document.getElementById('model').textContent = h.model + ' via ' + h.provider;
+}).catch(() => {});
+
+const exBox = document.getElementById('ex');
+EXAMPLES.forEach(t => {
+  const b = document.createElement('b');
+  b.textContent = t;
+  b.onclick = () => { qEl.value = t; ask(); };
+  exBox.appendChild(b);
+});
+
+document.getElementById('f').addEventListener('submit', e => {
+  e.preventDefault();
+  ask();
+});
+
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+async function ask() {
+  const question = qEl.value.trim();
+  if (!question) return;
+  go.disabled = true;
+
+  // A visible counter: the two model calls take 15-25 seconds, and a still
+  // spinner is indistinguishable from a page that has died.
+  let secs = 0;
+  const paint = () => {
+    out.innerHTML =
+      '<div class=spin><span class=dot></span><span class=dot></span>' +
+      '<span class=dot></span> asking the graph and the documents&hellip; ' +
+      secs + 's</div>';
+  };
+  paint();
+  const tick = setInterval(() => { secs++; paint(); }, 1000);
+
+  try {
+    const r = await fetch('/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: question, k: 6 })
+    });
+    const data = await r.json();
+    clearInterval(tick);
+    show(data);
+  } catch (err) {
+    clearInterval(tick);
+    out.innerHTML = '<div class=err>' + esc(err.message || err) + '</div>';
+  }
+  go.disabled = false;
+}
+
+function show(d) {
+  if (!d || typeof d !== 'object') {
+    out.innerHTML = '<div class=err>unexpected response</div>';
+    return;
+  }
+  if (d.error) {
+    out.innerHTML = '<div class=err>' + esc(d.error) + '</div>';
+    return;
+  }
+
+  const g  = d.graph || {};
+  const dc = d.docs  || {};
+  g.rows = g.rows || []; g.columns = g.columns || []; dc.chunks = dc.chunks || [];
+
+  let h = '<div class=answer>';
+  const paras = (d.answer || '(the model returned nothing)').split(/\n{2,}/);
+  paras.forEach(p => { h += '<p>' + esc(p) + '</p>'; });
+  if (d.sources && d.sources.length) {
+    h += '<div class=srcs><em>SOURCES</em>';
+    d.sources.forEach(s => { h += '<span class=tag>' + esc(s) + '</span>'; });
+    h += '</div>';
+  }
+  h += '</div>';
+
+  h += '<div class=meta>' + (Math.round(d.total_ms / 100) / 10) +
+       's total &middot; graph ' + (g.ms || 0) + ' ms &middot; documents ' +
+       (dc.ms || 0) + ' ms &middot; ' + (d.tokens || 0) + ' tokens</div>';
+
+  // ---- knowledge graph
+  let gi = '<pre class=q>' + esc(d.cypher || '') + '</pre>';
+  if (g.error) {
+    gi += '<div class=err>' + esc(g.error) + '</div>';
+  } else if (!g.total) {
+    gi += '<div class=none>The query ran and matched nothing.</div>';
+  } else {
+    gi += '<table><tr>';
+    g.columns.forEach(c => { gi += '<th>' + esc(c) + '</th>'; });
+    gi += '</tr>';
+    g.rows.forEach(r => {
+      gi += '<tr>';
+      g.columns.forEach(c => { gi += '<td>' + esc(r[c]) + '</td>'; });
+      gi += '</tr>';
+    });
+    gi += '</table>';
+    if (g.total > g.rows.length) {
+      gi += '<div class=meta>showing ' + g.rows.length + ' of ' + g.total +
+            '</div>';
+    }
+  }
+  h += panel('Knowledge graph', (g.total || 0) + ' rows', gi);
+
+  // ---- documents
+  let di = '<pre class="q v">' + esc(d.document_query || '') +
+           (d.section ? '   [section: ' + esc(d.section) + ']' : '') + '</pre>';
+  if (dc.error) {
+    di += '<div class=err>' + esc(dc.error) + '</div>';
+  } else if (!dc.total) {
+    di += '<div class=none>Nothing scored above the 0.6 relevance floor.</div>';
+  } else {
+    dc.chunks.forEach(c => {
+      di += '<div class=chunk><div class=chead>' +
+            '<span class=score>' + (c.score || 0).toFixed(3) + '</span>' +
+            '<span class=head>' + esc(c.heading) + '</span>' +
+            '<span class=src>' + esc(c.source) + '</span></div>' +
+            '<div class=file>' + esc(c.file) + '</div>' +
+            '<div class=body>' + esc(c.text) + '</div></div>';
+    });
+  }
+  h += panel('Regulatory documents', (dc.total || 0) + ' chunks', di);
+
+  out.innerHTML = h;
+}
+
+function panel(title, count, inner) {
+  const wrap = document.createElement('div');
+  wrap.className = 'ev';
+  wrap.innerHTML =
+    '<div class=evh><span class=car>&#9656;</span>' +
+    '<span class=t>' + esc(title) + '</span>' +
+    '<span class=n>' + esc(count) + '</span></div>' +
+    '<div class=evb>' + inner + '</div>';
+  // Listener rather than an inline onclick, so no quoting to get wrong.
+  wrap.querySelector('.evh').addEventListener('click', () => {
+    wrap.classList.toggle('open');
+  });
+  return wrap.outerHTML;
+}
+
+// outerHTML loses the listeners above, so bind once by delegation instead.
+document.addEventListener('click', e => {
+  const head = e.target.closest && e.target.closest('.evh');
+  if (head && head.parentNode) head.parentNode.classList.toggle('open');
+});
+</script>
