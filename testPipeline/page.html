@@ -227,9 +227,13 @@ function show(d) {
       gi += '</tr>';
     });
     gi += '</table>';
-    if (g.total > g.rows.length) {
-      gi += '<div class=meta>showing ' + g.rows.length + ' of ' + g.total +
-            '</div>';
+    // Every row that came back is in the table. The only thing that can hide
+    // one is the query's own LIMIT, so say so when the result sits exactly on
+    // it - "238 rows" and "at least 238" are different claims.
+    if (d.truncated) {
+      gi += '<div class=none>The result is exactly the query\'s LIMIT, so ' +
+            'there may be more matches than these ' + g.total + '. Ask for ' +
+            'a count if you need the true total.</div>';
     }
   }
   h += panel('Knowledge graph', (g.total || 0) + ' rows', gi);

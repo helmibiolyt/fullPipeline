@@ -207,8 +207,17 @@ def gather_repaired(question: str, cypher: str, doc_query: str,
 # purpose: the query should fetch everything that matches so the count is
 # true, while the model only needs enough rows to name examples. Conflating
 # the two is what made every answer say "25".
+# Three separate caps, and only one of them may lose data.
+#
+#   query LIMIT   fetches from Neo4j. This is the only one that can hide a
+#                 row, so it is set high and a result that exactly equals it
+#                 is reported as "at least N" rather than as a total.
+#   EVIDENCE_ROWS how many rows the ANSWERING model reads. It is given the
+#                 true total separately, so a sample here cannot change the
+#                 count it reports - only which examples it can name.
+#   page          none. Everything fetched is shown, however long the table.
 EVIDENCE_ROWS = 40
-PAGE_ROWS = 200
+PAGE_ROWS = None          # no cap - show every row that came back
 
 
 def _evidence(graph: dict, docs: dict, max_rows=EVIDENCE_ROWS,
@@ -313,8 +322,10 @@ def run(question: str, k: int = 8) -> dict:
         graph, docs = gather_repaired(question, out["cypher"],
                                       out["document_query"],
                                       out["section"] or None, k)
+        out["truncated"] = _hit_limit(out["cypher"], len(graph["rows"]))
         out["graph"] = {"rows": [{k2: A._fmt(v) for k2, v in r.items()}
-                                 for r in graph["rows"][:PAGE_ROWS]],
+                                 for r in (graph["rows"] if PAGE_ROWS is None
+                                           else graph["rows"][:PAGE_ROWS])],
                         "columns": list(graph["rows"][0].keys())
                         if graph["rows"] else [],
                         "total": len(graph["rows"]),
@@ -365,7 +376,8 @@ def run_streamed(question: str, k: int = 8):
                                   section or None, k)
     yield {"stage": "evidence",
            "graph": {"rows": [{k2: A._fmt(v) for k2, v in r.items()}
-                              for r in graph["rows"][:PAGE_ROWS]],
+                              for r in (graph["rows"] if PAGE_ROWS is None
+                                           else graph["rows"][:PAGE_ROWS])],
                      "columns": list(graph["rows"][0].keys())
                      if graph["rows"] else [],
                      "total": len(graph["rows"]), "ms": graph["ms"],
