@@ -211,6 +211,36 @@ def load_hgnc(b):
     b._done("hgnc", t0, n)
 
 
+def resolve_disease(b, raw_key: str, name: str) -> tuple[str, str]:
+    """An OpenTargets disease id -> the node it belongs on.
+
+    OpenTargets speaks MONDO and EFO; the graph's spine is MeSH. Until now
+    this used only the ChEMBL EFO<->MeSH crosswalk and, when that missed, kept
+    the raw id and created a second node for a disease MeSH already had.
+
+    The cost was invisible and large. ASSOCIATED_WITH put 21,690 edges on
+    MONDO nodes against 10,827 on MeSH, so "which targets are associated with
+    this disease" answered from a third of the evidence, and 593 disease names
+    existed twice - 'anxiety' as MESH:D001007 with 173 relationships and
+    HP:0000739 with 81, neither reachable from the other.
+
+    Three tiers, the same discipline load_icd11 already used:
+      1. the ChEMBL EFO/MeSH crosswalk - an explicit statement of equivalence
+      2. exact name against MeSH descriptors and their entry terms
+      3. the source's own id, as a genuinely new disease
+
+    Returns (key, how) so the caller can record which tier matched.
+    """
+    hit = b.efo_mesh.get(raw_key)
+    if hit:
+        return hit, "crosswalk"
+    if name:
+        hit = b.mesh_by_name.get(fold(name))
+        if hit:
+            return hit, "name"
+    return raw_key, "own"
+
+
 def load_opentargets_drugs(b):
     """A second source for INDICATED_FOR and TARGETS, joined on CHEMBL id.
 
@@ -228,10 +258,13 @@ def load_opentargets_drugs(b):
         n += 1
         ind = ot_disease_key(row.get("indication_id", ""))
         if ind:
-            dkey = b.efo_mesh.get(ind, ind)
-            b.w.node("Disease", dkey, source=key,
-                     name=row.get("indication_name", ""),
+            iname = row.get("indication_name", "")
+            dkey, how = resolve_disease(b, ind, iname)
+            b.stats[f"ot_drugs_disease_{how}"] =                 b.stats.get(f"ot_drugs_disease_{how}", 0) + 1
+            b.w.node("Disease", dkey, source=key, name=iname,
                      vocabulary="MeSH" if dkey.startswith("MESH:") else "EFO")
+            if how != "own" and ind != dkey:
+                b.w.identifier(dkey, "EFO", ind, source=key, match_method=how)
             b.w.edge("INDICATED_FOR", skey, dkey, match_method="structured",
                      source=key)
         tkey = b.symbol_target.get((row.get("target_symbol") or "").strip().upper())
@@ -261,7 +294,8 @@ def load_opentargets_assoc(b):
             dis = ot_disease_key(row.get("disease_id", ""))
             if not dis:
                 continue
-            dkey = b.efo_mesh.get(dis, dis)
+            dkey, how = resolve_disease(b, dis, row.get("disease_name", ""))
+            b.stats[f"ot_assoc_disease_{how}"] =                 b.stats.get(f"ot_assoc_disease_{how}", 0) + 1
             try:
                 score = float(row.get("overall_score") or 0)
             except ValueError:
