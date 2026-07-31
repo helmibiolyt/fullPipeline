@@ -152,9 +152,23 @@ Trials of a drug, and trials of a disease:
     MATCH (t:ClinicalTrial {{phase:'PHASE3'}})-[:STUDIES]->(d)
     RETURN t.registry, t.title LIMIT 5000
 
-Adverse events for a drug, and drugs for an organ class:
-    MATCH (s:Substance {{norm_name:'ibuprofen'}})-[e:HAS_ADVERSE_EVENT]->(a:AdverseEvent)
-    RETURN a.term, e.report_count ORDER BY e.report_count DESC LIMIT 5000
+Adverse events for a drug — MATCH THE SALT FORMS TOO. Safety reports name
+whatever the reporter wrote, which is usually the salt: plain 'metformin' has
+ZERO adverse events while 'metformin hydrochloride' has 1,370. Always widen
+the match by name prefix and sum across the forms:
+    MATCH (s:Substance)-[e:HAS_ADVERSE_EVENT]->(a:AdverseEvent)
+    WHERE s.norm_name = 'metformin' OR s.norm_name STARTS WITH 'metformin '
+    RETURN a.term AS reaction, sum(e.report_count) AS reports
+    ORDER BY reports DESC LIMIT 5000
+Do NOT rely on IS_SALT_OF to find the forms - that hierarchy comes from
+ChEMBL and is wrong in places (metformin hydrochloride points at METFORMIN
+C-11, a radiolabelled tracer). The name prefix is the dependable route.
+
+The same widening applies to any question about a specific drug where the
+first attempt returns nothing: try the prefix before concluding the graph has
+no data.
+
+Drugs for an organ class:
     // the other direction, via the MedDRA organ class:
     MATCH (o:OrganClass) WHERE toLower(o.name) CONTAINS 'cardiac'
     MATCH (s:Substance)-[e:HAS_ADVERSE_EVENT]->(a:AdverseEvent)-[:IN_ORGAN_CLASS]->(o)

@@ -88,6 +88,24 @@ def _parse_args(raw: str) -> dict:
     return out
 
 
+def _content_args(content: str) -> dict:
+    """Recover the two queries when the model wrote them as prose.
+
+    Strips a ```json fence if present, then takes the outermost object. Reuses
+    the same repair path as a tool call, so a body cut short by the token
+    budget is salvaged the same way.
+    """
+    text = content.strip()
+    fence = re.search(r"```(?:json)?\s*(.+?)(?:```|$)", text, re.S)
+    if fence:
+        text = fence.group(1).strip()
+    start = text.find("{")
+    if start < 0:
+        raise RuntimeError(
+            "the planner wrote prose with no queries in it: " + content[:200])
+    return _parse_args(text[start:])
+
+
 def plan(question: str) -> tuple[dict, int, int]:
     """Both queries, in one forced tool call."""
     t0 = time.time()
@@ -99,10 +117,15 @@ def plan(question: str) -> tuple[dict, int, int]:
         tools=PLAN_TOOL, max_tokens=PLAN_TOKENS)
     msg = data["choices"][0]["message"]
     calls = msg.get("tool_calls") or []
-    if not calls:
-        raise RuntimeError("the planner answered instead of writing queries: "
-                           + (msg.get("content") or "")[:200])
-    args = _parse_args(calls[0]["function"]["arguments"])
+    if calls:
+        args = _parse_args(calls[0]["function"]["arguments"])
+    else:
+        # tool_choice="required" is a request, not a guarantee. MiniMax-M2
+        # sometimes writes the same JSON into the message body instead,
+        # occasionally inside a ```json fence. The content is correct and
+        # usable, so take it rather than failing the run over the envelope
+        # it arrived in.
+        args = _content_args(msg.get("content") or "")
     if not args.get("document_query"):
         # Optional to recover: the question itself is a serviceable search.
         args["document_query"] = question
