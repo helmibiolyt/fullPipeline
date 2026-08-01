@@ -30,7 +30,6 @@ sys.path.insert(0, str(HERE))
 
 import ask as A                                             # noqa: E402
 import agent as AG                                          # noqa: E402
-import pipeline as P                                        # noqa: E402
 
 app = FastAPI(title="Biolyt · ask")
 
@@ -56,29 +55,6 @@ def ask(req: Ask):
     because the drug names ARE the search terms.
     """
     return JSONResponse(AG.run(req.question, k=req.k))
-
-
-@app.post("/ask/stream")
-def ask_stream(req: Ask):
-    """Server-sent events, one per stage, so the page fills in as it goes."""
-    import json as _json
-
-    from fastapi.responses import StreamingResponse
-
-    SEP = "\n\n"          # SSE frames are terminated by a blank line
-
-    def gen():
-        try:
-            for ev in P.run_streamed(req.question, k=req.k):
-                yield "data: " + _json.dumps(ev) + SEP
-        except Exception as e:                               # noqa: BLE001
-            yield "data: " + _json.dumps(
-                {"stage": "error",
-                 "error": f"{type(e).__name__}: {str(e)[:300]}"}) + SEP
-
-    return StreamingResponse(gen(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-store",
-                                      "X-Accel-Buffering": "no"})
 
 
 PAGE = HERE / "page.html"
