@@ -36,8 +36,15 @@ async function signed(key, download) {
   return j.url
 }
 
+//: Files shown per folder before "show all". sfda.gov.sa/linked_documents
+//: holds 416 PDFs and a browser rendering all of them makes the folder feel
+//: broken; the count is always stated, so 30 is a cap and not a lie about how
+//: much is there.
+const PAGE_FILES = 30
+
 export default function Page() {
   const [prefix, setPrefix] = useState('')
+  const [showAll, setShowAll] = useState(false)
   const [data, setData] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -45,7 +52,7 @@ export default function Page() {
   const [filter, setFilter] = useState('')
 
   const load = useCallback(async (p) => {
-    setBusy(true); setError(''); setFile(null); setFilter('')
+    setBusy(true); setError(''); setFile(null); setFilter(''); setShowAll(false)
     try {
       const r = await fetch(`/api/list?prefix=${encodeURIComponent(p)}`)
       const j = await r.json()
@@ -60,6 +67,10 @@ export default function Page() {
 
   const crumbs = prefix ? prefix.replace(/\/$/, '').split('/') : []
   const match = (n) => n.toLowerCase().includes(filter.toLowerCase())
+
+  const allFiles = (data?.files || []).filter((f) => match(f.name))
+  const shownFiles = showAll ? allFiles : allFiles.slice(0, PAGE_FILES)
+  const hidden = allFiles.length - shownFiles.length
 
   return (
     <main className="wrap">
@@ -116,7 +127,7 @@ export default function Page() {
                   <td />
                 </tr>
               ))}
-              {data.files.filter((f) => match(f.name)).map((f) => (
+              {shownFiles.map((f) => (
                 <tr key={f.key} className="row" onClick={() => setFile(f)}>
                   <td>
                     <span className={'ico ' + (isCsv(f.name) ? 'csv' : isDoc(f.name) ? 'doc' : '')}>
@@ -145,6 +156,24 @@ export default function Page() {
               ))}
             </tbody>
           </table>
+
+          {allFiles.length > 0 && (
+            <div className="count">
+              {showAll
+                ? `all ${allFiles.length.toLocaleString()} files`
+                : `showing ${shownFiles.length} of ${allFiles.length.toLocaleString()} files`}
+              {hidden > 0 && (
+                <button className="act" onClick={() => setShowAll(true)}>
+                  show all {allFiles.length.toLocaleString()}
+                </button>
+              )}
+              {showAll && allFiles.length > PAGE_FILES && (
+                <button className="act" onClick={() => setShowAll(false)}>
+                  show first {PAGE_FILES}
+                </button>
+              )}
+            </div>
+          )}
 
           {!data.folders.length && !data.files.length && (
             <div className="muted">this prefix is empty</div>
@@ -186,8 +215,21 @@ function Preview({ file, onClose }) {
     catch (e) { setErr(String(e.message || e)) }
   }
 
+  // Escape closes, and a click on the backdrop closes. A modal you can only
+  // dismiss with a button is the thing everyone complains about.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = ''
+    }
+  }, [onClose])
+
   return (
-    <div className="sheet">
+    <div className="backdrop" onClick={onClose}>
+    <div className="sheet" onClick={(e) => e.stopPropagation()}>
       <div className="sheethead">
         <div>
           <div className="sheetname">{file.name}</div>
@@ -267,6 +309,7 @@ function Preview({ file, onClose }) {
           </div>
         </>
       )}
+    </div>
     </div>
   )
 }
