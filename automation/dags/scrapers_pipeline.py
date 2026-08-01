@@ -3,7 +3,8 @@
 Collapsed, the graph shows one box per source. Expanded, each box is the
 per-source pipeline:
 
-    scrape -> validate_local -> upload_run -> verify_run -> commit -> prune
+    scrape -> collect -> fetch_linked_docs -> validate_local -> upload_run
+           -> verify_run -> commit -> prune
                                        \-------------------------> rollback (one_failed)
 
 Live S3 data is only ever mutated in `commit`, after S3 verification passes.
@@ -22,7 +23,7 @@ from scrape_pipeline import load_sources
 from scrape_pipeline.callbacks import on_task_failure
 from scrape_pipeline.registry import Source
 from scrape_pipeline.settings import S3_BUCKET
-from scrape_pipeline import runner, s3_io, validation
+from scrape_pipeline import linked_docs, runner, s3_io, validation
 
 # size_class -> Airflow pool (create these pools in the UI/CLI; default pool
 # is used automatically if a named pool does not exist).
@@ -92,6 +93,19 @@ with DAG(
                 "collect", lambda src, run_id: runner.collect(src, run_id),
                 src, tg, dag, retries=0,
             )
+            # Between collect and validate on purpose. After collect, because
+            # it reads the CSVs that collect just snapshotted; before validate
+            # and upload, so the documents it fetches are checked and shipped
+            # with the run rather than needing a second pass.
+            #
+            # retries=1 and it never raises: a scrape that produced good CSVs
+            # must not be discarded because a regulator's CDN was down. What
+            # could not be fetched is recorded in linked_documents.csv.
+            fetch_docs = _py(
+                "fetch_linked_docs",
+                lambda src, run_id: linked_docs.fetch_linked(src, run_id),
+                src, tg, dag, retries=1,
+            )
             validate = _py(
                 "validate_local", lambda src, run_id: validation.validate_local(src, run_id),
                 src, tg, dag, retries=0,
@@ -129,7 +143,7 @@ with DAG(
             )
 
             # Local data is deleted only after a verified S3 commit (success path).
-            hydrate >> scrape >> collect >> validate >> upload >> verify >> commit >> [prune, cleanup]
+            hydrate >> scrape >> collect >> fetch_docs >> validate >> upload >> verify >> commit >> [prune, cleanup]
             [upload, verify, commit] >> rollback
 
         (last_groups if src.run_last else normal_groups).append((tg, scrape))

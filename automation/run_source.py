@@ -15,7 +15,7 @@ import logging
 import sys
 
 from scrape_pipeline.registry import load_sources
-from scrape_pipeline import runner, validation, s3_io
+from scrape_pipeline import linked_docs, runner, validation, s3_io
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -37,6 +37,7 @@ def main():
     if not a.skip_scrape:
         runner.run_scraper(src, a.run_id)          # runs the scraper (no collect)
     runner.collect(src, a.run_id)                  # snapshot CSV + raw docs (xlsx->csv)
+    linked_docs.fetch_linked(src, a.run_id)        # fetch pdfs the CSVs only link to
     validation.validate_local(src, a.run_id)
 
     if a.no_s3:
