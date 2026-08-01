@@ -43,6 +43,28 @@ DEFAULT_ARGS = {
 }
 
 
+def _announce_documents(src: Source, run_id: str, **ctx):
+    """Skip unless this run produced documents, so the outlet does not fire.
+
+    Reads the counts the two upstream tasks pushed: collect() reports the
+    documents the scraper itself wrote, fetch_linked_docs() the ones it
+    downloaded from links in the CSVs. Either is a reason to wake the vector
+    store; neither is a reason to wake it for a CSV-only run.
+    """
+    from airflow.exceptions import AirflowSkipException
+
+    ti = ctx["ti"]
+    collected = ti.xcom_pull(task_ids=f"{src.slug}.collect") or 0
+    linked = (ti.xcom_pull(task_ids=f"{src.slug}.fetch_linked_docs") or {})
+    downloaded = linked.get("downloaded", 0) if isinstance(linked, dict) else 0
+    total = int(collected or 0) + int(downloaded or 0)
+    if total == 0:
+        raise AirflowSkipException(
+            f"{src.slug}: no documents this run - not waking the vector store")
+    print(f"{src.slug}: {total} document(s) this run "
+          f"({collected} from the scraper, {downloaded} from links)")
+
+
 def _py(task_id, fn, src: Source, tg, dag, **kw):
     return PythonOperator(
         task_id=task_id,
@@ -127,6 +149,26 @@ with DAG(
                 src, tg, dag,
                 outlets=[Dataset(f"s3://{S3_BUCKET}/{src.s3_base}")],
             )
+            # Emits ONLY when this run actually produced documents.
+            #
+            # The commit task's Dataset fires on every successful run, so
+            # vector_store_sync woke whether or not a PDF had appeared - and a
+            # wake is not free: it lists the whole bucket and scrolls 93k
+            # points in Qdrant before it can conclude nothing changed.
+            #
+            # A SKIPPED task does not emit its outlet, which is what makes the
+            # conditional work. It is a leaf, downstream of commit and gating
+            # nothing: put the skip anywhere in the main chain and every task
+            # after it skips too, which would silently stop the uploads.
+            announce = _py(
+                "announce_documents", _announce_documents, src, tg, dag,
+                retries=0,
+                # Its own scheme rather than a #fragment on the s3 URI:
+                # Airflow validates dataset URIs and normalises fragments, and
+                # two datasets that differ only by fragment are a good way to
+                # end up with one.
+                outlets=[Dataset(f"documents://{src.slug}")],
+            )
             prune = _py(
                 "prune_runs", lambda src, run_id: s3_io.prune_runs(src),
                 src, tg, dag, retries=1,
@@ -143,7 +185,7 @@ with DAG(
             )
 
             # Local data is deleted only after a verified S3 commit (success path).
-            hydrate >> scrape >> collect >> fetch_docs >> validate >> upload >> verify >> commit >> [prune, cleanup]
+            hydrate >> scrape >> collect >> fetch_docs >> validate >> upload >> verify >> commit >> [announce, prune, cleanup]
             [upload, verify, commit] >> rollback
 
         (last_groups if src.run_last else normal_groups).append((tg, scrape))

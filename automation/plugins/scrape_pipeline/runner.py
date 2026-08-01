@@ -201,8 +201,8 @@ def run_scraper(src: Source, run_id: str, timeout: int | None = None) -> None:
         raise RuntimeError(f"scraper {src.slug} exited {proc.returncode}")
 
 
-def collect(src: Source, run_id: str) -> None:
-    """Snapshot the scraped artifacts into the run dir.
+def collect(src: Source, run_id: str) -> int:
+    """Snapshot the scraped artifacts into the run dir. Returns the doc count.
 
     Publishes CSV (structured) + raw documents (pdf/doc/ppt — handled downstream
     by the graph/vector pipeline). Spreadsheets are converted to CSV. Docs are
@@ -228,6 +228,10 @@ def collect(src: Source, run_id: str) -> None:
 
     if csvs + docs == 0:
         raise RuntimeError(f"scraper {src.slug} produced no artifacts")
+    # Returned so the DAG can tell whether this run has anything for the vector
+    # store. Without it the only signal is "the source committed", which is
+    # true on every run and says nothing about documents.
+    return docs
 
 
 def _is_state_file(p: Path) -> bool:

@@ -23,28 +23,27 @@ from airflow.providers.ssh.operators.ssh import SSHOperator
 import sys
 sys.path.insert(0, "/opt/pylib")
 from scrape_pipeline.registry import load_sources          # noqa: E402
-from scrape_pipeline.settings import S3_BUCKET             # noqa: E402
 
-# EVERY source, not a curated list.
+# Woken by "this source produced documents", not by "this source ran".
 #
-# This used to be a hand-maintained set of ten, and the comment here explained
-# that it had to be: only three of the sources writing PDFs declared a pdf
-# output directory, so the set could not be derived. Two sources were found
-# missing from it after their documents were already in Qdrant - nothing had
-# woken this DAG when they published, and new documents from them would have
-# been dropped with no error.
+# Two earlier shapes, both wrong in different directions.
 #
-# fetch_linked_docs ended that argument. It runs for every source and downloads
-# whatever that source's CSVs link to, so ANY of the 49 can start publishing
-# documents on any run. A curated set is now guaranteed to go stale: sfda.gov.sa
-# (417 documents) and trialsearch.who.int (101) were both absent from it while
-# their documents were being downloaded.
+# A hand-maintained DOC_SOURCES set of ten. Its own comment said it had to be
+# maintained by hand, and it had already gone stale twice - two sources were
+# found missing from it after their documents were in Qdrant, so nothing woke
+# this DAG when they published. fetch_linked_docs made that worse rather than
+# better: it runs for every source, so any of the 49 can start producing
+# documents on any run and a curated list is guaranteed to fall behind.
 #
-# Listening to all of them is cheap because the ingest is incremental by ETag -
-# a source that commits without adding a document is skipped before any
-# download, extract or embed happens. The cost of a needless wake is one S3
-# listing; the cost of a missing source is a store that silently stops growing.
-_datasets = [Dataset(f"s3://{S3_BUCKET}/{s.s3_base}") for s in load_sources()]
+# Then every source's commit dataset. That fixed the staleness and introduced a
+# cost - commit fires on every successful run, and a wake here is not cheap. It
+# lists the whole bucket and scrolls ~93k points in Qdrant before it can decide
+# nothing changed, and with max_active_runs=1 those wakes queue.
+#
+# So the scrapers now emit documents://<slug> from a task that SKIPS when the
+# run produced no documents, and a skipped task emits no dataset event. No list
+# to maintain, and no wake for a CSV-only run.
+_datasets = [Dataset(f"documents://{s.slug}") for s in load_sources()]
 
 with DAG(
     dag_id="vector_store_sync",
