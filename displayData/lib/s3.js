@@ -97,6 +97,14 @@ export async function headObject(key) {
   return s3().send(new HeadObjectCommand({ Bucket: BUCKET, Key: guard(key) }))
 }
 
+/** The whole object as a stream of chunks - for counting, never for holding. */
+export async function streamObject(key) {
+  const out = await s3().send(new GetObjectCommand({
+    Bucket: BUCKET, Key: guard(key),
+  }))
+  return out.Body           // an async iterable of Buffers
+}
+
 /** A byte range, so previewing a multi-GB CSV does not download it. */
 export async function readRange(key, bytes) {
   const out = await s3().send(new GetObjectCommand({

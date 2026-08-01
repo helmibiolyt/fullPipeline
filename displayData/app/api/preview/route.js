@@ -1,9 +1,18 @@
-import { headObject, readRange } from '../../../lib/s3'
+import { headObject, readRange, streamObject } from '../../../lib/s3'
 
 export const dynamic = 'force-dynamic'
 
 const PREVIEW_BYTES = 256 * 1024      // plenty for the first rows of anything
 const PREVIEW_ROWS = 10
+
+//: Above this, the row count is estimated instead of counted. Counting means
+//: reading the whole object: 25 MB is a second, and ClinVar's variant_summary
+//: is several GB - a browser asking "how many rows" must not pull that down.
+const EXACT_COUNT_LIMIT = 25 * 1024 * 1024
+
+//: How much to read when estimating. Enough that a few long rows do not skew
+//: the average, small enough to stay instant.
+const SAMPLE_BYTES = 2 * 1024 * 1024
 
 /**
  * Minimal RFC4180 reader.
@@ -39,6 +48,36 @@ function parseCsv(text) {
 }
 
 /**
+ * Count record separators, ignoring newlines inside quoted fields.
+ *
+ * A plain newline count is wrong here and wrong in a way that looks right:
+ * ClinicalTrials.gov titles and Health Canada addresses contain line breaks
+ * inside quotes, so counting '\n' reports more rows than the file has and the
+ * number simply looks plausible. State carries across chunks, which is why
+ * `inQuotes` is passed in and out rather than reset per buffer.
+ */
+function countRows(buf, state) {
+  let { inQuotes, rows, sawAny } = state
+  for (let i = 0; i < buf.length; i++) {
+    const c = buf[i]
+    if (inQuotes) {
+      if (c === 0x22) {
+        if (buf[i + 1] === 0x22) i++
+        else inQuotes = false
+      }
+    } else if (c === 0x22) {
+      inQuotes = true
+    } else if (c === 0x0a) {
+      rows++
+      sawAny = true
+      continue
+    }
+    if (c !== 0x0d) sawAny = true
+  }
+  return { inQuotes, rows, sawAny }
+}
+
+/**
  * Which line the real header is on.
  *
  * NUPCO and NHRA publish spreadsheet exports with the report title in A1 and
@@ -55,13 +94,34 @@ function headerRow(rows) {
     ? 1 : 0
 }
 
+/** Exact count for a small file: stream it, never hold it. */
+async function exactRows(key, headerLines) {
+  let state = { inQuotes: false, rows: 0, sawAny: false }
+  let trailing = false
+  for await (const chunk of await streamObject(key)) {
+    state = countRows(chunk, state)
+    trailing = chunk.length > 0 && chunk[chunk.length - 1] !== 0x0a
+  }
+  // A file whose last row has no trailing newline still has that row.
+  const total = state.rows + (trailing ? 1 : 0)
+  return Math.max(0, total - headerLines)
+}
+
 /**
- * Ten rows and the column names. Not a viewer for the whole file.
+ * Estimated count for a large file: rows per byte from a sample.
  *
- * The full thing is a download - chembl_structures is 3.1M rows and ClinVar's
- * variant_summary is ~21.8M, and no browser renders that in a table. A preview
- * answers "what is in this file"; the download answers "give me the data".
+ * Reported separately from an exact count and labelled as an estimate,
+ * because a number that is quietly approximate is worse than no number - it
+ * gets quoted, and nothing in the UI would say it was never counted.
  */
+async function estimateRows(key, size, headerLines) {
+  const buf = await readRange(key, Math.min(SAMPLE_BYTES, size - 1))
+  const state = countRows(buf, { inQuotes: false, rows: 0, sawAny: false })
+  if (!state.rows) return null
+  const perByte = state.rows / buf.length
+  return Math.max(0, Math.round(size * perByte) - headerLines)
+}
+
 export async function GET(req) {
   const key = new URL(req.url).searchParams.get('key') || ''
   try {
@@ -88,15 +148,34 @@ export async function GET(req) {
 
     const all = parseCsv(text)
     if (!all.length) {
-      return Response.json({ ...info, kind: 'csv', columns: [], rows: [] })
+      return Response.json({ ...info, kind: 'csv', columns: [], rows: [],
+        rowCount: 0, rowCountExact: true })
     }
     const start = headerRow(all)
+    const headerLines = start + 1
+
+    let rowCount = null
+    let rowCountExact = false
+    try {
+      if (size <= EXACT_COUNT_LIMIT) {
+        rowCount = await exactRows(key, headerLines)
+        rowCountExact = true
+      } else {
+        rowCount = await estimateRows(key, size, headerLines)
+      }
+    } catch {
+      // A count that fails must not take the preview with it.
+      rowCount = null
+    }
+
     return Response.json({
       ...info,
       kind: 'csv',
       columns: all[start],
       rows: all.slice(start + 1, start + 1 + PREVIEW_ROWS),
       headerRow: start,
+      rowCount,
+      rowCountExact,
     })
   } catch (e) {
     return Response.json({ error: e.message }, { status: e.status || 502 })

@@ -213,7 +213,13 @@ function Preview({ file, onClose }) {
       {!state.loading && state.kind === 'csv' && (
         <>
           <div className="muted small">
-            {state.columns.length} columns · first {state.rows.length} rows
+            {state.columns.length} columns
+            {state.rowCount != null && (
+              <> · {state.rowCountExact
+                ? `${state.rowCount.toLocaleString()} rows`
+                : `~${state.rowCount.toLocaleString()} rows (estimated from a sample)`}</>
+            )}
+            {' · showing first '}{state.rows.length}
             {state.headerRow > 0 && ' · header is on line 2, line 1 is a report title'}
             {' · '}<b>download</b> for the whole file
           </div>
