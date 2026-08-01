@@ -368,11 +368,14 @@ EXCLUDED: dict[str, str] = {
     "Targets_Genomics_Biomarkers/ncbi.nlm.nih.gov/Variants/var_citations.csv":
         "Variant-to-publication citations. Variant links to a gene and a "
         "disease; Publication reaches drugs and diseases by its own title "
-        "matching, so this edge would duplicate both paths.",
+        "matching, so this edge would duplicate both paths. NO HEADER ROW - "
+        "line 0 is a citation. Read it with stream_rows and index by "
+        "position, never stream_csv.",
     "Targets_Genomics_Biomarkers/ncbi.nlm.nih.gov/Variants/"
     "summary_of_conflicting_interpretations.csv":
         "Where submitters disagree on significance. The loader keeps only "
-        "unambiguous calls, so this file describes the rows it discards.",
+        "unambiguous calls, so this file describes the rows it discards. "
+        "NO HEADER ROW - line 0 is a submission.",
     "Targets_Genomics_Biomarkers/ncbi.nlm.nih.gov/Variants/cross_references.csv":
         "ClinVar to other variant databases. Nothing in the schema consumes "
         "them.",
@@ -470,12 +473,21 @@ EXCLUDED: dict[str, str] = {
         "6,982 veterinary products. Out of scope for a human-medicines graph.",
 
     "Ontologies_Standards/cdisc.org":
-        "Standards lists with no node to attach to. 198 rows combined with "
-        "nupco.",
+        "CDISC controlled terminology - the code lists that describe how a "
+        "trial submission is FORMATTED, not facts about drugs or diseases. "
+        "67,455 rows across 10 files, the bulk of it SDTM (46,774) and SEND "
+        "(17,610). Worth revisiting if trial protocol structure is ever "
+        "modelled; nothing in the current schema has an endpoint for a "
+        "codelist term. This note previously read '198 rows combined with "
+        "nupco', which understated it by 340x - the figure was never "
+        "measured.",
 
     "MENA_GCC_Regulatory_Market/nupco.com":
         "Procurement catalogues - what a buyer purchased, not a regulatory "
-        "fact about a drug. No node to attach to.",
+        "fact about a drug. No node to attach to. Also a spreadsheet export "
+        "with the report title in A1 and the real header on line 1; "
+        "lake.header_offset detects that now, but it is worth knowing before "
+        "anyone maps these columns.",
 
     "*/Index/*_documents.csv, mhra_documents.csv, ema_documents.csv":
         "Document indexes - filename, URL, product name. These describe the "

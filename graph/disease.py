@@ -25,6 +25,9 @@ from normalise import fold
 L = {
     "mesh":        "Ontologies_Standards/meshb.nlm.nih.gov/mesh_data/mesh_descriptors.csv",
     "icd11":       "Ontologies_Standards/icd.who.int/icd_data/icd11_codes.csv",
+    "icd10_codes":    "Ontologies_Standards/icd.who.int/icd_data/icd10_codes.csv",
+    "icd10_blocks":   "Ontologies_Standards/icd.who.int/icd_data/icd10_blocks.csv",
+    "icd10_chapters": "Ontologies_Standards/icd.who.int/icd_data/icd10_chapters.csv",
     "indications": "Drug_Substance_Reference/ebi.ac.uk-chembl/chembl_data/chembl_indications.csv",
     "hgnc":        "Targets_Genomics_Biomarkers/genenames.org/data/complete_set/hgnc_complete_set.csv",
     "ot_drugs":    "Targets_Genomics_Biomarkers/platform.opentargets.org/Drugs/known_drugs.csv",
@@ -139,6 +142,106 @@ def load_icd11(b):
     b.stats["icd11_name_matched"] = matched
     b.stats["icd11_non_disease_skipped"] = skipped
     b._done("icd11", t0, n)
+
+
+def load_icd10(b):
+    """ICD-10, with its hierarchy, which ICD-11 is not loaded with.
+
+    ICD-10 is what claims, registries and hospital coding actually use;
+    ICD-11 adoption is still thin. Leaving it out meant a MeSH disease could
+    not be reached from the code a hospital record carries.
+
+    The difference from load_icd11 is that this one keeps the TREE. The files
+    name each level explicitly - `parent_code` on a code, `chapter_id` on a
+    block - so SUBTYPE_OF costs nothing to derive and makes "everything under
+    C00-C97" a traversal instead of a string prefix match. That is the whole
+    reason to hold a classification in a graph rather than a table.
+
+    Chapters and blocks are Disease nodes too: they are the levels you group
+    by, and a node with no parent is a chapter, not a special case.
+    """
+    t0 = b._step("icd10")
+    n = matched = 0
+
+    # Chapters, then blocks, then codes: a child's parent must exist before the
+    # edge is written, and each file names the level above it.
+    for row in lake.stream_csv(L["icd10_chapters"], limit=b.limit):
+        cid = (row.get("chapter_id") or "").strip()
+        title = (row.get("title") or "").strip()
+        if not cid or not title:
+            continue
+        if cid.upper() in ICD_NON_DISEASE_CHAPTERS:
+            continue
+        n += 1
+        b.w.node("Disease", f"ICD10:{cid}", source=L["icd10_chapters"],
+                 name=title, vocabulary="ICD-10")
+
+    for row in lake.stream_csv(L["icd10_blocks"], limit=b.limit):
+        bid = (row.get("block_id") or "").strip()
+        title = (row.get("title") or "").strip()
+        cid = (row.get("chapter_id") or "").strip()
+        if not bid or not title or cid.upper() in ICD_NON_DISEASE_CHAPTERS:
+            continue
+        n += 1
+        b.w.node("Disease", f"ICD10:{bid}", source=L["icd10_blocks"],
+                 name=title, vocabulary="ICD-10")
+        if cid:
+            b.w.edge("SUBTYPE_OF", f"ICD10:{bid}", f"ICD10:{cid}",
+                     match_method="structured", source=L["icd10_blocks"])
+
+    # Nodes first, edges second - the same two-pass shape load_mesh uses, and
+    # for the same reason. A code that matches MeSH by name IS the MeSH node,
+    # so A00 "Cholera" is keyed MESH:D002771 and not ICD10:A00. Its children
+    # still say parent_code=A00, and writing that edge as it is read produced
+    # three parents pointing at a node that does not exist. The map records
+    # what each code actually resolved to; parents are looked up through it.
+    resolved: dict[str, str] = {}
+    parents: list[tuple[str, str]] = []
+
+    for row in lake.stream_csv(L["icd10_codes"], limit=b.limit):
+        code = (row.get("code") or "").strip()
+        title = (row.get("title") or "").strip()
+        cid = (row.get("chapter_id") or "").strip()
+        if not code or not title:
+            continue
+        if cid.upper() in ICD_NON_DISEASE_CHAPTERS or code[:1].upper() in ICD_NON_DISEASE_CHAPTERS:
+            continue
+        n += 1
+        # Same rule as ICD-11: an exact name match makes this the MeSH disease
+        # and the code becomes an identifier on it, so the two vocabularies
+        # describe one node rather than two.
+        hit = b.mesh_by_name.get(fold(title))
+        dkey = hit or f"ICD10:{code}"
+        if hit:
+            matched += 1
+        else:
+            b.w.node("Disease", dkey, source=L["icd10_codes"], name=title,
+                     vocabulary="ICD-10")
+        b.w.identifier(dkey, "ICD10", code, source=L["icd10_codes"],
+                       match_method="name" if hit else "structured")
+        resolved[code] = dkey
+        # Parent first, block second: a code's immediate parent is another
+        # code where there is one, and only the top of a subtree hangs off the
+        # block. Writing both would make the tree wrong, not merely redundant.
+        parent = (row.get("parent_code") or "").strip()
+        block = (row.get("block_id") or "").strip()
+        if parent:
+            parents.append((code, parent))
+        elif block:
+            parents.append((code, f"\0block\0{block}"))
+
+    for code, above in parents:
+        child = resolved.get(code)
+        if not child:
+            continue
+        dst = (f"ICD10:{above.split(chr(0))[2]}" if above.startswith("\0block\0")
+               else resolved.get(above, ""))
+        if dst and dst != child:
+            b.w.edge("SUBTYPE_OF", child, dst, match_method="structured",
+                     source=L["icd10_codes"])
+
+    b.stats["icd10_name_matched"] = matched
+    b._done("icd10", t0, n)
 
 
 def load_indications(b):
@@ -334,5 +437,5 @@ def load_opentargets_assoc(b):
     b._done("opentargets_assoc", t0, n)
 
 
-ALL = [load_mesh, load_icd11, load_indications, load_hgnc,
+ALL = [load_mesh, load_icd11, load_icd10, load_indications, load_hgnc,
        load_opentargets_drugs, load_opentargets_assoc]

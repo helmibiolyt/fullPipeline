@@ -63,21 +63,84 @@ def s3():
     return _client
 
 
-def stream_csv(key: str, limit: int | None = None) -> Iterator[dict]:
+def _is_title_row(cells: list[str]) -> bool:
+    """True when a row is a spreadsheet title, not column names.
+
+    Several MENA regulators publish an Excel export with the report's title in
+    A1 and the real header underneath:
+
+        line0  ["NUPCO's PHARMACEUTICALS CATALOGUE - JUNE 2026",
+                'Unnamed: 1', 'Unnamed: 2', ...]
+        line1  ['SN', 'NUPCO Generic Code', 'Item Description', ...]
+
+    Read straight, DictReader names one column after the report and the rest
+    `Unnamed: N`, and every mapping that referenced a real column silently
+    returns None. Two signatures catch it without guessing: pandas' own
+    placeholder for a blank header cell, and a row that is one value followed
+    by nothing. A genuine header has names in most of its cells.
+    """
+    if not cells:
+        return True                       # a blank first line is never a header
+    filled = [c for c in cells if c.strip()]
+    placeholder = sum(1 for c in cells if c.strip().lower().startswith("unnamed:"))
+    return len(filled) <= 1 or placeholder >= max(2, len(cells) // 2)
+
+
+_OFFSET: dict[str, int] = {}
+
+
+def header_offset(key: str, probe: int = 4) -> int:
+    """How many lines to skip before the real header. 0 for a normal file.
+
+    Reads the first 16 KB, not the object, and deliberately does NOT touch
+    READ: that set is what the documentation uses to say which files the graph
+    consumes, and probing a file for its header shape is not consuming it.
+    Marking probes as reads would have quietly reclassified every excluded
+    source as loaded. Cached because the build asks for the same key repeatedly.
+    """
+    if key in _OFFSET:
+        return _OFFSET[key]
+    raw = s3().get_object(Bucket=BUCKET, Key=key,
+                          Range="bytes=0-16384")["Body"].read()
+    txt = raw.decode("utf-8-sig", errors="replace")
+    off = 0
+    for i, line in enumerate(txt.split("\n")[:probe]):
+        cells = next(csv.reader([line]), []) if line.strip() else []
+        if not _is_title_row([c.strip() for c in cells]):
+            off = i
+            break
+    _OFFSET[key] = off
+    return off
+
+
+def stream_csv(key: str, limit: int | None = None,
+               header_row: int | None = None) -> Iterator[dict]:
     """Yield rows of an S3 CSV as dicts, without downloading it.
 
-    Handles two things every source in this lake gets wrong somewhere:
+    Handles three things sources in this lake get wrong somewhere:
 
     * A UTF-8 BOM on the first header (all 20 SFDA files) - which otherwise
       turns the first column name into '\\ufeffregisterNumber' and silently
       breaks every mapping that references it.
     * Undecodable bytes mid-file. errors="replace" keeps the stream alive; one
       mangled character is better than losing the remaining rows.
+    * A title row above the header. `header_row` says which line the names are
+      on; left as None it is detected, because the failure is silent - you get
+      a column called `Unnamed: 3` and None for every value, not an error.
+
+    None of the affected files are loaded today. Fixing it here rather than
+    when one is first consumed is deliberate: the symptom of getting this wrong
+    is a mapping that quietly yields nothing, which reads as "the source has no
+    data" rather than as a bug.
     """
+    if header_row is None:
+        header_row = header_offset(key)
     READ.add(key)
     body = s3().get_object(Bucket=BUCKET, Key=key)["Body"]
     wrapper = io.TextIOWrapper(body, encoding="utf-8-sig", errors="replace",
                                newline="")
+    for _ in range(header_row):
+        wrapper.readline()
     reader = csv.DictReader(wrapper)
     if reader.fieldnames:
         # utf-8-sig handles the leading BOM; strip any that survive mid-header.
@@ -127,12 +190,23 @@ def list_keys(prefix: str, suffix: str = "") -> list[str]:
 
 
 def header(key: str) -> list[str]:
-    """Column names only - a few KB, not the whole object."""
+    """Column names only - a few KB, not the whole object.
+
+    Skips a title row the same way stream_csv does, so the documentation and
+    the loaders agree about what the columns are. They did not before: the
+    generated data-source pages showed 'Temporary Importation Medicine List'
+    as a column name for that file, and the first real row as its values.
+    """
     body = s3().get_object(Bucket=BUCKET, Key=key, Range="bytes=0-16384")["Body"].read()
     txt = body.decode("utf-8-sig", errors="replace")
-    line = txt.split("\n", 1)[0]
-    return [c.strip().strip('"').replace("﻿", "")
-            for c in next(csv.reader([line]))] if line else []
+    for line in txt.split("\n"):
+        if not line.strip():
+            continue
+        cells = [c.strip().strip('"').replace("﻿", "")
+                 for c in next(csv.reader([line]))]
+        if not _is_title_row(cells):
+            return cells
+    return []
 
 
 def exists(key: str) -> bool:

@@ -33,6 +33,7 @@ import json
 import pathlib
 import sys
 import threading
+import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -61,19 +62,49 @@ def _evidence(res: dict) -> int:
                if s.get("tool") in ("graph", "documents"))
 
 
-def run_arm(name: str, allow, mg: int, md: int, sw: bool, q: str, k: int) -> dict:
-    try:
-        res = AG.run(q, k=k, allow=allow, max_graph=mg, max_docs=md,
-                     switch_on_miss=sw)
-    except Exception as e:                                     # noqa: BLE001
-        return {"arm": name, "fatal": f"{type(e).__name__}: {e}",
-                "evidence": 0, "denies": True, "seq": "", "ms": 0, "tokens": 0}
+def run_arm(name: str, allow, mg: int, md: int, sw: bool, q: str, k: int,
+            tries: int = 2) -> dict:
+    """One arm, retried once if it came back having done nothing.
+
+    An arm that FAILED and an arm that found nothing scored identically -
+    zero evidence either way - and the first strategy run was ruined by it:
+    the Neo4j pool went stale after the rebuild, eighteen of twenty-two
+    questions returned nothing on every arm, and the report presented that as
+    "graph wins 21 of 22". A harness that cannot tell a broken run from a
+    negative result will quietly confirm whatever it is asked.
+
+    So a run with no lookups at all is treated as suspect and repeated, and
+    whatever the loop reported in `error` is carried into the record instead
+    of being dropped.
+    """
+    res, err = None, ""
+    for attempt in range(tries):
+        try:
+            res = AG.run(q, k=k, allow=allow, max_graph=mg, max_docs=md,
+                         switch_on_miss=sw)
+        except Exception as e:                                 # noqa: BLE001
+            err = f"{type(e).__name__}: {e}"
+            time.sleep(3 * (attempt + 1))
+            continue
+        if any(s.get("tool") in ("graph", "documents") for s in res["steps"]):
+            break
+        err = res.get("error") or "no lookup attempted"
+        time.sleep(3 * (attempt + 1))
+
+    if res is None:
+        return {"arm": name, "fatal": err, "evidence": 0, "denies": True,
+                "seq": "", "lookups": 0, "ms": 0, "tokens": 0}
     c = B.classify(q, res)
-    return {"arm": name, "seq": c["seq"], "lookups": c["lookups"],
-            "evidence": _evidence(res), "denies": c["denies"],
-            "verdict": c["verdict"], "chained": c["chained"],
-            "ms": res.get("total_ms", 0), "tokens": res.get("tokens", 0),
-            "answer": (res.get("answer") or "")[:1200]}
+    out = {"arm": name, "seq": c["seq"], "lookups": c["lookups"],
+           "evidence": _evidence(res), "denies": c["denies"],
+           "verdict": c["verdict"], "chained": c["chained"],
+           "ms": res.get("total_ms", 0), "tokens": res.get("tokens", 0),
+           "answer": (res.get("answer") or "")[:1200]}
+    if not c["lookups"]:
+        # Still nothing after the retry. Marked, not scored: leaving it in the
+        # totals as a zero is what produced the false result last time.
+        out["fatal"] = err or "no lookup attempted"
+    return out
 
 
 def compare(cat: str, q: str, k: int) -> dict:
@@ -83,14 +114,17 @@ def compare(cat: str, q: str, k: int) -> dict:
     for name, allow, mg, md, sw in ARMS:
         arms[name] = run_arm(name, allow, mg, md, sw, q, k)
 
-    best = max(a["evidence"] for a in arms.values())
+    ok = {n: a for n, a in arms.items() if not a.get("fatal")}
+    best = max((a["evidence"] for a in ok.values()), default=0)
     # The finding that needs no judge: an arm that reported absence while
     # another arm found something on the identical question.
-    wrong = [n for n, a in arms.items()
+    wrong = [n for n, a in ok.items()
              if a["denies"] and best > 0 and a["evidence"] < best]
     return {"category": cat, "question": q, "arms": arms,
             "best_evidence": best, "false_denial": wrong,
-            "winner": max(arms.items(), key=lambda kv: kv[1]["evidence"])[0]}
+            "broken": [n for n in arms if n not in ok],
+            "winner": (max(ok.items(), key=lambda kv: kv[1]["evidence"])[0]
+                       if ok else "")}
 
 
 def report(rows: list[dict]) -> None:
@@ -99,8 +133,15 @@ def report(rows: list[dict]) -> None:
 
     print(f"\n{'arm':<10} {'answered':>9} {'false denials':>14} "
           f"{'evidence':>10} {'lookups':>8} {'sec':>6} {'tokens':>9}")
+    broke = sum(len(r.get("broken", [])) for r in rows)
+    if broke:
+        print(f"\n  {broke} of {len(rows)*len(names)} runs did no lookup at "
+              f"all and are excluded from every column below.")
     for n in names:
-        got = [r["arms"][n] for r in rows]
+        got = [r["arms"][n] for r in rows if not r["arms"][n].get("fatal")]
+        if not got:
+            print(f"  {n:<8}  no usable runs")
+            continue
         print(f"  {n:<8} "
               f"{sum(1 for a in got if a['evidence'] > 0):>9} "
               f"{sum(1 for r in rows if n in r['false_denial']):>14} "
@@ -110,7 +151,8 @@ def report(rows: list[dict]) -> None:
               f"{sum(a['tokens'] for a in got):>9,}")
 
     print("\nWHICH ARM RETURNED THE MOST EVIDENCE")
-    for n, c in collections.Counter(r["winner"] for r in rows).most_common():
+    for n, c in collections.Counter(
+            r["winner"] for r in rows if r.get("winner")).most_common():
         print(f"  {n:<10} {c:>4}")
 
     print("\nBY CATEGORY - winner, and whether one store alone sufficed")
@@ -120,9 +162,12 @@ def report(rows: list[dict]) -> None:
     print(f"  {'category':<30} {'n':>3}  {'winner':<10} "
           f"{'graph alone':>11} {'docs alone':>10}")
     for c, rs in sorted(bycat.items()):
-        w = collections.Counter(r["winner"] for r in rs).most_common(1)[0][0]
-        ga = sum(1 for r in rs if r["arms"]["graph"]["evidence"] > 0)
-        da = sum(1 for r in rs if r["arms"]["docs"]["evidence"] > 0)
+        wins = collections.Counter(r["winner"] for r in rs if r.get("winner"))
+        w = wins.most_common(1)[0][0] if wins else "-"
+        ga = sum(1 for r in rs if not r["arms"]["graph"].get("fatal")
+                 and r["arms"]["graph"]["evidence"] > 0)
+        da = sum(1 for r in rs if not r["arms"]["docs"].get("fatal")
+                 and r["arms"]["docs"]["evidence"] > 0)
         print(f"  {c:<30} {len(rs):>3}  {w:<10} {ga:>11} {da:>10}")
 
     fd = [r for r in rows if r["false_denial"]]

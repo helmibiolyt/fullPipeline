@@ -270,6 +270,28 @@ SOFT = {"mechanism", "targets", "indications"}
 # TRAP - the specific ways this graph misleads. Each asserts the CORRECT
 # behaviour, so a regression shows up as a failure.
 TRAPS = [
+ # ICD-10 is what hospital coding and claims actually use, and it was in the
+ # lake unloaded while ICD-11 was loaded. Loaded WITH its tree, so "everything
+ # under C00-C97" is a traversal rather than a string prefix match.
+ ("ICD-10 codes are reachable",
+  "MATCH (:Identifier {scheme:'ICD10'}) RETURN count(*) AS n",
+  lambda r: r[0]["n"] > 8_000),
+ ("ICD-10 carries its hierarchy, not just flat codes",
+  "MATCH (d:Disease {vocabulary:'ICD-10'})-[:SUBTYPE_OF]->() "
+  "RETURN count(*) AS n", lambda r: r[0]["n"] > 5_000),
+ ("an ICD-10 leaf walks up to its chapter",
+  "MATCH p=(:Identifier {scheme:'ICD10', value:'Z99.9'})<-[:HAS_IDENTIFIER]-()"
+  "-[:SUBTYPE_OF*1..4]->(top:Disease) "
+  "WHERE NOT (top)-[:SUBTYPE_OF]->() RETURN count(DISTINCT top) AS n",
+  lambda r: r[0]["n"] >= 1),
+ # A00 'Cholera' matches MeSH by name, so it is keyed MESH:D002771 and its
+ # children still say parent_code=A00. Written as read, that edge pointed at a
+ # node that does not exist.
+ ("an ICD-10 child whose parent matched MeSH is still attached",
+  "MATCH (:Identifier {scheme:'ICD10', value:'A00.0'})<-[:HAS_IDENTIFIER]-(c) "
+  "MATCH (c)-[:SUBTYPE_OF]->(p) RETURN count(p) AS n",
+  lambda r: r[0]["n"] >= 1),
+
  # "which drugs are approved for epilepsy" returned tocilizumab, bevacizumab
  # and doxycycline, because INDICATED_FOR carried no phase and 86% of ChEMBL's
  # indication rows are investigational. These four assert the phase is there,
