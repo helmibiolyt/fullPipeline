@@ -22,9 +22,11 @@ function bytes(n) {
 }
 
 const when = (iso) => (iso ? iso.slice(0, 10) : '—')
-const isCsv = (n) => n.toLowerCase().endsWith('.csv')
-const isPdf = (n) => n.toLowerCase().endsWith('.pdf')
-const isDoc = (n) => /\.(pdf|docx?|pptx?|dotx)$/i.test(n)
+const ext = (n) => (n.includes('.') ? n.split('.').pop().toLowerCase() : '')
+const isCsv = (n) => ext(n) === 'csv'
+const isPdf = (n) => ext(n) === 'pdf'
+const isViewable = (n) => ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'svg'].includes(ext(n))
+const isDoc = (n) => ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'dotx'].includes(ext(n))
 
 async function signed(key, download) {
   const r = await fetch(
@@ -103,7 +105,7 @@ export default function Page() {
           <table className="listing">
             <thead>
               <tr><th>name</th><th className="num">size</th>
-                  <th className="num">modified</th><th className="num"></th></tr>
+                  <th className="num">modified</th><th className="num">actions</th></tr>
             </thead>
             <tbody>
               {data.folders.filter((f) => match(f.name)).map((f) => (
@@ -124,16 +126,20 @@ export default function Page() {
                   </td>
                   <td className="num">{bytes(f.bytes)}</td>
                   <td className="num muted">{when(f.modified)}</td>
-                  <td className="num">
+                  <td className="num acts-cell">
+                    <button className="act" title="preview in the page"
+                            onClick={(e) => { e.stopPropagation(); setFile(f) }}>
+                      preview
+                    </button>
                     <button
-                      className="dl"
+                      className="act"
                       title="download"
                       onClick={async (e) => {
                         e.stopPropagation()
                         try { window.location.href = await signed(f.key, true) }
                         catch (err) { setError(String(err.message || err)) }
                       }}
-                    >↓</button>
+                    >download</button>
                   </td>
                 </tr>
               ))}
@@ -164,9 +170,10 @@ function Preview({ file, onClose }) {
       .then((j) => { if (live) setState({ loading: false, ...j }) })
       .catch((e) => { if (live) setState({ loading: false, error: String(e) }) })
 
-    // A PDF is previewed by embedding it, which needs a signed URL. Fetched
-    // here rather than on a click so the viewer is simply there.
-    if (isPdf(file.name)) {
+    // A PDF or image is rendered by the browser from a signed URL, so no bytes
+    // pass through this app. Fetched here rather than on a second click, so
+    // "preview" means the document is simply there.
+    if (isViewable(file.name)) {
       signed(file.key, false)
         .then((u) => { if (live) setViewUrl(u) })
         .catch((e) => { if (live) setErr(String(e.message || e)) })
@@ -189,6 +196,11 @@ function Preview({ file, onClose }) {
           </div>
         </div>
         <div className="acts">
+          {viewUrl && (
+            <button onClick={() => window.open(viewUrl, '_blank', 'noopener')}>
+              open in tab
+            </button>
+          )}
           <button onClick={download}>download</button>
           <button onClick={onClose}>close</button>
         </div>
@@ -198,19 +210,35 @@ function Preview({ file, onClose }) {
       {state.loading && <div className="muted">reading…</div>}
       {state.error && <div className="err">{state.error}</div>}
 
-      {isPdf(file.name) && (
+      {state.kind === 'pdf' && (
         viewUrl
-          ? <iframe className="pdf" src={viewUrl} title={file.name} />
-          : !err && <div className="muted">preparing preview…</div>
+          ? <iframe className="viewer" src={viewUrl} title={file.name} />
+          : !err && <div className="muted">preparing the document…</div>
       )}
 
-      {!state.loading && state.kind === 'binary' && !isPdf(file.name) && (
+      {state.kind === 'image' && (
+        viewUrl
+          ? <img className="img" src={viewUrl} alt={file.name} />
+          : !err && <div className="muted">preparing the image…</div>
+      )}
+
+      {state.kind === 'text' && (
+        <>
+          <div className="muted small">
+            first {bytes(Math.min(file.bytes, 262144))}
+            {state.truncated && ' of the file'} · <b>download</b> for the whole thing
+          </div>
+          <pre className="text">{state.text}</pre>
+        </>
+      )}
+
+      {state.kind === 'binary' && (
         <div className="muted">
-          No inline preview for this type — use <b>download</b>.
+          No inline viewer for <code>.{ext(file.name)}</code> — use <b>download</b>.
         </div>
       )}
 
-      {!state.loading && state.kind === 'csv' && (
+      {state.kind === 'csv' && (
         <>
           <div className="muted small">
             {state.columns.length} columns

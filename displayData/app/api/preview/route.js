@@ -134,7 +134,31 @@ export async function GET(req) {
       etag: (head.ETag || '').replaceAll('"', ''),
     }
 
-    if (!key.toLowerCase().endsWith('.csv')) {
+    const lower = key.toLowerCase()
+    const ext = lower.includes('.') ? lower.split('.').pop() : ''
+
+    // Rendered in the page by the browser itself, from a signed URL - no
+    // bytes come through this server for these.
+    if (['pdf', 'png', 'jpg', 'jpeg', 'gif', 'svg'].includes(ext)) {
+      return Response.json({ ...info, kind: ext === 'pdf' ? 'pdf' : 'image',
+        columns: [], rows: [] })
+    }
+
+    // Text-ish formats get their head returned as text, so JSON and XML are
+    // readable in place rather than being a download with no way to look
+    // inside first.
+    if (['json', 'txt', 'xml', 'md', 'yaml', 'yml', 'log', 'tsv'].includes(ext)) {
+      const b = await readRange(key, Math.min(PREVIEW_BYTES, Math.max(0, size - 1)))
+      let t = b.toString('utf8').replace(/^﻿/, '')
+      if (size > PREVIEW_BYTES) {
+        const cut = t.lastIndexOf('\n')
+        t = cut > 0 ? t.slice(0, cut + 1) : t
+      }
+      return Response.json({ ...info, kind: 'text', text: t,
+        truncated: size > PREVIEW_BYTES, columns: [], rows: [] })
+    }
+
+    if (ext !== 'csv') {
       return Response.json({ ...info, kind: 'binary', columns: [], rows: [] })
     }
 

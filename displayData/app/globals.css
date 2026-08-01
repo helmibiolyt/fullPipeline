@@ -114,19 +114,31 @@ table.grid td {
 table.grid tr:hover td { background: #162033; }
 table.grid td:first-child { color: var(--text); }
 
-/* The download arrow on each row. Kept small and only coloured on hover so a
-   long listing does not read as a column of buttons. */
-.dl {
+/* Per-row actions. Transparent until the row is hovered, so a long listing
+   does not read as two columns of buttons. */
+.acts-cell { white-space: nowrap; }
+.act {
   background: none; border: 1px solid transparent; color: var(--dim);
-  cursor: pointer; font: inherit; font-size: 14px; line-height: 1;
-  padding: 3px 8px; border-radius: 6px;
+  cursor: pointer; font: inherit; font-size: 12px; line-height: 1;
+  padding: 4px 9px; border-radius: 6px; margin-left: 4px;
 }
-.row:hover .dl { color: var(--text); border-color: var(--line); }
-.dl:hover { color: var(--blue); border-color: var(--blue); }
+.row:hover .act { color: var(--muted); border-color: var(--line); }
+.act:hover { color: var(--blue); border-color: var(--blue); }
 
-/* The PDF viewer. Tall enough to read a page without scrolling the page
-   itself, and it is the browser's own viewer - no JS pdf library to ship. */
-.pdf {
-  width: 100%; height: 78vh; min-height: 460px; margin-top: 10px;
+/* The document viewer. The browser's own - no PDF library in the bundle, and
+   the bytes go straight from S3 rather than through this app. Tall enough to
+   read a page without scrolling the page around it. */
+.viewer {
+  width: 100%; height: 80vh; min-height: 480px; margin-top: 10px;
   border: 1px solid var(--line); border-radius: 8px; background: #fff;
+}
+.img {
+  display: block; max-width: 100%; margin-top: 10px;
+  border: 1px solid var(--line); border-radius: 8px; background: #fff;
+}
+pre.text {
+  margin: 10px 0 0; padding: 14px 16px; background: #0c1424;
+  border: 1px solid var(--line); border-radius: 8px; overflow-x: auto;
+  font: 12.5px/1.6 Consolas, monospace; color: var(--muted);
+  max-height: 62vh; white-space: pre-wrap; word-break: break-word;
 }
