@@ -336,10 +336,19 @@ TRAPS = [
                                         "daratumumab", "doxycycline",
                                         "empagliflozin"))
                     for n in r[0]["names"])),
- ("opentargets edges leave max_phase null rather than lie",
-  "MATCH ()-[e:INDICATED_FOR]->() WHERE e.source = 's16' "
-  "RETURN count(e) AS total, count(e.max_phase) AS phased",
-  lambda r: r[0]["total"] > 10_000 and r[0]["phased"] == 0),
+ # Expressed per source rather than against a source id. The first version
+ # said e.source = 's16', and source ids are assigned per run - adding the
+ # ICD-10 and ontology loaders renumbered OpenTargets to s21 and the check
+ # failed on a graph that was entirely correct. The property that matters is
+ # all-or-nothing: a source either records the phase for every indication or
+ # for none, and a source with SOME phased rows means the column was dropped
+ # somewhere, which is the actual bug this guards.
+ ("INDICATED_FOR sources are all-or-nothing on max_phase",
+  "MATCH ()-[e:INDICATED_FOR]->() WITH e.source AS src, count(*) AS total, "
+  "count(e.max_phase) AS phased RETURN src, total, phased",
+  lambda r: len(r) >= 2 and all(x["phased"] in (0, x["total"]) for x in r)
+            and any(x["phased"] == 0 and x["total"] > 10_000 for x in r)
+            and any(x["phased"] == x["total"] and x["total"] > 10_000 for x in r)),
  ("salt forms carry the safety data",
   "MATCH (s:Substance) WHERE s.norm_name STARTS WITH 'metformin' "
   "MATCH (s)-[e:HAS_ADVERSE_EVENT]->() RETURN count(e) AS n", lambda r: r[0]["n"] > 100),
