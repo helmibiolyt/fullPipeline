@@ -2,8 +2,8 @@ import { headObject, readRange } from '../../../lib/s3'
 
 export const dynamic = 'force-dynamic'
 
-const PREVIEW_BYTES = 512 * 1024
-const MAX_ROWS = 300
+const PREVIEW_BYTES = 256 * 1024      // plenty for the first rows of anything
+const PREVIEW_ROWS = 10
 
 /**
  * Minimal RFC4180 reader.
@@ -55,13 +55,21 @@ function headerRow(rows) {
     ? 1 : 0
 }
 
+/**
+ * Ten rows and the column names. Not a viewer for the whole file.
+ *
+ * The full thing is a download - chembl_structures is 3.1M rows and ClinVar's
+ * variant_summary is ~21.8M, and no browser renders that in a table. A preview
+ * answers "what is in this file"; the download answers "give me the data".
+ */
 export async function GET(req) {
   const key = new URL(req.url).searchParams.get('key') || ''
   try {
     const head = await headObject(key)
+    const size = head.ContentLength ?? 0
     const info = {
       key,
-      bytes: head.ContentLength ?? 0,
+      bytes: size,
       modified: head.LastModified ? head.LastModified.toISOString() : '',
       etag: (head.ETag || '').replaceAll('"', ''),
     }
@@ -70,11 +78,11 @@ export async function GET(req) {
       return Response.json({ ...info, kind: 'binary', columns: [], rows: [] })
     }
 
-    const buf = await readRange(key, PREVIEW_BYTES)
+    const buf = await readRange(key, Math.min(PREVIEW_BYTES, Math.max(0, size - 1)))
     let text = buf.toString('utf8').replace(/^﻿/, '')
     // A range read almost always cuts the last line in half, and a truncated
     // row renders as a column count that does not match the header.
-    if (info.bytes > PREVIEW_BYTES && text.includes('\n')) {
+    if (size > PREVIEW_BYTES && text.includes('\n')) {
       text = text.slice(0, text.lastIndexOf('\n'))
     }
 
@@ -87,9 +95,8 @@ export async function GET(req) {
       ...info,
       kind: 'csv',
       columns: all[start],
-      rows: all.slice(start + 1, start + 1 + MAX_ROWS),
+      rows: all.slice(start + 1, start + 1 + PREVIEW_ROWS),
       headerRow: start,
-      truncated: info.bytes > PREVIEW_BYTES,
     })
   } catch (e) {
     return Response.json({ error: e.message }, { status: e.status || 502 })

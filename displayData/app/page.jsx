@@ -21,20 +21,25 @@ function bytes(n) {
   return `${n < 10 && i ? n.toFixed(1) : Math.round(n)} ${u[i]}`
 }
 
-function when(iso) {
-  if (!iso) return '—'
-  return iso.slice(0, 10)
-}
-
+const when = (iso) => (iso ? iso.slice(0, 10) : '—')
 const isCsv = (n) => n.toLowerCase().endsWith('.csv')
+const isPdf = (n) => n.toLowerCase().endsWith('.pdf')
 const isDoc = (n) => /\.(pdf|docx?|pptx?|dotx)$/i.test(n)
+
+async function signed(key, download) {
+  const r = await fetch(
+    `/api/link?key=${encodeURIComponent(key)}${download ? '&download=1' : ''}`)
+  const j = await r.json()
+  if (!j.url) throw new Error(j.error || 'could not sign')
+  return j.url
+}
 
 export default function Page() {
   const [prefix, setPrefix] = useState('')
   const [data, setData] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [file, setFile] = useState(null)      // the previewed object
+  const [file, setFile] = useState(null)
   const [filter, setFilter] = useState('')
 
   const load = useCallback(async (p) => {
@@ -45,24 +50,20 @@ export default function Page() {
       if (j.error) throw new Error(j.error)
       setData(j)
     } catch (e) {
-      setError(String(e.message || e))
-      setData(null)
-    } finally {
-      setBusy(false)
-    }
+      setError(String(e.message || e)); setData(null)
+    } finally { setBusy(false) }
   }, [])
 
   useEffect(() => { load(prefix) }, [prefix, load])
 
   const crumbs = prefix ? prefix.replace(/\/$/, '').split('/') : []
+  const match = (n) => n.toLowerCase().includes(filter.toLowerCase())
 
   return (
     <main className="wrap">
       <header>
         <h1>Data lake</h1>
-        <span className="sub">
-          the eight categories, shown the way they sit in S3
-        </span>
+        <span className="sub">the eight categories, shown the way they sit in S3</span>
       </header>
 
       <nav className="crumbs">
@@ -70,10 +71,10 @@ export default function Page() {
         {crumbs.map((c, i) => (
           <span key={i}>
             <span className="sep">/</span>
-            <button
-              className="crumb"
-              onClick={() => setPrefix(crumbs.slice(0, i + 1).join('/') + '/')}
-            >{c}</button>
+            <button className="crumb"
+                    onClick={() => setPrefix(crumbs.slice(0, i + 1).join('/') + '/')}>
+              {c}
+            </button>
           </span>
         ))}
       </nav>
@@ -95,31 +96,25 @@ export default function Page() {
       {!busy && data && prefix && (
         <>
           {(data.folders.length + data.files.length) > 12 && (
-            <input
-              className="filter"
-              placeholder="filter this folder…"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-            />
+            <input className="filter" placeholder="filter this folder…"
+                   value={filter} onChange={(e) => setFilter(e.target.value)} />
           )}
 
           <table className="listing">
             <thead>
-              <tr><th>name</th><th className="num">size</th><th className="num">modified</th></tr>
+              <tr><th>name</th><th className="num">size</th>
+                  <th className="num">modified</th><th className="num"></th></tr>
             </thead>
             <tbody>
-              {data.folders
-                .filter((f) => f.name.toLowerCase().includes(filter.toLowerCase()))
-                .map((f) => (
+              {data.folders.filter((f) => match(f.name)).map((f) => (
                 <tr key={f.prefix} className="row folder" onClick={() => setPrefix(f.prefix)}>
                   <td><span className="ico">▸</span>{f.name}</td>
                   <td className="num muted">—</td>
                   <td className="num muted">—</td>
+                  <td />
                 </tr>
               ))}
-              {data.files
-                .filter((f) => f.name.toLowerCase().includes(filter.toLowerCase()))
-                .map((f) => (
+              {data.files.filter((f) => match(f.name)).map((f) => (
                 <tr key={f.key} className="row" onClick={() => setFile(f)}>
                   <td>
                     <span className={'ico ' + (isCsv(f.name) ? 'csv' : isDoc(f.name) ? 'doc' : '')}>
@@ -129,6 +124,17 @@ export default function Page() {
                   </td>
                   <td className="num">{bytes(f.bytes)}</td>
                   <td className="num muted">{when(f.modified)}</td>
+                  <td className="num">
+                    <button
+                      className="dl"
+                      title="download"
+                      onClick={async (e) => {
+                        e.stopPropagation()
+                        try { window.location.href = await signed(f.key, true) }
+                        catch (err) { setError(String(err.message || err)) }
+                      }}
+                    >↓</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -147,21 +153,30 @@ export default function Page() {
 
 function Preview({ file, onClose }) {
   const [state, setState] = useState({ loading: true })
+  const [viewUrl, setViewUrl] = useState('')
+  const [err, setErr] = useState('')
 
   useEffect(() => {
     let live = true
-    setState({ loading: true })
+    setState({ loading: true }); setViewUrl(''); setErr('')
     fetch(`/api/preview?key=${encodeURIComponent(file.key)}`)
       .then((r) => r.json())
       .then((j) => { if (live) setState({ loading: false, ...j }) })
       .catch((e) => { if (live) setState({ loading: false, error: String(e) }) })
-    return () => { live = false }
-  }, [file.key])
 
-  async function open() {
-    const r = await fetch(`/api/link?key=${encodeURIComponent(file.key)}`)
-    const j = await r.json()
-    if (j.url) window.open(j.url, '_blank', 'noopener')
+    // A PDF is previewed by embedding it, which needs a signed URL. Fetched
+    // here rather than on a click so the viewer is simply there.
+    if (isPdf(file.name)) {
+      signed(file.key, false)
+        .then((u) => { if (live) setViewUrl(u) })
+        .catch((e) => { if (live) setErr(String(e.message || e)) })
+    }
+    return () => { live = false }
+  }, [file.key, file.name])
+
+  async function download() {
+    try { window.location.href = await signed(file.key, true) }
+    catch (e) { setErr(String(e.message || e)) }
   }
 
   return (
@@ -174,27 +189,33 @@ function Preview({ file, onClose }) {
           </div>
         </div>
         <div className="acts">
-          <button onClick={open}>open</button>
+          <button onClick={download}>download</button>
           <button onClick={onClose}>close</button>
         </div>
       </div>
 
+      {err && <div className="err">{err}</div>}
       {state.loading && <div className="muted">reading…</div>}
       {state.error && <div className="err">{state.error}</div>}
 
-      {!state.loading && state.kind === 'binary' && (
+      {isPdf(file.name) && (
+        viewUrl
+          ? <iframe className="pdf" src={viewUrl} title={file.name} />
+          : !err && <div className="muted">preparing preview…</div>
+      )}
+
+      {!state.loading && state.kind === 'binary' && !isPdf(file.name) && (
         <div className="muted">
-          Not a CSV — use <b>open</b> for a signed link to the file itself.
+          No inline preview for this type — use <b>download</b>.
         </div>
       )}
 
       {!state.loading && state.kind === 'csv' && (
         <>
           <div className="muted small">
-            {state.columns.length} columns · showing {state.rows.length} rows
-            {state.truncated && ' · preview is the first 512 KB of the file'}
-            {state.headerRow > 0 &&
-              ' · header is on line 2, line 1 is a report title'}
+            {state.columns.length} columns · first {state.rows.length} rows
+            {state.headerRow > 0 && ' · header is on line 2, line 1 is a report title'}
+            {' · '}<b>download</b> for the whole file
           </div>
           <div className="scroll">
             <table className="grid">

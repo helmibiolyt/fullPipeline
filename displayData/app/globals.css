@@ -113,3 +113,20 @@ table.grid td {
 }
 table.grid tr:hover td { background: #162033; }
 table.grid td:first-child { color: var(--text); }
+
+/* The download arrow on each row. Kept small and only coloured on hover so a
+   long listing does not read as a column of buttons. */
+.dl {
+  background: none; border: 1px solid transparent; color: var(--dim);
+  cursor: pointer; font: inherit; font-size: 14px; line-height: 1;
+  padding: 3px 8px; border-radius: 6px;
+}
+.row:hover .dl { color: var(--text); border-color: var(--line); }
+.dl:hover { color: var(--blue); border-color: var(--blue); }
+
+/* The PDF viewer. Tall enough to read a page without scrolling the page
+   itself, and it is the browser's own viewer - no JS pdf library to ship. */
+.pdf {
+  width: 100%; height: 78vh; min-height: 460px; margin-top: 10px;
+  border: 1px solid var(--line); border-radius: 8px; background: #fff;
+}
