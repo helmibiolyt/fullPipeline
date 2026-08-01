@@ -54,20 +54,38 @@ _DOCURL = re.compile(r"\.(pdf|docx?|dotx|pptx?)(\?|#|$)", re.I)
 HOST_DELAY = 0.7
 
 
+#: A column holding a document link is almost always named like one. Used to
+#: decide which files to read in full - reading every row of all 440 CSVs took
+#: half an hour, and 30 of them hold every link. Prefiltering on the HEADER
+#: rather than on a row sample is what makes that safe: sampling 40 rows is
+#: exactly how the first survey missed SFDA's Pharmacovigilance file, whose
+#: links start further down.
+_URL_COLUMN = re.compile(r"url|link|detail|attach|file|pdf|doc|source", re.I)
+
+
 def scan(prefixes: list[str], sample: int | None) -> list[dict]:
     """Every document URL in every CSV under the given prefixes.
 
-    `sample` exists to make a survey cheap, and is off by default because a
-    sampled scan is how the first survey missed SFDA's Pharmacovigilance file
-    entirely - its links start below row 40. For the real run, read it all.
+    `sample` exists to make a survey cheap, and is off by default: for the real
+    run, read every row of the files that could hold a link.
     """
     keys: list[str] = []
     for p in prefixes:
         keys += [k for k in lake.list_keys(p) if k.lower().endswith(".csv")]
-    print(f"scanning {len(keys)} csvs", flush=True)
+
+    cand: list[str] = []
+    for i, k in enumerate(keys, 1):
+        try:
+            if any(_URL_COLUMN.search(c or "") for c in lake.header(k)):
+                cand.append(k)
+        except Exception:                                      # noqa: BLE001
+            continue
+        if i % 100 == 0:
+            print(f"  headers {i}/{len(keys)} -> {len(cand)} candidates", flush=True)
+    print(f"scanning {len(cand)} of {len(keys)} csvs in full", flush=True)
 
     out, seen = [], set()
-    for i, key in enumerate(keys, 1):
+    for i, key in enumerate(cand, 1):
         try:
             for n, row in enumerate(lake.stream_csv(key, limit=sample)):
                 for col, val in row.items():
@@ -79,8 +97,8 @@ def scan(prefixes: list[str], sample: int | None) -> list[dict]:
                                     "column": col or "", "row": n})
         except Exception as e:                                 # noqa: BLE001
             print(f"  ! {key.split('/')[-1]}: {type(e).__name__}", flush=True)
-        if i % 50 == 0:
-            print(f"  {i}/{len(keys)}  urls so far: {len(out):,}", flush=True)
+        if i % 10 == 0:
+            print(f"  {i}/{len(cand)}  urls so far: {len(out):,}", flush=True)
     return out
 
 
@@ -123,7 +141,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True, help="directory to download into")
     ap.add_argument("--source", default="",
-                    help="only this publisher, e.g. sfda.gov.sa")
+                    help="comma-separated publishers, e.g. sfda.gov.sa,moh.gov.om")
     ap.add_argument("--dry-run", action="store_true",
                     help="scan and report, download nothing")
     ap.add_argument("--sample", type=int, default=None,
@@ -138,8 +156,10 @@ def main() -> None:
 
     links = scan(list(CATEGORIES), a.sample)
     if a.source:
-        links = [l for l in links if a.source in l["source_csv"]
-                 or a.source in urlparse(l["url"]).netloc]
+        want = [s.strip() for s in a.source.split(",") if s.strip()]
+        links = [l for l in links
+                 if any(w in l["source_csv"] or w in urlparse(l["url"]).netloc
+                        for w in want)]
 
     byhost = collections.Counter(urlparse(l["url"]).netloc for l in links)
     print(f"\n{len(links):,} document URLs across {len(byhost)} hosts")
