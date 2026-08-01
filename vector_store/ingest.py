@@ -128,8 +128,19 @@ def ingest(prefix: str = "", limit: int | None = None, batch: int = 64,
             _flush(pending)
             n_chunks += len(pending)
 
-    print(f"\ningested {n_chunks:,} chunks from {len(todo) - failed:,} documents "
-          f"({failed:,} failed)")
+    print(f"\ningested {n_chunks:,} chunks from {len(todo) - failed - empty:,} "
+          f"documents ({failed:,} failed, {empty:,} produced no text)")
+    if empty:
+        # Named, not just counted. A scan tesseract could not read and a
+        # download that was really an error page both land here, and both used
+        # to be folded into the success count - the run reported a clean
+        # ingest and the corpus was quietly missing those documents.
+        print("  no text extracted - scans OCR could not read, or downloads "
+              "that were an error page:")
+        for k in empty_keys[:15]:
+            print(f"    {k}")
+        if len(empty_keys) > 15:
+            print(f"    ... and {len(empty_keys) - 15:,} more")
     # The distribution is the check that template detection still works. If SPCs
     # stop landing on the spc path, everything still looks healthy - same counts,
     # working retrieval - and only the section filters go quiet.
