@@ -20,9 +20,9 @@ import lake
 from normalise import fold
 
 L = {
-    "ncit_swissprot": "Ontologies_Standards/evs.nci.nih.gov/NCIt/data/"
+    "ncit_swissprot": "Ontologies_Standards/evs.nci.nih.gov/nci_thesaurus_data/"
                       "mapping_ncit_swissprot.csv",
-    "ncit_hgnc":      "Ontologies_Standards/evs.nci.nih.gov/NCIt/data/"
+    "ncit_hgnc":      "Ontologies_Standards/evs.nci.nih.gov/nci_thesaurus_data/"
                       "mapping_ncit_hgnc.csv",
     "mesh_actions":   "Ontologies_Standards/meshb.nlm.nih.gov/mesh_data/"
                       "mesh_pharmacological_actions.csv",

@@ -428,7 +428,31 @@ class Build:
         self._done("chembl_mechanisms", t0, n)
 
     # ---- driver ----------------------------------------------------------
+    def preflight(self):
+        """Every S3 key the loaders name, checked before any of them run.
+
+        A mistyped path used to surface as NoSuchKey three minutes into a
+        build, after gsrs and chembl had already streamed - and it surfaced as
+        a botocore traceback naming a bucket, not as "ontology.ncit_swissprot
+        is wrong". Two loaders were added with a guessed directory and both
+        died that way. This costs one HEAD per key and turns it into a list.
+        """
+        import disease as _d, ontology as _o, reference as _r
+        missing = []
+        for mod in (_d, _o, _r):
+            for name, key in getattr(mod, "L", {}).items():
+                if not lake.exists(key):
+                    missing.append(f"{mod.__name__}.L[{name!r}] -> {key}")
+        for name, key in LAKE.items():
+            if not lake.exists(key):
+                missing.append(f"build.LAKE[{name!r}] -> {key}")
+        if missing:
+            raise SystemExit("these declared files are not in the lake:\n  "
+                             + "\n  ".join(missing))
+        print("preflight: every declared key resolves")
+
     def run(self):
+        self.preflight()
         print(f"run_id {self.run_id}"
               f"{'   SLICE: ' + ', '.join(sorted(self.slice)) if self.slice else '   FULL'}")
         print()
