@@ -158,3 +158,5 @@ pre.text {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
 }
 .count .act { color: var(--muted); border-color: var(--line); margin-left: 0; }
+.count .hint { color: var(--dim); }
+.count .hint::before { content: "· "; }

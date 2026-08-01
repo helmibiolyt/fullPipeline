@@ -36,15 +36,14 @@ async function signed(key, download) {
   return j.url
 }
 
-//: Files shown per folder before "show all". sfda.gov.sa/linked_documents
-//: holds 416 PDFs and a browser rendering all of them makes the folder feel
-//: broken; the count is always stated, so 30 is a cap and not a lie about how
-//: much is there.
+//: Files rendered per folder. Deliberately without a "show all": one prefix
+//: holds 11,228 objects, and putting that many rows in the DOM locks the tab.
+//: The real total is always stated beside the thirty, so the cap is visible
+//: rather than a quiet truncation - the filter box is how you reach the rest.
 const PAGE_FILES = 30
 
 export default function Page() {
   const [prefix, setPrefix] = useState('')
-  const [showAll, setShowAll] = useState(false)
   const [data, setData] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -52,7 +51,7 @@ export default function Page() {
   const [filter, setFilter] = useState('')
 
   const load = useCallback(async (p) => {
-    setBusy(true); setError(''); setFile(null); setFilter(''); setShowAll(false)
+    setBusy(true); setError(''); setFile(null); setFilter('')
     try {
       const r = await fetch(`/api/list?prefix=${encodeURIComponent(p)}`)
       const j = await r.json()
@@ -69,8 +68,7 @@ export default function Page() {
   const match = (n) => n.toLowerCase().includes(filter.toLowerCase())
 
   const allFiles = (data?.files || []).filter((f) => match(f.name))
-  const shownFiles = showAll ? allFiles : allFiles.slice(0, PAGE_FILES)
-  const hidden = allFiles.length - shownFiles.length
+  const shownFiles = allFiles.slice(0, PAGE_FILES)
 
   return (
     <main className="wrap">
@@ -159,18 +157,11 @@ export default function Page() {
 
           {allFiles.length > 0 && (
             <div className="count">
-              {showAll
-                ? `all ${allFiles.length.toLocaleString()} files`
-                : `showing ${shownFiles.length} of ${allFiles.length.toLocaleString()} files`}
-              {hidden > 0 && (
-                <button className="act" onClick={() => setShowAll(true)}>
-                  show all {allFiles.length.toLocaleString()}
-                </button>
-              )}
-              {showAll && allFiles.length > PAGE_FILES && (
-                <button className="act" onClick={() => setShowAll(false)}>
-                  show first {PAGE_FILES}
-                </button>
+              {allFiles.length > shownFiles.length
+                ? `displaying ${shownFiles.length} of ${allFiles.length.toLocaleString()} files available`
+                : `${allFiles.length.toLocaleString()} file${allFiles.length === 1 ? '' : 's'}`}
+              {allFiles.length > shownFiles.length && (
+                <span className="hint">use the filter to reach the rest</span>
               )}
             </div>
           )}
