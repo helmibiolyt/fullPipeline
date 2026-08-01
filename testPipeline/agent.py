@@ -361,6 +361,40 @@ def _run_docs(args: dict, k: int) -> tuple[str, dict]:
     return "\n".join(out), rec
 
 
+#: A tool call the provider emitted as TEXT instead of as a tool call. It
+#: happens when the model wants another lookup and the tool has been withdrawn:
+#: with nothing to call it writes the call out, and the loop - which only looks
+#: at tool_calls - stored that markup as the answer. Three of five approval
+#: questions came back reading "<minimax:tool_call> <invoke name=...".
+_LEAKED_CALL = re.compile(
+    r"<\s*(minimax:)?tool_call|<\s*invoke\s+name=|<\s*parameter\s+name=", re.I)
+
+
+def _clean_answer(text: str, messages: list, out: dict) -> str:
+    """Re-ask for prose when the model wrote a tool call instead of an answer.
+
+    Asked once, with no tools offered at all, so there is nothing to call and
+    the only thing it can produce is the answer. If that still comes back as
+    markup the original is returned rather than an empty string - a visible
+    wrong answer can be diagnosed, a blank one cannot.
+    """
+    if not text or not _LEAKED_CALL.search(text):
+        return text
+    try:
+        data = P._chat(
+            messages + [{"role": "user", "content":
+                         ("Do not call any tool. Write the answer as prose, "
+                          "from the results already returned.")}],
+            max_tokens=STEP_TOKENS)
+    except Exception:                                          # noqa: BLE001
+        return text
+    out["tokens"] += data.get("usage", {}).get("total_tokens", 0)
+    m = data["choices"][0]["message"]
+    again = ((m.get("content") or "") or (m.get("reasoning_content") or "")).strip()
+    out["repaired_answer"] = True
+    return again if again and not _LEAKED_CALL.search(again) else text
+
+
 def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
         max_graph: int | None = None, max_docs: int | None = None,
         switch_on_miss: bool = True) -> dict:
@@ -445,7 +479,7 @@ def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
                 text = (msg.get("content") or "").strip()
                 if not text:
                     text = (msg.get("reasoning_content") or "").strip()
-                out["answer"] = text
+                out["answer"] = _clean_answer(text, messages, out)
                 break
 
             # Keep the assistant turn intact - the tool result must reply to
@@ -518,8 +552,9 @@ def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
                             "establish.")}], max_tokens=STEP_TOKENS)
             out["tokens"] += data.get("usage", {}).get("total_tokens", 0)
             m = data["choices"][0]["message"]
-            out["answer"] = ((m.get("content") or "")
-                             or (m.get("reasoning_content") or "")).strip()
+            out["answer"] = _clean_answer(
+                ((m.get("content") or "")
+                 or (m.get("reasoning_content") or "")).strip(), messages, out)
     except Exception as e:                                   # noqa: BLE001
         out["error"] = f"{type(e).__name__}: {str(e)[:300]}"
 
