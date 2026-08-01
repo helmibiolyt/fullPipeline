@@ -94,6 +94,7 @@ def ingest(prefix: str = "", limit: int | None = None, batch: int = 64,
         return
 
     pending, n_chunks, failed = [], 0, 0
+    empty, empty_keys = 0, []
     paths = Counter()
     with tempfile.TemporaryDirectory() as tmp:
         for doc in tqdm(todo, desc="docs"):
@@ -104,6 +105,14 @@ def ingest(prefix: str = "", limit: int | None = None, batch: int = 64,
                 chunks = chunker.chunk_document(
                     blocks, doc.source, doc.doc_id, doc.s3_key,
                     doc_type=doc.doc_type)
+                if not chunks:
+                    # Counted, not swallowed. A scan with no text layer and a
+                    # download that returned an error page both land here, and
+                    # both used to be indistinguishable from a document that
+                    # ingested cleanly - the run reported success and the
+                    # corpus was quietly missing it.
+                    empty += 1
+                    empty_keys.append(doc.s3_key)
                 for c in chunks:
                     c.etag = doc.etag
                     paths[c.chunk_path] += 1

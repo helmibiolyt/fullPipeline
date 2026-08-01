@@ -6,6 +6,7 @@ python-pptx. (Swap in Docling later for richer table/section structure.)
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 
@@ -20,14 +21,51 @@ def extract_blocks(path: str) -> list[tuple[int | None, str]]:
     return []
 
 
+#: Below this many characters a page is treated as having no text layer. Not
+#: zero: a scanned page often carries a stray header or a page number from the
+#: scanner's own stamp, which is enough to look extracted and mean nothing.
+_MIN_PAGE_CHARS = 40
+
+#: OCR languages. Arabic matters here - 38 of the 416 SFDA documents are Arabic
+#: and a third of those are scans, so an English-only model returns gibberish
+#: rather than nothing, which is worse.
+OCR_LANGS = os.environ.get("OCR_LANGS", "eng+ara")
+
+
 def _pdf(path: str):
+    """Page text, falling back to OCR for pages that have no text layer.
+
+    Without the fallback a scanned PDF extracted to nothing, produced no
+    chunks, and was counted by ingest.py as a document successfully ingested.
+    36 of the 556 backfilled documents are scans, so 36 SFDA safety alerts
+    would have been absent from the corpus with no error anywhere - the same
+    silent-absence failure the graph kept producing, in a different system.
+
+    OCR is per PAGE, not per document: regulators mix a scanned annex into a
+    born-digital report, and OCRing the whole file because of one page is
+    wasteful while skipping the file because most of it extracted is wrong.
+    """
     import fitz  # pymupdf
-    out = []
+    out, ocr_pages = [], 0
     with fitz.open(path) as doc:
         for i, page in enumerate(doc, 1):
             txt = page.get_text("text").strip()
+            if len(txt) < _MIN_PAGE_CHARS:
+                try:
+                    tp = page.get_textpage_ocr(language=OCR_LANGS, full=False,
+                                               dpi=200)
+                    ocr = page.get_text("text", textpage=tp).strip()
+                    if len(ocr) > len(txt):
+                        txt, _ = ocr, ocr_pages
+                        ocr_pages += 1
+                except Exception:                              # noqa: BLE001
+                    # No tesseract, or a page it cannot handle. Left to the
+                    # empty-document check below rather than failing the run.
+                    pass
             if txt:
                 out.append((i, txt))
+    if ocr_pages:
+        print(f"    ocr: {ocr_pages} page(s) in {Path(path).name}")
     return out
 
 

@@ -25,41 +25,33 @@ sys.path.insert(0, "/opt/pylib")
 from scrape_pipeline.registry import load_sources          # noqa: E402
 from scrape_pipeline.settings import S3_BUCKET             # noqa: E402
 
-# Sources that publish documents. Hand-maintained on purpose, and it has to
-# be: only 3 of the 10 sources that actually write PDFs declare a pdf output
-# subdir in their manifest, so deriving this set would silently miss seven of
-# them. An earlier comment here claimed it WAS derived, which promised a
-# safety property that did not exist - add a document source to this set by
-# hand, or it will never wake this DAG.
+# EVERY source, not a curated list.
 #
-# Verified against the lake inventory on 2026-07-31: these are exactly the
-# sources holding objects ending in .pdf.
-DOC_SOURCES = {
-    "Regulatory_Approvals/products.mhra.gov.uk",      # 70,559 PDFs
-    "Regulatory_Approvals/ema.europa.eu",             # 22,150
-    "Regulatory_Approvals/pmda.go.jp",                #    547
-    "MENA_GCC_Regulatory_Market/dha.gov.ae",          #     88
-    "MENA_GCC_Regulatory_Market/doh.gov.ae",          #     60
-    "MENA_GCC_Regulatory_Market/moh.gov.om",          #     18
-    "MENA_GCC_Regulatory_Market/nhra.bh",             #      9
-    "MENA_GCC_Regulatory_Market/moph.gov.qa",         #      1
-    # These two were missing. Their chunks are in Qdrant already - a full
-    # ingest picked them up - but nothing woke this DAG when they published,
-    # so new documents from them would have been dropped without an error.
-    "Clinical_Trials_Pipeline_Intelligence/anzctr.org.au",   # 1
-    "Ontologies_Standards/loinc.org",                        # 1
-}
-
-_datasets = [Dataset(f"s3://{S3_BUCKET}/{s.s3_base}")
-             for s in load_sources()
-             if f"{s.topic}/{s.source}" in DOC_SOURCES]
+# This used to be a hand-maintained set of ten, and the comment here explained
+# that it had to be: only three of the sources writing PDFs declared a pdf
+# output directory, so the set could not be derived. Two sources were found
+# missing from it after their documents were already in Qdrant - nothing had
+# woken this DAG when they published, and new documents from them would have
+# been dropped with no error.
+#
+# fetch_linked_docs ended that argument. It runs for every source and downloads
+# whatever that source's CSVs link to, so ANY of the 49 can start publishing
+# documents on any run. A curated set is now guaranteed to go stale: sfda.gov.sa
+# (417 documents) and trialsearch.who.int (101) were both absent from it while
+# their documents were being downloaded.
+#
+# Listening to all of them is cheap because the ingest is incremental by ETag -
+# a source that commits without adding a document is skipped before any
+# download, extract or embed happens. The cost of a needless wake is one S3
+# listing; the cost of a missing source is a store that silently stops growing.
+_datasets = [Dataset(f"s3://{S3_BUCKET}/{s.s3_base}") for s in load_sources()]
 
 with DAG(
     dag_id="vector_store_sync",
     description="Embed newly published documents into Qdrant (incremental by ETag)",
     # DatasetAny, not a plain list. A list means AND in Airflow: the DAG waits
     # until EVERY listed dataset has updated since its last run. This one
-    # listens to eight document sources, so it would have fired only when all eight published in the
+    # listens to every source, so it would have fired only when all of them published in the
     # same window - which is to say, effectively never, with no error and no
     # failed task to notice. Just a store that quietly stopped updating.
     schedule=DatasetAny(*_datasets) if _datasets else None,
