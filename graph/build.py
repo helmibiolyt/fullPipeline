@@ -27,6 +27,7 @@ import disease
 import lake
 import literature
 import products
+import ontology
 import reference
 import safety
 import trials
@@ -60,6 +61,7 @@ class Build:
         # mapping to graph keys has to be held while loading.
         self.molregno_key: dict[str, str] = {}
         self.tid_key: dict[str, str] = {}
+        self.target_acc: set[str] = set()
         self.chembl_target_key: dict[str, str] = {}
         self.ca_code_key: dict[str, str] = {}       # Canada DRUG_CODE -> Product key
         self.fda_appl_products: dict[str, set] = {} # Appl_No -> {(Product_No, key)}
@@ -383,6 +385,11 @@ class Build:
                         target_type=row.get("target_type", ""))
             if acc:
                 self.w.identifier(tkey, "UNIPROT", acc, source=key)
+                # The accessions that actually became Targets. NCIt's crosswalk
+                # names 6,410 proteins and only 3,399 are in this graph; without
+                # this set the other 3,011 would be written as identifiers on
+                # nodes that do not exist.
+                self.target_acc.add(acc)
             self.tid_key[tid] = tkey
             self.chembl_target_key[cid] = tkey
         self._done("chembl_targets", t0, n)
@@ -437,6 +444,11 @@ class Build:
             fn(self)
         self.load_targets()
         self.load_mechanisms()
+        # After load_targets, because NCIt attaches to Target accessions that
+        # must already exist; after the resolver is finalised, because MeSH
+        # names substances and half of them are salts.
+        for fn in ontology.ALL:
+            fn(self)
         # Disease before products and trials: both match prose against
         # mesh_by_name, which does not exist until load_mesh has run.
         for fn in disease.ALL:

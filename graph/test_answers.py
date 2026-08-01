@@ -270,6 +270,28 @@ SOFT = {"mechanism", "targets", "indications"}
 # TRAP - the specific ways this graph misleads. Each asserts the CORRECT
 # behaviour, so a regression shows up as a failure.
 TRAPS = [
+ # Ontologies_Standards holds 83 CSVs and the graph read two of them. These
+ # two attach to nodes that already exist and were measured before the loader
+ # was written: NCIt 53% of its crosswalk lands on a Target, MeSH 59% of its
+ # substances resolve.
+ ("NCIt codes reach Target nodes",
+  "MATCH (:Identifier {scheme:'NCIT'})<-[:HAS_IDENTIFIER]-(t:Target) "
+  "RETURN count(DISTINCT t) AS n", lambda r: r[0]["n"] > 2_000),
+ ("MeSH pharmacological actions are a class you can query",
+  "MATCH (c:DrugClass {vocabulary:'MeSH Pharmacological Action'}) "
+  "RETURN count(c) AS n", lambda r: 300 < r[0]["n"] < 800),
+ ("a MeSH action class has drugs in it",
+  "MATCH (c:DrugClass {vocabulary:'MeSH Pharmacological Action'}) "
+  "WHERE toLower(c.name) CONTAINS 'anticoagulant' "
+  "MATCH (s:Substance)-[:IN_CLASS]->(c) RETURN count(DISTINCT s) AS n",
+  lambda r: r[0]["n"] > 5),
+ # The two classifications must stay separable: a MeSH action carries no ATC
+ # code, so filtering on atc_code still sees only the WHO hierarchy.
+ ("MeSH action classes never carry an ATC code",
+  "MATCH (c:DrugClass {vocabulary:'MeSH Pharmacological Action'}) "
+  "WHERE c.atc_code IS NOT NULL AND c.atc_code <> '' RETURN count(c) AS n",
+  lambda r: r[0]["n"] == 0),
+
  # ICD-10 is what hospital coding and claims actually use, and it was in the
  # lake unloaded while ICD-11 was loaded. Loaded WITH its tree, so "everything
  # under C00-C97" is a traversal rather than a string prefix match.
