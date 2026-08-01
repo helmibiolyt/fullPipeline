@@ -48,40 +48,64 @@ not an ordering.
 ## 2. Free choice beats every fixed plan, measured
 
 Five configurations, same 22 questions, same total lookup budget so a win is
-not just a bigger allowance:
+not just a bigger allowance.
 
-| arm | answered | false denials | evidence | lookups | sec |
-|---|---|---|---|---|---|
-| graph only | 20 | 1 | 2,025 | 93 | 26 |
-| documents only | 17 | 1 | 336 | 97 | 62 |
-| fixed parallel (1+1) | 20 | 1 | 387 | 33 | 20 |
-| split budget (4+4) | 21 | 2 | 1,317 | 77 | 31 |
-| **agentic** | **21** | **0** | **2,477** | 88 | 33 |
+**Scored on ANSWERED, not on evidence returned.** The first version of this
+table used evidence count and it was wrong in a way worth recording: the
+documents-only arm returned six chunks for *"are there recruiting clinical
+trials for ALS"* and then wrote *"I don't have access to a tool that can query
+the clinical trial registry database"*. It retrieved something and answered
+nothing, and counting rows scored that as a store that could answer. A run
+counts only if evidence came back, the answer is about the data, and it does
+not claim absence.
 
-**Fixed parallel is the clear loser** — 387 evidence against 2,477, six times
-less, for two thirds of the time. Cheap and wrong.
+| arm | **answered** | refused | denied | no evidence |
+|---|---|---|---|---|
+| graph only | 18 | 0 | 2 | 2 |
+| documents only | 13 | **6** | 1 | 5 |
+| fixed parallel (1+1) | 20 | 0 | 1 | 2 |
+| split budget (4+4) | 19 | 0 | 2 | 1 |
+| **agentic** | **21** | **0** | **0** | 1 |
 
-`split` and `agentic` are the same loop differing in one rule (§4). That rule
-is worth 2 false denials and roughly double the evidence.
+The agentic loop answers 21 of 22 and is the only arm with no refusal and no
+false denial. Every fixed shape loses something: the graph alone denies twice,
+the documents alone refuse six times, fixed-parallel answers 20 but on a single
+lookup each so it cannot chain.
+
+Note what this corrects. On evidence count the agentic arm returned LESS than
+the best single store more often than more (10 against 6) - so evidence count
+was never the win condition, and any conclusion drawn from it was measuring
+volume rather than usefulness.
 
 ---
 
-## 3. The document store is the more reliable of the two and is under-used
+## 3. The graph is the broader store; the documents are a complement, not an alternative
 
-Over 116 questions:
+Which store can answer a question ALONE, re-scored on answered:
 
-| | calls | returned something |
-|---|---|---|
-| document searches | 52 | **92%** |
-| graph queries | 340 | 80% |
+```
+both stores          12 / 22
+ONLY the graph        6 / 22
+ONLY the documents    1 / 22
+neither               3 / 22
+```
 
-Yet only 20 of 116 questions touched the documents at all, and **68 graph
-queries returned nothing** — 68 round trips spent discovering the graph does
-not hold something.
+So the graph answers 18 of 22 alone and the corpus 13, and the corpus refuses
+on 6 - mostly questions that want structure it does not hold ("how many
+recruiting trials", "which companies sponsor most"). **Routing that treats the
+two as interchangeable is wrong**: one question in 22 is documents-only, and
+the corpus is there for what a document SAYS, not for counting.
 
-The under-use is not because documents are unhelpful. It is a bias: the model
-reaches for Cypher by default and only falls to the corpus when the graph
-disappoints it repeatedly.
+That corrects an earlier claim in this file. Per CALL the document search does
+return something more often than a Cypher query (92% against 80% over 116
+questions), and I read that as the corpus being the more reliable store. It is
+not the same thing: returning chunks is not answering, and the arm that only
+had chunks refused six times.
+
+What stands is that the documents are under-reached - 20 of 116 questions
+touched them - and that 68 graph queries returned nothing. The cost of that is
+not coverage, since the graph usually can answer. It is quality, and §5 has the
+one case measured so far.
 
 ---
 
@@ -148,6 +172,26 @@ indistinguishable otherwise, and "we got rows" is what tells the caller to stop
 looking.
 
 ---
+
+## 5b. You cannot route by keyword, and the quality question is open
+
+The obvious design - classify the question, send it to the right store - does
+not survive the data. Looking for words that predict which store wins found
+nothing usable: the only term favouring documents across 22 questions was
+"approved", and it favoured the graph as often. A classifier trained on this
+would be guessing.
+
+Which is the argument for deciding AFTER a result rather than before one.
+
+The open question is quality, and there is one measured case pointing at the
+corpus. Asked *"is rimegepant FDA approved"*, the graph had ten rows and
+answered *"listed as None (Tentative Approval) rather than full approval"* -
+misleading. The documents answered *"yes, approved for acute migraine"*, which
+is correct. Both "answered". Only one was right.
+
+Nothing in this file scores correctness, so that case is an anecdote, not a
+finding. Scoring it needs relevance judgements over a set of questions with
+known answers, and that has not been built.
 
 ## 6. The agent must never answer from its own knowledge
 

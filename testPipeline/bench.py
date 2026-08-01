@@ -140,6 +140,17 @@ def classify(question: str, res: dict) -> dict:
 
     ans = (res.get("answer") or "").strip()
     low = ans.lower()
+
+    # An answer that describes the AGENT rather than the data. The docs-only
+    # arm returned six chunks for "are there recruiting trials for ALS" and
+    # then said it had no tool that could query a trial registry - retrieved
+    # something, answered nothing. Scoring on evidence counted that as a store
+    # that could answer, which is how "both stores could answer 17 of 22"
+    # became a finding that was really a metric artefact.
+    refuses = any(p in low for p in (
+        "i don't have access", "i do not have access", "the available tools",
+        "i'm unable to", "i am unable to", "i cannot query", "i can't query",
+        "no tool", "not able to query", "outside my", "i don't have a tool"))
     # The failure that matters: a confident sentence saying the data is absent
     # when the query simply did not reach it.
     denies = any(p in low for p in (
@@ -151,6 +162,8 @@ def classify(question: str, res: dict) -> dict:
         verdict = "NO_LOOKUP"
     elif not ans:
         verdict = "NO_ANSWER"
+    elif refuses:
+        verdict = "REFUSED"          # answered about itself, not the question
     elif errs and not rows:
         verdict = "ALL_ERRORED"
     elif not rows:
@@ -170,7 +183,11 @@ def classify(question: str, res: dict) -> dict:
             "rows": rows, "errors": len(errs), "empty": len(empty),
             "chained": chained, "chain_evidence": chain_ev,
             "truncated": len(truncated), "recovered": recovered,
-            "denies": denies, "answer_chars": len(ans)}
+            "denies": denies, "refuses": refuses,
+            # The only honest summary of "did this work": evidence came back,
+            # the answer is about the data, and it does not claim absence.
+            "answered": bool(rows) and not refuses and not denies,
+            "answer_chars": len(ans)}
 
 
 def run_one(cat: str, q: str, k: int) -> dict:
