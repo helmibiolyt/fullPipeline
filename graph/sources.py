@@ -116,6 +116,50 @@ INCLUDED: list[dict] = [
          rows=None, builds=["node:Disease", "id:ICD11"],
          note="Second coding system on the same Disease nodes."),
 
+    # ICD-10, with its hierarchy - which ICD-11 is not loaded with. It is what
+    # claims, registries and hospital coding actually carry, so a disease has
+    # to be reachable from the code a real record holds. Chapters and blocks
+    # are Disease nodes too: they are the levels you group by, and SUBTYPE_OF
+    # makes "everything under C00-C97" a traversal instead of a string prefix.
+    dict(file="Ontologies_Standards/icd.who.int/icd_data/icd10_chapters.csv",
+         rows=23, builds=["node:Disease"],
+         key="ICD10:{chapter_id}",
+         note="The 22 chapters. The top of the tree."),
+    dict(file="Ontologies_Standards/icd.who.int/icd_data/icd10_blocks.csv",
+         rows=212, builds=["node:Disease", "edge:SUBTYPE_OF"],
+         key="ICD10:{block_id}",
+         note="Code ranges (C00-C97). chapter_id gives the parent directly."),
+    dict(file="Ontologies_Standards/icd.who.int/icd_data/icd10_codes.csv",
+         rows=9_792, builds=["node:Disease", "id:ICD10", "edge:SUBTYPE_OF"],
+         key="ICD10:{code}",
+         note="parent_code first, block_id only for the top of a subtree - "
+              "writing both would make the tree wrong, not just redundant. A "
+              "code whose title matches a MeSH descriptor exactly IS that "
+              "node, so the two vocabularies describe one disease."),
+
+    # NCIt is what oncology data speaks, and swissprot_id IS the Target key -
+    # the same UniProt accession chembl's mapping produces. A join, not a name
+    # match, which is why the crosswalk is taken and the 212,234 concepts are
+    # not: those would need matching by name and would bring a second
+    # hierarchy to argue with MeSH.
+    dict(file="Ontologies_Standards/evs.nci.nih.gov/nci_thesaurus_data/"
+              "mapping_ncit_swissprot.csv",
+         rows=6_410, builds=["id:NCIT"],
+         note="3,399 of 6,410 land on a Target; the rest name proteins this "
+              "graph has none for, and are skipped rather than dangled."),
+
+    # A second classification beside ATC and a genuinely different one: ATC
+    # says where a drug sits in a dispensing hierarchy, MeSH says what it
+    # DOES. Keyed MESHPA: so it cannot collide with an ATC code, and atc_code
+    # is left empty so a query filtering on it still sees only WHO's tree.
+    dict(file="Ontologies_Standards/meshb.nlm.nih.gov/mesh_data/"
+              "mesh_pharmacological_actions.csv",
+         rows=35_790, builds=["node:DrugClass", "edge:IN_CLASS"],
+         key="MESHPA:{action_descriptor_ui}",
+         note="568 action classes. 21,164 of the substance names resolve; the "
+              "rest are supplemental records GSRS has never heard of, and an "
+              "IN_CLASS edge to a provisional key is worse than no edge."),
+
     dict(file="Drug_Substance_Reference/ebi.ac.uk-chembl/chembl_data/chembl_indications.csv",
          rows=60_504, builds=["edge:INDICATED_FOR"],
          note="Carries mesh_id AND efo_id on the same row - the crosswalk that "
@@ -478,9 +522,7 @@ EXCLUDED: dict[str, str] = {
         "67,455 rows across 10 files, the bulk of it SDTM (46,774) and SEND "
         "(17,610). Worth revisiting if trial protocol structure is ever "
         "modelled; nothing in the current schema has an endpoint for a "
-        "codelist term. This note previously read '198 rows combined with "
-        "nupco', which understated it by 340x - the figure was never "
-        "measured.",
+        "codelist term.",
 
     "MENA_GCC_Regulatory_Market/nupco.com":
         "Procurement catalogues - what a buyer purchased, not a regulatory "
