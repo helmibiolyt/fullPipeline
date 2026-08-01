@@ -28,6 +28,7 @@ import argparse
 import collections
 import csv
 import hashlib
+import os
 import pathlib
 import re
 import sys
@@ -83,6 +84,41 @@ def scan(prefixes: list[str], sample: int | None) -> list[dict]:
     return out
 
 
+def publish(out: pathlib.Path, rows: list[dict]) -> None:
+    """Upload each downloaded file to S3 beside the source that linked it.
+
+    The path is derived from the CSV the link came from, so an SFDA assessment
+    report lands under MENA_GCC_Regulatory_Market/sfda.gov.sa/ and not in some
+    parallel folder of its own. That matters because the vector store's
+    list_docs derives `source` from the first two segments of the key: put
+    these anywhere else and every chunk is attributed to the wrong regulator.
+
+    `linked_documents/` rather than the source root so it is obvious these
+    arrived by following a link rather than from the scraper itself, and
+    NOT `_runs/` - list_docs skips that prefix by design.
+
+    Nothing is deleted here. The temp directory is removed once the vectors
+    exist and have been looked at, which is a separate decision.
+    """
+    import boto3
+    bucket = os.environ.get("S3_BUCKET", "moine-data")
+    s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+    done = failed = 0
+    for r in rows:
+        if r.get("status") != "ok" or not r.get("file"):
+            continue
+        src_prefix = "/".join(str(r["source_csv"]).split("/")[:2])
+        key = f"{src_prefix}/linked_documents/{pathlib.Path(r['file']).name}"
+        try:
+            s3.upload_file(str(out / r["file"]), bucket, key)
+            done += 1
+        except Exception as e:                                 # noqa: BLE001
+            failed += 1
+            print(f"  ! upload {key}: {type(e).__name__}: {str(e)[:70]}")
+    print(f"\npublished {done:,} to s3://{bucket}/ ({failed} failed)")
+    print("next: python vector_store/ingest.py --prefix <category>/<source>")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True, help="directory to download into")
@@ -95,6 +131,9 @@ def main() -> None:
     ap.add_argument("--max-per-host", type=int, default=0,
                     help="cap per host, 0 = no cap. OpenAlex links open-access "
                          "full text, which is neither regulatory nor small.")
+    ap.add_argument("--publish", action="store_true",
+                    help="after downloading, upload to S3 beside the source "
+                         "that linked each file, so ingest.py finds them")
     a = ap.parse_args()
 
     links = scan(list(CATEGORIES), a.sample)
@@ -177,6 +216,9 @@ def main() -> None:
     print(f"\ndownloaded {got:,}   already present {skipped:,}   failed {failed:,}")
     print(f"{total / 1024 / 1024:.0f} MB in {out}")
     print(f"manifest: {man}")
+
+    if a.publish:
+        publish(out, rows)
     if failed:
         why = collections.Counter(r["status"] for r in rows if r["status"] not in
                                   ("ok", "already present"))
