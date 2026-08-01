@@ -60,6 +60,23 @@ TIMEOUT = 45
 RETRIES = 2
 MANIFEST = "linked_documents.csv"
 
+#: Sources whose CSV links are NOT followed.
+#:
+#: trialsearch.who.int aggregates 50-odd national registries, so its links
+#: point wherever those registries host their files. Measured on the 648 it
+#: publishes: 254 return HTTP 403 (ANZCTR blocks hotlinking to any user agent,
+#: including a full Chrome one), others are dead, and what does come back is
+#: whole trial protocols - one of them held both cores for over an hour in the
+#: extract stage with nothing to show. The useful fraction is not worth the
+#: failure rate or the time.
+#:
+#: Excluded here rather than by deleting the column: the URLs stay in the CSV,
+#: where they are still a fact about the trial, and the graph can use them
+#: without anything trying to fetch them.
+SKIP_SOURCES = {
+    "clinical_trials_pipeline_intelligence_trialsearch_who_int",
+}
+
 
 def _looks_like_doc(value: str) -> bool:
     return bool(value and _URL.match(value) and _EXT.search(value))
@@ -137,6 +154,11 @@ def _download(session, url: str, dest: Path) -> tuple[bool, str]:
 def fetch_linked(src: Source, run_id: str, limit: int | None = None) -> dict:
     """Fetch every document linked from this run's CSVs. Never raises."""
     import requests
+
+    if src.slug in SKIP_SOURCES:
+        log.info("[%s] linked_docs: source is on the skip list, not following "
+                 "its links", src.slug)
+        return {"found": 0, "downloaded": 0, "skipped": 0, "failed": 0}
 
     dd = data_dir(src, run_id)
     links = find_links(dd)

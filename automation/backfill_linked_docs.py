@@ -41,7 +41,12 @@ sys.path.insert(0, str(HERE.parent / "graph"))
 
 import lake                                                    # noqa: E402
 from scrape_pipeline.linked_docs import (                      # noqa: E402
-    _download, _ext_of, _safe_name, DOC_EXT)
+    _download, _ext_of, _safe_name, DOC_EXT, SKIP_SOURCES)
+
+#: The same exclusions the per-scrape stage applies, by S3 prefix rather than
+#: by slug - this script walks the lake, not a run directory. Without it a
+#: backfill would put back exactly what the skip list exists to keep out.
+SKIP_PREFIXES = ("Clinical_Trials_Pipeline_Intelligence/trialsearch.who.int",)
 
 CATEGORIES = (
     "Clinical_Trials_Pipeline_Intelligence", "Drug_Substance_Reference",
@@ -71,7 +76,9 @@ def scan(prefixes: list[str], sample: int | None) -> list[dict]:
     """
     keys: list[str] = []
     for p in prefixes:
-        keys += [k for k in lake.list_keys(p) if k.lower().endswith(".csv")]
+        keys += [k for k in lake.list_keys(p)
+                 if k.lower().endswith(".csv")
+                 and not k.startswith(SKIP_PREFIXES)]
 
     cand: list[str] = []
     for i, k in enumerate(keys, 1):
