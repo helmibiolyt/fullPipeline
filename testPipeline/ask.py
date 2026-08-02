@@ -108,8 +108,14 @@ def check_cypher(q: str) -> str | None:
         return f"write or admin operation: {m.group(0).strip()!r}"
     if re.search(r"-\[[^\]]*\*\s*\]", q) or re.search(r"-\[[^\]]*\*\s*\.\.", q):
         return "unbounded variable-length traversal"
+    # Any aggregate, not just count(). This accepted count( alone, so a query
+    # grouping with collect() was refused as "not an aggregate" - and
+    # collect(DISTINCT s.name) is bounded by the grouping key exactly as
+    # count() is. One survived the LIMIT-appending fix in agent.py for this
+    # reason: that code recognised it as an aggregate and left it alone, then
+    # this check disagreed and rejected it.
     if not re.search(r"\bLIMIT\b", q, re.I) and not re.search(
-            r"\bcount\s*\(", q, re.I):
+            r"\b(count|collect|sum|avg|min|max)\s*\(", q, re.I):
         return "no LIMIT and not an aggregate"
     return None
 
