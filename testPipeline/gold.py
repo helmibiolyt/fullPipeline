@@ -44,93 +44,154 @@ sys.path.insert(0, str(HERE))
 
 import agent as AG                                             # noqa: E402
 
-#: (question, must-contain-any-of, must-not-contain-any-of)
+#: (kind, question, must-contain-any-of, must-not-contain-any-of)
 #:
 #: `must` is a list of alternative spellings - an answer saying "PD-1" and one
 #: saying "programmed cell death protein 1" are the same answer, and scoring
 #: the phrasing rather than the fact would measure the model's vocabulary.
-GOLD: list[tuple[str, list[list[str]], list[str]]] = [
+#:
+#: `kind` is what makes this set discriminate, which the first version did not.
+#: Eighteen well-known facts scored 18/18 on every arm - true, and useless for
+#: choosing a routing strategy, because not one of them was a question a store
+#: could fail. A test every configuration passes ranks nothing.
+#:
+#:   fact   checkable independently; either store might hold it
+#:   doc    needs what a LABEL SAYS - contraindications, warnings, wording.
+#:          The graph holds no label prose, so a graph-only arm should fail.
+#:   graph  needs counting or structure across sources. A corpus of chunks
+#:          cannot count trials, so a documents-only arm should fail.
+#:
+#: The prediction being tested: each single store fails its opposite kind and
+#: the loop handles both. If that does not happen, complementarity is an
+#: assumption I have been repeating rather than a finding.
+GOLD: list[tuple[str, str, list[list[str]], list[str]]] = [
 
     # ---- approval status: the case that started this -----------------------
-    ("Is rimegepant FDA approved?",
+    ("fact", "Is rimegepant FDA approved?",
      [["approved", "approval"]],
      ["not approved", "not fda approved", "no fda approval",
       "tentative approval", "is not currently approved"]),
 
-    ("Is pembrolizumab FDA approved?",
+    ("fact", "Is pembrolizumab FDA approved?",
      [["approved", "approval"]],
      ["not approved", "no fda approval", "is not currently approved"]),
 
-    ("Is atorvastatin approved in the United States?",
+    ("fact", "Is atorvastatin approved in the United States?",
      [["approved", "approval"]],
      ["not approved", "no approval", "is not currently approved"]),
 
     # ---- target and mechanism ----------------------------------------------
-    ("What is the molecular target of pembrolizumab?",
+    ("fact", "What is the molecular target of pembrolizumab?",
      [["pd-1", "pd1", "programmed cell death protein 1", "pdcd1"]],
      ["egfr", "her2", "vegf", "cd20"]),
 
-    ("What is the mechanism of action of atorvastatin?",
+    ("fact", "What is the mechanism of action of atorvastatin?",
      [["hmg-coa", "hmg coa", "reductase"]],
      ["beta blocker", "ace inhibitor", "calcium channel"]),
 
-    ("Which enzyme does aspirin inhibit?",
+    ("fact", "Which enzyme does aspirin inhibit?",
      [["cyclooxygenase", "cox-1", "cox-2", "cox1", "cox2", "prostaglandin"]],
      ["reductase", "kinase inhibitor"]),
 
-    ("What is the target of trastuzumab?",
+    ("fact", "What is the target of trastuzumab?",
      [["her2", "erbb2"]],
      ["pd-1", "egfr", "cd20", "vegf"]),
 
-    ("What is the target of rituximab?",
+    ("fact", "What is the target of rituximab?",
      [["cd20", "ms4a1"]],
      ["her2", "pd-1", "egfr"]),
 
     # ---- drug class --------------------------------------------------------
-    ("What drug class does metformin belong to?",
+    ("fact", "What drug class does metformin belong to?",
      [["biguanide", "antidiabetic", "a10", "blood glucose"]],
      ["statin", "beta blocker", "antibiotic"]),
 
-    ("What class of drug is amoxicillin?",
+    ("fact", "What class of drug is amoxicillin?",
      [["penicillin", "beta-lactam", "antibacterial", "antibiotic", "j01"]],
      ["statin", "antidepressant", "anticoagulant"]),
 
-    ("Is sertraline an SSRI?",
+    ("fact", "Is sertraline an SSRI?",
      [["ssri", "serotonin reuptake", "serotonin-reuptake"]],
      ["is not an ssri", "not a serotonin"]),
 
-    ("Which class does warfarin belong to?",
+    ("fact", "Which class does warfarin belong to?",
      [["anticoagulant", "vitamin k antagonist", "coumarin", "b01"]],
      ["antibiotic", "statin", "antipsychotic"]),
 
     # ---- indication --------------------------------------------------------
-    ("What is levetiracetam used to treat?",
+    ("fact", "What is levetiracetam used to treat?",
      [["epilep", "seizure", "convuls"]],
      ["diabetes", "hypertension", "asthma"]),
 
-    ("What condition is metformin used for?",
+    ("fact", "What condition is metformin used for?",
      [["diabet", "glycaem", "glycem", "blood glucose"]],
      ["epilepsy", "asthma", "depression"]),
 
-    ("What is salbutamol used for?",
+    ("fact", "What is salbutamol used for?",
      [["asthma", "bronch", "airway", "copd", "obstructive"]],
      ["diabetes", "epilepsy"]),
 
     # ---- identifiers, where a wrong answer is unmistakable -----------------
-    ("What is the ATC code for atorvastatin?",
+    ("fact", "What is the ATC code for atorvastatin?",
      [["c10aa05", "c10aa"]],
      ["a10", "n06a", "j01"]),
 
-    ("Which gene does the EGFR protein come from?",
+    ("fact", "Which gene does the EGFR protein come from?",
      [["egfr", "erbb1", "her1"]],
      ["kras", "tp53", "braf"]),
 
     # ---- absence, stated correctly -----------------------------------------
     # Not a trick: a drug that does not exist should produce "not found", and
     # an agent that invents a profile for it is worse than one that says so.
-    ("What is the mechanism of action of florbetapinib-zx?",
+    ("fact", "What is the mechanism of action of florbetapinib-zx?",
      [["no", "not", "could not", "unable", "nothing"]],
      ["inhibitor of", "binds to the", "approved for"]),
+
+    # ---- doc: what a LABEL SAYS. The graph holds no label prose, so a
+    # graph-only arm should fail these, and that is the point of having them.
+    ("doc", "What does the atorvastatin label say about use in pregnancy?",
+     [["contraindicat", "not recommend", "should not be used", "avoid"]],
+     ["safe in pregnancy", "no restriction"]),
+
+    ("doc", "What are the contraindications listed for warfarin?",
+     [["bleed", "haemorrhag", "hemorrhag", "pregnan", "contraindicat"]],
+     ["no contraindications"]),
+
+    ("doc", "What does the metformin label say about renal impairment?",
+     [["renal", "kidney", "egfr", "creatinine", "lactic acidosis"]],
+     ["no renal", "no restriction"]),
+
+    ("doc", "What warnings does the label give for isotretinoin in pregnancy?",
+     [["teratogen", "contraindicat", "pregnan", "birth defect", "malformation"]],
+     ["safe in pregnancy"]),
+
+    ("doc", "What does the sertraline label say about suicidal thoughts?",
+     [["suicid", "behaviour", "behavior", "young adult", "monitor"]],
+     ["no warning"]),
+
+    # ---- graph: counting and structure across sources. A corpus of chunks
+    # cannot count trials, so a documents-only arm should fail these.
+    ("graph", "How many clinical trials in the graph test pembrolizumab?",
+     [["trial"]],
+     ["cannot count", "unable to count", "no tool", "i don't have access"]),
+
+    ("graph", "Which regulatory agencies have approved products containing "
+              "atorvastatin?",
+     [["fda", "ema", "mhra", "pmda", "sfda", "health canada"]],
+     ["no tool", "i don't have access", "cannot determine"]),
+
+    ("graph", "How many substances in the graph are classified as "
+              "anticoagulants?",
+     [["anticoagulant"]],
+     ["cannot count", "no tool", "i don't have access"]),
+
+    ("graph", "Which drugs target EGFR according to the graph?",
+     [["egfr"]],
+     ["no tool", "i don't have access", "cannot determine"]),
+
+    ("graph", "How many products contain metformin?",
+     [["product", "metformin"]],
+     ["cannot count", "no tool", "i don't have access"]),
 ]
 
 
@@ -159,7 +220,7 @@ ARMS = {
 def run_arm(name: str, k: int) -> list[dict]:
     cfg = ARMS[name]
     out = []
-    for q, must, must_not in GOLD:
+    for kind, q, must, must_not in GOLD:
         try:
             res = AG.run(q, k=k, **cfg)
             ans = res.get("answer") or ""
@@ -168,12 +229,12 @@ def run_arm(name: str, k: int) -> list[dict]:
             res = {"steps": [], "total_ms": 0, "error": str(e)}
         s = score(ans, must, must_not)
         steps = [x for x in res.get("steps", []) if x.get("tool") in ("graph", "documents")]
-        out.append({"arm": name, "question": q, **s,
+        out.append({"arm": name, "kind": kind, "question": q, **s,
                     "seq": "".join(x["tool"][0] for x in steps),
                     "ms": res.get("total_ms", 0),
                     "answer": ans[:400]})
         mark = "ok  " if s["correct"] else ("WRONG" if s["contradicts"] else "thin ")
-        print(f"  {mark} [{out[-1]['seq']:<5}] {q[:56]}")
+        print(f"  {mark} {kind:<6} [{out[-1]['seq']:<5}] {q[:50]}", flush=True)
         if not s["correct"]:
             print(f"        missing={s['missing']} wrong={s['wrong']}")
     return out
