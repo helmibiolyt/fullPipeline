@@ -238,10 +238,25 @@ def trial_key(raw: str) -> str:
     return f"TRIAL:{s}"
 
 
-# Split on ; and | only. NOT on comma: MeSH inverts its descriptor names, so
+# Split on ; | and <br>. NOT on comma: MeSH inverts its descriptor names, so
 # "Scleroderma, Diffuse" and "Carcinoma, Non-Small-Cell Lung" are single terms,
 # and comma-splitting them guarantees the dictionary lookup misses.
-_SEP = re.compile(r"\s*[;|]\s*")
+#
+# <br> is here because WHO ICTRP passes registry HTML through untouched:
+# ISRCTN writes "Glanzmann thrombasthenia <br>Genetic Diseases" and NL-OMON
+# opens with one. Both resolved 0% until the tag became a separator - the
+# disease name was always present, the splitter could not see it.
+_SEP = re.compile(r"\s*(?:[;|]|<\s*br\s*/?\s*>)\s*", re.I)
+
+# Registry bookkeeping wrapped around the condition. CTRI in WHO writes
+# "Health Condition 1: C692- Malignant neoplasm of retina" - a label, an
+# ICD-10 code, then the disease. Every one of CTRI's WHO rows carries this,
+# which is why 0% of them resolved.
+_COND_LABEL = re.compile(r"^\s*health\s+condition\s*\d*\s*:\s*", re.I)
+_ICD_PREFIX = re.compile(r"^\s*[A-Z]\d{2,3}(?:\.\d+)?\s*[-:]\s*")
+# NL-OMON appends a MedDRA id: "...Iliac Artery (FLIA);10047079". _SEP already
+# splits it off, but a bare number left alone would count as a term.
+_BARE_CODE = re.compile(r"^\d{4,}$")
 # CT.gov writes "Drug: Atorvastatin", ISRCTN writes "Other: ..."
 _TYPE = re.compile(r"^(?:drug|biological|device|procedure|behavioral|dietary"
                    r"\s+supplement|radiation|genetic|diagnostic\s+test|other|"
@@ -252,7 +267,12 @@ _DOSE = re.compile(r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|ug|g|ml|iu|%|mg/kg|mg/ml)\b.*$"
 def _terms(raw: str) -> list[str]:
     out = []
     for part in _SEP.split(raw or ""):
-        p = _DOSE.sub("", _TYPE.sub("", part or "")).strip(" -\t")
+        p = _DOSE.sub("", _TYPE.sub("", part or ""))
+        # Strip the registry's own labelling before the dictionary sees it.
+        # Order matters: the label wraps the code, so the label goes first.
+        p = _ICD_PREFIX.sub("", _COND_LABEL.sub("", p)).strip(" -\t")
+        if _BARE_CODE.match(p):
+            continue
         if 3 <= len(p) <= 120:
             out.append(p)
     return out[:12]          # a trial listing 60 interventions is a basket study
