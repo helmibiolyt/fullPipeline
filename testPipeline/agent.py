@@ -236,11 +236,48 @@ def _breakdown(cypher: str, col: str, cap: int = 30) -> list[dict] | None:
     return rows or None
 
 
+#: Added to a query that has no LIMIT, rather than refusing it.
+#:
+#: The guard exists so an unbounded MATCH cannot exhaust Neo4j's heap, and
+#: refusing was the blunt way to get that. On the 116-question benchmark it
+#: rejected 14 queries and every one was safe - "MATCH (m:Modality) RETURN
+#: m.name" returns a dozen rows. Each refusal cost a lookup and taught the
+#: model nothing, because the query was fine.
+#:
+#: Bounding it keeps the protection and spends the call on an answer. Large
+#: enough that a real result is rarely cut, and the truncation machinery
+#: reports the true total when it is.
+DEFAULT_LIMIT = 300
+
+# Written with explicit character classes rather than \s, \d and \b. Both of
+# these were first written with the shorthand and both arrived with a literal
+# backspace byte where \b should be: the pattern then silently matched nothing,
+# every query looked unbounded, and the file looked correct in an editor. The
+# same accident cost this project a day once already.
+_ENDS_LIMIT = re.compile(r"LIMIT[ \t]+[0-9]+[ \t]*$", re.I)
+_AGGREGATE = re.compile(r"(count|collect|sum|avg|min|max)[ \t]*[(]", re.I)
+
+
+def _bound(cypher: str) -> tuple[str, bool]:
+    """Append a LIMIT if the query has none. Returns (cypher, was_added).
+
+    An aggregate is left alone: RETURN count(*) produces one row whatever the
+    match size, and a LIMIT on it says nothing while making the result read as
+    though it might have been cut.
+    """
+    q = cypher.strip().rstrip(";").rstrip()
+    if not q or _ENDS_LIMIT.search(q) or _AGGREGATE.search(q):
+        return cypher, False
+    return f"{q} LIMIT {DEFAULT_LIMIT}", True
+
+
 def _run_graph(args: dict) -> tuple[str, dict]:
     """Execute Cypher, returning (text for the model, record for the page)."""
     cypher = (args.get("cypher") or "").strip()
+    cypher, bounded = _bound(cypher)
     rec = {"tool": "graph", "why": args.get("why", ""), "query": cypher,
-           "rows": [], "columns": [], "total": 0, "ms": 0, "error": ""}
+           "rows": [], "columns": [], "total": 0, "ms": 0, "error": "",
+           "bounded": bounded}
 
     bad = A.check_cypher(cypher)
     if bad:
