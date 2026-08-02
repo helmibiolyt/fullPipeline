@@ -271,6 +271,30 @@ def _bound(cypher: str) -> tuple[str, bool]:
     return f"{q} LIMIT {DEFAULT_LIMIT}", True
 
 
+#: Tool names the provider actually emits, mapped to the ones declared.
+#:
+#: MiniMax returns "graph" and "functions.graph" as often as "query_graph".
+#: Unmapped, those fell through to the unknown-tool branch: the lookup never
+#: ran, and the record written for it said tool="graph" - so a call that did
+#: nothing was counted as a graph query in every metric built on these steps.
+#: The docs-only arm showed sequences like "gggd" while touching the graph
+#: exactly zero times.
+_TOOL_ALIASES = {
+    "graph": "query_graph", "query_graph": "query_graph",
+    "cypher": "query_graph", "search_graph": "query_graph",
+    "documents": "search_documents", "search_documents": "search_documents",
+    "docs": "search_documents", "document_search": "search_documents",
+}
+
+
+def _canonical_tool(name: str) -> str:
+    """Resolve a provider's spelling of a tool name to the declared one."""
+    n = (name or "").strip()
+    if "." in n:                       # functions.graph, tools.query_graph
+        n = n.rsplit(".", 1)[-1]
+    return _TOOL_ALIASES.get(n.lower(), n)
+
+
 def _run_graph(args: dict) -> tuple[str, dict]:
     """Execute Cypher, returning (text for the model, record for the page)."""
     cypher = (args.get("cypher") or "").strip()
@@ -524,7 +548,7 @@ def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
             messages.append({"role": "assistant", "content": msg.get("content") or "",
                              "tool_calls": calls})
             for tc in calls:
-                fn = tc["function"]["name"]
+                fn = _canonical_tool(tc["function"]["name"])
                 try:
                     args = P._parse_args(tc["function"]["arguments"])
                 except Exception as e:                       # noqa: BLE001
@@ -575,7 +599,14 @@ def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
                         run_of[fn] += 1
                         run_of["query_graph"] = 0
                     else:
-                        result, rec = f"unknown tool {fn}", {"tool": fn}
+                        # NOT tool="graph"/"documents": a name that did not
+                        # resolve is a failed call, and recording it under a
+                        # store made it count as a lookup that never happened.
+                        result = (f"There is no tool called {fn}. The tools "
+                                  f"are query_graph and search_documents.")
+                        rec = {"tool": "unknown", "query": "", "total": 0,
+                               "ms": 0, "error": f"unknown tool {fn}",
+                               "why": args.get("why", "")}
                 rec["step"] = len(out["steps"]) + 1
                 out["steps"].append(rec)
                 messages.append({"role": "tool", "tool_call_id": tc.get("id"),
