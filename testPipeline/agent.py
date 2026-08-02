@@ -52,24 +52,19 @@ MAX_DOCS = 4
 MAX_SECONDS = 90
 STEP_TOKENS = 4000
 
-#: Consecutive calls to one store before it is withheld for a single step.
+#: Consecutive calls to one store before it is withheld for a single call.
 #:
-#: All seven false denials on the 116-question benchmark had the same shape:
-#: four graph queries in a row, no document search, then "no data found". The
-#: model does not treat its own run of failures as evidence about which store
-#: it should be asking - it rewrites the Cypher again.
+#: This was a mechanical fix for the gggg failure - four graph queries, no
+#: document search, then "no data found" for something sitting in the corpus.
+#: It is kept only as a backstop, and switch_on_miss now defaults to False,
+#: because the cause was the PROMPT: its only advice on an empty result was to
+#: rewrite the Cypher, so nothing ever suggested the fact might be written down
+#: rather than tabulated. With the prompt fixed, all four questions that used
+#: to fail answer with this rule turned off.
 #:
-#: The first attempt at a fix keyed on consecutive EMPTY results, and it never
-#: fired: the model interleaves hits and misses, so two zeros rarely land in a
-#: row. The second raised both caps to 6 on the theory that a shared ceiling
-#: would let the question decide the split. Measured on "what oligonucleotide
-#: therapies are available", that was worse, not better - it spent all six on
-#: the graph and never reached the documents, while the 4+4 split reached them
-#: at step five and came back with the approved products by name.
-#:
-#: So the limit is on the RUN, not on the misses and not on the total. What
-#: went wrong was never four graph calls; it was four graph calls before
-#: anything else was tried.
+#: Its benefit was never reproducible either - measured twice, it helped once
+#: and hurt once, both at n=22. A rule that cannot be shown to work is worse
+#: than no rule: it reads as protection nobody has verified.
 RUN_BEFORE_SWITCH = 3
 
 TOOLS = [
@@ -487,7 +482,7 @@ def _clean_answer(text: str, messages: list, out: dict) -> str:
 
 def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
         max_graph: int | None = None, max_docs: int | None = None,
-        switch_on_miss: bool = True) -> dict:
+        switch_on_miss: bool = False) -> dict:
     """Answer a question, deciding the lookups as it goes.
 
     allow/max_* exist so the same loop can be run with one store removed. That

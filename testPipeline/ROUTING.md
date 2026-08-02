@@ -109,38 +109,55 @@ one case measured so far.
 
 ---
 
-## 4. The one rule that earns its place: a store cannot monopolise the budget
+## 4. The switch rule did not earn its place — the prompt did
 
-All 7 false denials on the 116-question run had one shape — four graph queries
-in a row, no document search, then "no data found":
+All 7 false denials on the first run had one shape: four graph queries in a
+row, no document search, then "no data found" for something sitting in the
+3.24M chunks.
 
 ```
-[gggg  ] What biomarkers are associated with Parkinson's disease?
-[gggg  ] Which ACE inhibitors are FDA approved?
-[gggg  ] What oligonucleotide therapies are available?
-[gggg  ] Which mechanisms are unique to approved vs investigational?
+[gggg] What biomarkers are associated with Parkinson's disease?
+[gggg] Which ACE inhibitors are FDA approved?
+[gggg] What oligonucleotide therapies are available?
 ```
 
-None of that is missing. It is in the 3.24M chunks the model never asked.
+I fixed it mechanically first: after three consecutive calls to one store,
+refuse that store for one call. **That was patching a symptom I had written
+myself.** The prompt's only advice on an empty result was:
 
-**After three consecutive calls to one store, that store is refused for one
-call and the reply names the other one.** Not a ban, not an ordering — the
-model still chooses, it just cannot spend the whole budget in one place before
-the other has been tried once.
+> try a different starting node — the full-text index instead of an exact
+> name, a name prefix instead of equality — before concluding the data is absent
 
-Three attempts were needed and the two failures are the useful part:
+Every option it offered was another graph query. Nothing said an empty graph
+result might mean the fact is written in prose rather than tabulated. `gggg`
+was the prompt working exactly as specified.
 
-- keyed on consecutive **empty** results — never fired, because the model
-  interleaves hits and misses and two zeros rarely land in a row
-- **raised both caps** to 6 so a shared ceiling could let the question decide —
-  measurably worse: it spent all six on the graph and never reached the
-  documents, while the 4+4 split reached them at step five
-- **withheld the tool between steps** — never fired either, and invisibly:
-  withholding cleared the run counter, but the model calls a withheld tool
-  anyway often enough, so by dispatch the counter read zero
+The prompt now states what each store physically holds — the graph "holds no
+prose: there is no sentence anywhere in it", the documents "cannot count, and
+have no notion of all" — and what a second empty result means: stop rewriting
+Cypher, two misses usually mean the fact is not tabulated.
 
-The rule has to live where the call is dispatched, and a hint must not clear
-the counter it is a hint about.
+Measured on the four questions that produced `gggg` and a denial, **with the
+mechanical rule turned off**:
+
+```
+biomarkers          ggggd    46 rows   no denial
+ACE inhibitors      gggg     30 rows   no denial
+oligonucleotides    gggg    212 rows   no denial
+atorvastatin AEs    gdd      26 rows   no denial
+```
+
+Two still use only the graph, which is correct — it holds those facts. The
+failure was never staying on the graph; it was staying on the graph **and then
+claiming the data did not exist**.
+
+The rule is now off by default and kept only as a backstop. Its benefit was
+never reproducible: measured twice at n=22, it helped once and hurt once. A
+rule that cannot be shown to work is worse than no rule, because it reads as
+protection nobody has verified.
+
+**The general lesson, which is the transferable part:** when the model behaves
+badly, check what you told it before adding machinery to stop it.
 
 ---
 
