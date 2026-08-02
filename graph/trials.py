@@ -22,6 +22,7 @@ rows of "Drug: placebo comparator, 10mg tablet, twice daily" cannot.
 """
 from __future__ import annotations
 
+import json
 import re
 
 import countries
@@ -399,7 +400,15 @@ def load_euctr(b):
             continue
         n += 1
         k = trial_key(eid)
+        # E.1.1 survived the header damage and holds the condition in
+        # English. Only 3% of eu_ctr trials had a disease link before this,
+        # not because the data was missing but because nothing read it.
+        # The 22 translated copies - (de), (fr), (it) ... - are skipped:
+        # mesh_by_name is English, so they would resolve to nothing and cost
+        # a dictionary lookup each.
         _trial(b, k, "eu_ctr", key, status=row.get("Trial Status", ""),
+               conditions=row.get("E.1.1 Medical condition(s) being investigated",
+                                  ""),
                title="")
     b.stats["euctr_header_damaged_cols"] = 128
     b._done("eu_ctr", t0, n)
@@ -503,6 +512,38 @@ def load_ctis(b):
     b._done("ctis", t0, n)
 
 
+def _ctri_conditions(raw: str) -> str:
+    """CTRI stores conditions as a JSON array, not as text.
+
+        [{"health_type": "Patients",
+          "condition": "(1) ICD-10 Condition: O80||Encounter for full-term..."}]
+
+    The condition itself is wrapped in the registry's own coding notation - a
+    numbered prefix, an ICD-10 label, and the human phrase after a || marker.
+    _terms() cannot see through that, which is why passing the raw field would
+    not have helped either.
+    """
+    if not raw or not raw.strip().startswith("["):
+        return raw or ""
+    try:
+        items = json.loads(raw)
+    except Exception:                                          # noqa: BLE001
+        return ""
+    out = []
+    for it in items if isinstance(items, list) else []:
+        c = str((it or {}).get("condition", "")).strip()
+        if not c:
+            continue
+        # "(1) ICD-10 Condition: O80||Encounter for..." -> "Encounter for..."
+        if "||" in c:
+            c = c.split("||", 1)[1]
+        c = re.sub(r"^\s*\(\d+\)\s*", "", c)
+        c = re.sub(r"^\s*ICD-10 Condition:\s*\S+\s*", "", c)
+        if c.strip():
+            out.append(c.strip())
+    return "; ".join(out)
+
+
 def load_ctri(b):
     t0 = b._step("ctri")
     key = L["ctri"]
@@ -515,6 +556,7 @@ def load_ctri(b):
             continue
         n += 1
         _trial(b, trial_key(tid), "ctri", key,
+               conditions=_ctri_conditions(row.get("health_conditions", "")),
                sponsor=row.get("primary_sponsor_name", ""),
                iso=countries.from_list(row.get("countries_of_recruitment", "")),
                title=row.get("public_title_of_study", ""),
@@ -536,6 +578,7 @@ def load_jrct(b):
             continue
         n += 1
         _trial(b, trial_key(tid), "jrct", key,
+               conditions=row.get("Health Condition(s) or Problem(s) Studied", ""),
                title=row.get("Public Title", ""),
                status=row.get("Recruitment status", ""),
                study_type=row.get("Study Type", ""),
