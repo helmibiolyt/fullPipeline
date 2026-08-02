@@ -43,11 +43,34 @@ def _chat(messages, tools=None, tool_choice=None, max_tokens=2500):
         body["tools"] = tools
         body["tool_choice"] = tool_choice or "required"
 
+    import time as _t
+
     import requests
-    r = requests.post(A.GROQ_URL, json=body, timeout=120,
-                      headers={"Authorization": f"Bearer {A.GROQ_KEY}"})
+    # Retried, because a long benchmark run is exactly the shape that trips a
+    # rate limit: 79 of 114 questions in one run came back with no lookups at
+    # all, and the cause was a transient failure on the very first call rather
+    # than anything the agent decided. A run that dies question by question
+    # produces a table that looks like a finding.
+    last = None
+    for attempt in range(3):
+        try:
+            r = requests.post(A.GROQ_URL, json=body, timeout=120,
+                              headers={"Authorization": f"Bearer {A.GROQ_KEY}"})
+        except Exception as e:                                 # noqa: BLE001
+            last = f"{type(e).__name__}: {str(e)[:160]}"
+            _t.sleep(2 * (attempt + 1))
+            continue
+        if r.status_code == 200:
+            break
+        last = f"{A.PROVIDER} {r.status_code}: {r.text[:200]}"
+        # 429 and 5xx are worth waiting for; a 400 will fail identically.
+        if r.status_code not in (429, 500, 502, 503, 504):
+            raise RuntimeError(last)
+        _t.sleep(3 * (attempt + 1))
+    else:
+        raise RuntimeError(f"after 3 attempts: {last}")
     if r.status_code != 200:
-        raise RuntimeError(f"{A.PROVIDER} {r.status_code}: {r.text[:300]}")
+        raise RuntimeError(last or f"{A.PROVIDER} {r.status_code}")
     data = r.json()
     # MiniMax reports refusals inside a 200 response.
     br = data.get("base_resp") or {}

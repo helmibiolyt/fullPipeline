@@ -158,7 +158,13 @@ def classify(question: str, res: dict) -> dict:
         "no results", "unable to find", "no information", "graph does not",
         "no such", "nothing in the graph"))
 
-    if not steps:
+    # A provider failure and a model that declined to use its tools both
+    # produce zero steps, and they mean opposite things - one is infrastructure,
+    # the other is the behaviour tool_choice="required" exists to prevent.
+    # Telling them apart needs the error, which is why it is carried here.
+    if not steps and (res.get("error") or not res.get("tokens")):
+        verdict = "PROVIDER_ERROR"
+    elif not steps:
         verdict = "NO_LOOKUP"
     elif not ans:
         verdict = "NO_ANSWER"
@@ -190,15 +196,20 @@ def classify(question: str, res: dict) -> dict:
             "answer_chars": len(ans)}
 
 
-def run_one(cat: str, q: str, k: int) -> dict:
+def run_one(cat: str, q: str, k: int, switch: bool = True) -> dict:
     t0 = time.time()
     try:
-        res = AG.run(q, k=k)
+        res = AG.run(q, k=k, switch_on_miss=switch)
     except Exception as e:                                     # noqa: BLE001
         return {"category": cat, "question": q, "fatal": f"{type(e).__name__}: {e}",
                 "verdict": "CRASH", "ms": int((time.time() - t0) * 1000)}
     row = {"category": cat, "question": q, "ms": res.get("total_ms"),
            "tokens": res.get("tokens"), "budget": res.get("budget"),
+           # Kept, because dropping it turned every provider failure into a
+           # row that read "the agent chose to look nothing up". 79 of 114
+           # questions in one run were scored NO_LOOKUP when the model call
+           # had simply raised.
+           "error": res.get("error", ""),
            "answer": res.get("answer", ""), "sources": res.get("sources", []),
            # The rows themselves are dropped - a 120-question run would be
            # hundreds of MB - but the token set they contributed is kept, so
@@ -265,6 +276,9 @@ def main() -> None:
     ap.add_argument("--workers", type=int, default=3,
                     help="the provider rate-limits; 3 is the safe ceiling")
     ap.add_argument("--k", type=int, default=6)
+    ap.add_argument("--no-switch", action="store_true",
+                    help="turn the store-switch rule off, to measure the "
+                         "prompt on its own")
     ap.add_argument("--out", default="testPipeline/bench_results.jsonl")
     ap.add_argument("--report", default="", help="re-analyse an existing jsonl")
     a = ap.parse_args()
@@ -301,7 +315,8 @@ def main() -> None:
 
     print(f"{len(bank)} questions, {a.workers} at a time -> {out}\n")
     with cf.ThreadPoolExecutor(max_workers=a.workers) as ex:
-        futs = {ex.submit(run_one, c, q, a.k): (c, q) for c, q in bank}
+        futs = {ex.submit(run_one, c, q, a.k, not a.no_switch): (c, q)
+                for c, q in bank}
         for f in cf.as_completed(futs):
             c, q = futs[f]
             try:
