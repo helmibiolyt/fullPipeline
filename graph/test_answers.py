@@ -420,6 +420,13 @@ TRAPS = [
   "MATCH (d:Disease {name:'Carcinoma, Renal Cell'}) "
   "RETURN COUNT { (:ClinicalTrial)-[:STUDIES]->(d) } AS n",
   lambda r: r[0]["n"] > 300),
+ # A rewritten link to a bare category word is worse than no link: it reads
+ # as a finding. Exact matches are exempt - that is what the registry said.
+ ("no trial is linked to a category word by a rewriting",
+  "MATCH ()-[e:STUDIES {match_method:'name_variant'}]->(d:Disease) "
+  "WHERE toLower(d.name) IN ['disease','diseases','disorder','disorders',"
+  "'syndrome','condition','illness','symptoms','infection','injuries'] "
+  "RETURN count(e) AS n", lambda r: r[0]["n"] == 0),
  ("dosage form has one spelling per form",
   "MATCH (p:Product) WHERE p.form <> '' "
   "AND (p.form CONTAINS ',' OR p.form CONTAINS '(' OR p.form CONTAINS '-') "

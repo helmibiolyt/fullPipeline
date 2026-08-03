@@ -270,6 +270,15 @@ check("...and it is last",
       _rc.index("Renal Cell Carcinoma") < len(_rc) - 1, True)
 check("empty yields nothing", _v(""), [])
 check("no duplicates", len(_v("Solid Tumors")), len(set(_v("Solid Tumors"))))
+# Stripping the qualifier off "Chronic Disease" leaves "Disease", which is a
+# real MeSH heading and told you nothing - it put 1,278 trials on a node that
+# says nothing about any of them.
+check("a qualifier strip cannot land on a category word",
+      _v("Chronic Disease"), ["Chronic Disease"])
+check("...but a real disease still narrows",
+      "Kidney Disease" in _v("Chronic Kidney Disease"), True)
+check("...and an exact 'Disease' still matches on tier one",
+      _v("Disease"), ["Disease"])
 
 print()
 if FAILS:

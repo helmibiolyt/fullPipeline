@@ -348,6 +348,18 @@ _COND_CANCER = re.compile(
 
 _COND_SPLIT = re.compile(r"[ ]+and[ ]+|[ ]*[/][ ]*", re.I)
 
+# Category words that are real MeSH headings and useless as a link. Stripping
+# a qualifier off "Chronic Disease" leaves "Disease", which matched and put
+# 1,278 trials on a node that says nothing about any of them. Checked only on
+# REWRITTEN forms: a trial whose condition is literally "Disease" still
+# matches on the first tier, because that is what the registry actually said.
+_COND_TOO_GENERIC = {
+    "disease", "diseases", "disorder", "disorders", "syndrome", "syndromes",
+    "condition", "conditions", "illness", "illnesses", "symptom", "symptoms",
+    "infection", "infections", "injury", "injuries", "complication",
+    "complications", "patients", "healthy", "health",
+}
+
 
 def condition_variants(term: str):
     """Rewritings of a trial's condition worth trying against the dictionary.
@@ -370,15 +382,16 @@ def condition_variants(term: str):
         if nxt == base:
             break
         base = nxt
-    for cand in (base,):
-        if cand and cand.lower() not in seen:
-            seen.add(cand.lower())
-            yield cand
+    if base and base.lower() not in seen:
+        if base.lower() not in _COND_TOO_GENERIC:
+            seen.add(base.lower())
+            yield base
 
     def _push(c):
         c = " ".join((c or "").split())
-        if len(c) >= 4 and c.lower() not in seen:
-            seen.add(c.lower())
+        low = c.lower()
+        if len(c) >= 4 and low not in seen and low not in _COND_TOO_GENERIC:
+            seen.add(low)
             return c
         return None
 
