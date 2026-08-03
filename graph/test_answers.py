@@ -418,6 +418,22 @@ TRAPS = [
   "MATCH (t:ClinicalTrial)-[e:STUDIES {match_method:'vocab_alias'}]->"
   "(d:Disease {name:'Anxiety Disorders'}) RETURN count(t) AS n",
   lambda r: r[0]["n"] < 500),
+ # TESTED_IN was 15.7% of trials and 93% of it came from ct.gov, because
+ # _TYPE only knew that registry's fixed vocabulary of arm labels.
+ ("CTRI trials reach a drug now",
+  "MATCH (t:ClinicalTrial {registry:'ctri'}) "
+  "WHERE COUNT { ()-[:TESTED_IN]->(t) } > 0 RETURN count(t) AS n",
+  lambda r: r[0]["n"] > 2_000),
+ ("drug linkage is no longer one registry",
+  "MATCH (t:ClinicalTrial) WHERE COUNT { ()-[:TESTED_IN]->(t) } > 0 "
+  "AND t.registry <> 'clinicaltrials.gov' RETURN count(t) AS n",
+  lambda r: r[0]["n"] > 25_000),
+ # A Substance node for placebo would connect tens of thousands of unrelated
+ # trials to each other through their control arm.
+ ("no trial is linked to placebo as a drug",
+  "MATCH (s:Substance)-[:TESTED_IN]->(:ClinicalTrial) "
+  "WHERE toLower(s.name) IN ['placebo','saline','normal saline','sham'] "
+  "RETURN count(*) AS n", lambda r: r[0]["n"] == 0),
  ("the vocabulary bridge fires",
   "MATCH ()-[e:STUDIES {match_method:'vocab_alias'}]->() RETURN count(e) AS n",
   lambda r: r[0]["n"] > 5_000),

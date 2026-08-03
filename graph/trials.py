@@ -391,10 +391,49 @@ _TYPE = re.compile(r"^(?:drug|biological|device|procedure|behavioral|dietary"
 _DOSE = re.compile(r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|ug|g|ml|iu|%|mg/kg|mg/ml)\b.*$", re.I)
 
 
-def _terms(raw: str) -> list[str]:
+# _TYPE above is ClinicalTrials.gov's fixed vocabulary, and knowing only that
+# is why ct.gov supplies 93% of all TESTED_IN edges. Every other registry
+# labels its arms in its own words - "Observation group:", "Case series:",
+# "Intervention1:", "Gold Standard:", "Index test:", "Control group:" - and
+# the label went to the resolver along with the drug name, so nothing matched.
+#
+# Deliberately narrow: at most four words, no more than 40 characters, and
+# something must follow. A drug name containing a colon is rare; a registry
+# label followed by one is 445,351 rows in WHO alone.
+_ARM_LABEL = re.compile(r"^[A-Za-z][A-Za-z0-9 /()-]{0,38}?\s*:\s*(?=\S)")
+
+# Not a drug, however often it is written in the intervention field. Placebo
+# alone is 47,882 rows in WHO, and a Substance node for it would connect tens
+# of thousands of unrelated trials to each other.
+_NOT_A_DRUG = {
+    "placebo", "placebos", "control", "controls", "no intervention",
+    "standard care", "standard of care", "usual care", "routine care",
+    "normal saline", "saline", "sham", "sham procedure", "blank", "vehicle",
+    "best supportive care", "observation", "no treatment", "conventional",
+}
+
+
+def _terms(raw: str, kind: str = "condition") -> list[str]:
+    """Split a registry cell into terms the dictionaries can be asked about.
+
+    `kind` decides which labels are stripped. Conditions carry ICD prefixes
+    and "health condition N:"; interventions carry an arm label. Applying the
+    arm-label rule to conditions would eat text like "Diabetes: type 2".
+    """
     out = []
     for part in _SEP.split(raw or ""):
         p = _DOSE.sub("", _TYPE.sub("", part or ""))
+        if kind == "intervention":
+            # Repeatedly, because labels nest: "Intervention1: Nil: Nil" needs
+            # two passes before the placeholder underneath is visible.
+            # Bounded, so a name that is genuinely all colons cannot loop.
+            for _ in range(3):
+                nxt = _ARM_LABEL.sub("", p, count=1)
+                if nxt == p:
+                    break
+                p = nxt
+            if is_placeholder(p) or " ".join(p.lower().split()) in _NOT_A_DRUG:
+                continue
         # Strip the registry's own labelling before the dictionary sees it.
         # Order matters: the label wraps the code, so the label goes first.
         p = _ICD_PREFIX.sub("", _COND_LABEL.sub("", p)).strip(" -\t")
@@ -503,7 +542,7 @@ def _trial(b, key, registry, source, sponsor="", conditions="", interventions=""
         if dkey:
             b.w.edge("STUDIES", key, dkey, match_method=mth, source=source)
 
-    for i in _terms(interventions):
+    for i in _terms(interventions, kind="intervention"):
         m = b.r.resolve(i)
         if m.key and m.resolved:                  # never provisional from prose
             b.w.edge("TESTED_IN", m.key, key, match_method=m.method, source=source)
@@ -760,7 +799,11 @@ def load_ctri(b):
         if not b.wanted_trial("", row.get("public_title_of_study", "")):
             continue
         n += 1
+        # CTRI publishes `interventions` and this loader did not read it, so
+        # all 61,738 of its trials had no drug link - the same oversight as
+        # the condition columns three registries were publishing unread.
         _trial(b, trial_key(tid), "ctri", key,
+               interventions=row.get("interventions", ""),
                conditions=_ctri_conditions(row.get("health_conditions", "")),
                sponsor=row.get("primary_sponsor_name", ""),
                iso=countries.from_list(row.get("countries_of_recruitment", "")),
@@ -783,6 +826,7 @@ def load_jrct(b):
             continue
         n += 1
         _trial(b, trial_key(tid), "jrct", key,
+               interventions=row.get("Intervention(s)", ""),
                conditions=row.get("Health Condition(s) or Problem(s) Studied", ""),
                title=row.get("Public Title", ""),
                status=row.get("Recruitment status", ""),
