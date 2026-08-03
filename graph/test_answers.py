@@ -439,6 +439,20 @@ TRAPS = [
   "MATCH (s:Substance)-[:TESTED_IN]->(:ClinicalTrial) "
   "WHERE toLower(s.name) IN ['placebo','saline','normal saline','sham'] "
   "RETURN count(*) AS n", lambda r: r[0]["n"] == 0),
+ # ICD-11 had no hierarchy at all: 16,965 Disease nodes with no parent,
+ # against 99.8% for ICD-10. Over half the label was flat, so a rollup could
+ # never reach the 39,056 trial links the icd_name tier puts there.
+ ("ICD-11 nodes have parents now",
+  "MATCH (d:Disease {vocabulary:'ICD-11'}) "
+  "WHERE COUNT { (d)-[:SUBTYPE_OF]->() } = 0 RETURN count(d) AS n",
+  lambda r: r[0]["n"] < 2_000),
+ ("the ICD-11 tree is deep enough to roll up",
+  "MATCH p = (:Disease {vocabulary:'ICD-11'})-[:SUBTYPE_OF*3]->(:Disease) "
+  "RETURN count(p) AS n", lambda r: r[0]["n"] > 1_000),
+ # A tree that loops makes any variable-length traversal non-terminating.
+ ("no disease is its own ancestor",
+  "MATCH (d:Disease)-[:SUBTYPE_OF*1..4]->(d) RETURN count(*) AS n",
+  lambda r: r[0]["n"] == 0),
  ("the vocabulary bridge fires",
   "MATCH ()-[e:STUDIES {match_method:'vocab_alias'}]->() RETURN count(e) AS n",
   lambda r: r[0]["n"] > 5_000),

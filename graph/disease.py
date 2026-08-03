@@ -154,36 +154,95 @@ def _index_icd(b, title: str, dkey: str) -> None:
 
 
 def load_icd11(b):
-    """A second coding system, attached to MeSH where the name matches exactly.
+    """A second coding system, attached to MeSH where the name matches, and
+    WITH its hierarchy - which it did not have.
 
-    Rows whose `code` is blank are chapter and block headings, not codes; they
-    have no identifier to key on and are skipped.
+    The previous version skipped every row whose `code` was blank, on the
+    reasoning that those are chapter and block headings with no identifier to
+    key on. They are, and skipping them meant the 28 chapters and 1,360 blocks
+    were never created - so all 16,965 ICD-11 diseases had no parent, against
+    99.8% for ICD-10 and 97.8% for MeSH. Over half the Disease label was flat.
+
+    That is not a cosmetic gap. `(x)-[:SUBTYPE_OF*]->(d)` is how a question
+    about a broad condition is answered - it is what took Heart Diseases from
+    1,980 trials to 31,141 - and it could never reach an ICD-11 node. The
+    icd_name tier has put 39,056 trial links on those nodes, every one of them
+    invisible to a rollup.
+
+    The file carries `parent` as a foundation URI and `foundation_uri` as the
+    row's own, so the tree is a join rather than an inference. Chapters and
+    blocks are keyed on what they do have - chapter_no and block_id.
+
+    Two passes, for the same reason load_icd10 needs them: a row whose title
+    matches MeSH IS the MeSH node and is keyed MESH:*, so a child pointing at
+    its URI has to be resolved through what the parent actually became, not
+    through what its own file called it.
     """
     t0 = b._step("icd11")
     key = L["icd11"]
     n = matched = skipped = 0
+    by_uri: dict[str, str] = {}          # foundation_uri -> the key it became
+    pending: list[tuple[str, str]] = []  # (child key, parent uri)
+
     for row in lake.stream_csv(key, limit=b.limit):
-        code = (row.get("code") or "").strip()
         title = (row.get("title") or "").strip()
-        if not code or not title:
+        if not title:
             continue
         chapter = (row.get("chapter_no") or "").strip().upper()
-        if chapter in ICD_NON_DISEASE_CHAPTERS or code[:1].upper() in ICD_NON_DISEASE_CHAPTERS:
+        code = (row.get("code") or "").strip()
+        if (chapter in ICD_NON_DISEASE_CHAPTERS
+                or (code and code[:1].upper() in ICD_NON_DISEASE_CHAPTERS)):
             skipped += 1
             continue
+
+        kind = (row.get("class_kind") or "").strip().lower()
+        uri = (row.get("foundation_uri") or "").strip()
+        block = (row.get("block_id") or "").strip()
+
+        # Chapters and blocks have no code, which is why they were dropped.
+        # They do have an identity, and it is the level a question groups by.
+        if code:
+            own = f"ICD11:{code}"
+        elif kind == "block" and block:
+            own = f"ICD11:{block}"
+        elif kind == "chapter" and chapter:
+            own = f"ICD11:CH{chapter}"
+        else:
+            continue
+
         n += 1
         hit = b.mesh_by_name.get(fold(title))
-        dkey = hit or f"ICD11:{code}"
+        dkey = hit or own
         if hit:
             matched += 1
         else:
             b.w.node("Disease", dkey, source=key, name=title,
                      vocabulary="ICD-11")
             _index_icd(b, title, dkey)
-        b.w.identifier(dkey, "ICD11", code, source=key,
-                       match_method="name" if hit else "structured")
+        if code:
+            b.w.identifier(dkey, "ICD11", code, source=key,
+                           match_method="name" if hit else "structured")
+        if uri:
+            by_uri.setdefault(uri, dkey)
+        parent_uri = (row.get("parent") or "").strip()
+        if parent_uri:
+            pending.append((dkey, parent_uri))
+
+    edges = 0
+    for child, parent_uri in pending:
+        pkey = by_uri.get(parent_uri)
+        # A parent outside the disease chapters was skipped, so its children
+        # simply have no parent here. Writing the edge anyway would dangle at
+        # an endpoint neo4j-admin then invents as an empty node.
+        if not pkey or pkey == child:
+            continue
+        b.w.edge("SUBTYPE_OF", child, pkey, match_method="structured",
+                 source=key)
+        edges += 1
+
     b.stats["icd11_name_matched"] = matched
     b.stats["icd11_non_disease_skipped"] = skipped
+    b.stats["icd11_subtype_edges"] = edges
     b._done("icd11", t0, n)
 
 
