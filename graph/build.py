@@ -107,6 +107,9 @@ class Build:
         self.ncit_key: dict[str, str] = {}
         # CDISC dosage-form key -> the submission value regulators write.
         self.form_std: dict[str, str] = {}
+        # Every MeSH descriptor name, all trees. A string MeSH already uses
+        # for something must not become an alias for something else.
+        self.mesh_any_name: set[str] = set()
         # Disease nodes named for a category rather than a condition. A
         # rewritten or ICD match may never land here; an exact one may.
         self.generic_disease_keys: set[str] = set()

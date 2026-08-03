@@ -72,6 +72,10 @@ def load_mesh(b):
     t0 = b._step("mesh")
     key = L["mesh"]
     tree_owner: dict[str, str] = {}
+    # Every descriptor name MeSH publishes, including the ones outside the C
+    # and F03 trees that do not become Disease nodes. Needed as a veto: see
+    # _may_alias.
+    b.mesh_any_name = getattr(b, "mesh_any_name", set())
     pending: list[tuple[str, str]] = []
     n = 0
     for row in lake.stream_csv(key, limit=b.limit):
@@ -80,6 +84,7 @@ def load_mesh(b):
         trees = [t.strip() for t in (row.get("tree_numbers") or "").split(";") if t.strip()]
         if not ui or not name:
             continue
+        b.mesh_any_name.add(fold(name))
         if not any(t.startswith("C") or t.startswith("F03") for t in trees):
             continue
         n += 1
@@ -517,6 +522,24 @@ def _vocab_concepts():
             yield [x for x in out if x]
 
 
+def _may_alias(b, folded: str) -> bool:
+    """False when this string is MeSH's own name for something else.
+
+    The bridge put 5,027 trials on "Anxiety Disorders" through an alias that
+    was the single word "Anxiety". MeSH has a descriptor for anxiety the
+    SYMPTOM, D001007, but it lives in tree F01 and this build only makes
+    Disease nodes from C and F03 - so the symptom is not a node, the alias has
+    nowhere right to go, and it lands on the psychiatric diagnosis. A trial
+    reducing pre-operative anxiety became an anxiety-disorder trial.
+
+    So a string MeSH already uses as a descriptor name is never allowed to
+    become an alias for a DIFFERENT descriptor, whichever tree it sits in.
+    Being outside the disease trees is a reason to leave a term unlinked, not
+    a licence to attach it to the nearest thing that is.
+    """
+    return folded not in b.mesh_any_name
+
+
 def load_vocab_aliases(b):
     """NCIt and CDISC synonyms, used as a BRIDGE to MeSH and never as nodes.
 
@@ -556,7 +579,8 @@ def load_vocab_aliases(b):
             # Never shadow MeSH's own wording, and never re-point an alias
             # another concept already claimed - first writer wins, as
             # everywhere else in this build.
-            if len(f) >= MIN_ALIAS and f not in b.mesh_by_name:
+            if (len(f) >= MIN_ALIAS and f not in b.mesh_by_name
+                    and _may_alias(b, f)):
                 if b.alias_by_name.setdefault(f, hit) == hit:
                     n += 1
     b.stats["vocab_alias_concepts_matched"] = touched
@@ -605,7 +629,8 @@ def load_mesh_scr(b):
         names += [x.strip() for x in (row.get("synonyms") or "").split(";")]
         for x in names:
             f = fold(x)
-            if len(f) >= MIN_ALIAS and f not in b.mesh_by_name:
+            if (len(f) >= MIN_ALIAS and f not in b.mesh_by_name
+                    and _may_alias(b, f)):
                 if b.alias_by_name.setdefault(f, dkey) == dkey:
                     n += 1
     b.stats["mesh_scr_aliases"] = n

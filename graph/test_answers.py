@@ -408,6 +408,16 @@ TRAPS = [
  # NCIt/CDISC as a bridge to MeSH. These two terms matched nothing at all
  # before it: NSCLC is not a MeSH heading or an entry term, and "Lung Cancer"
  # is indexed as "Lung Neoplasms".
+ # A string MeSH already uses as a descriptor name must never become an alias
+ # for a DIFFERENT descriptor. The word "Anxiety" is MeSH D001007, the
+ # SYMPTOM, which lives in tree F01 and so is not a Disease node here - the
+ # bridge sent it to "Anxiety Disorders" and put 5,027 trials on a psychiatric
+ # diagnosis, including one of a multimedia distraction system used during a
+ # hospital procedure.
+ ("no trial reaches Anxiety Disorders through the bare word anxiety",
+  "MATCH (t:ClinicalTrial)-[e:STUDIES {match_method:'vocab_alias'}]->"
+  "(d:Disease {name:'Anxiety Disorders'}) RETURN count(t) AS n",
+  lambda r: r[0]["n"] < 500),
  ("the vocabulary bridge fires",
   "MATCH ()-[e:STUDIES {match_method:'vocab_alias'}]->() RETURN count(e) AS n",
   lambda r: r[0]["n"] > 5_000),
