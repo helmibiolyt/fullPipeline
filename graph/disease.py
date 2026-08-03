@@ -478,3 +478,90 @@ def load_opentargets_assoc(b):
 
 ALL = [load_mesh, load_icd11, load_icd10, load_indications, load_hgnc,
        load_opentargets_drugs, load_opentargets_assoc]
+
+
+# --------------------------------------------------------------------- bridge
+
+NCIT_CONCEPTS = ("Ontologies_Standards/evs.nci.nih.gov/nci_thesaurus_data/"
+                 "nci_thesaurus_concepts.csv")
+NEOPLASM_CORE = ("Ontologies_Standards/evs.nci.nih.gov/nci_thesaurus_data/"
+                 "neoplasm_core.csv")
+CDISC_FILES = (
+    "Ontologies_Standards/cdisc.org/CDISC/data/SDTM Terminology.csv",
+    "Ontologies_Standards/cdisc.org/CDISC/data/CDASH Terminology.csv",
+    "Ontologies_Standards/cdisc.org/CDISC/data/Protocol Terminology.csv",
+)
+
+#: An alias shorter than this bridges too much. "ALS" is worth having and is
+#: reached as an exact MeSH entry term already; 4 characters is where a
+#: three-letter code stops being ambiguous.
+MIN_ALIAS = 5
+
+
+def _vocab_concepts():
+    """One list of names per concept, from every vocabulary carrying synonyms."""
+    for row in lake.stream_csv(NCIT_CONCEPTS):
+        out = [(row.get("preferred_name") or "").strip()]
+        out += [s.strip() for s in (row.get("synonyms") or "").split("|")]
+        yield [x for x in out if x]
+    for row in lake.stream_csv(NEOPLASM_CORE):
+        out = [(row.get("Preferred Term") or "").strip()]
+        out += [s.strip() for s in (row.get("Synonyms") or "").split("|")]
+        yield [x for x in out if x]
+    for path in CDISC_FILES:
+        for row in lake.stream_csv(path):
+            out = [(row.get("NCI Preferred Term") or "").strip(),
+                   (row.get("CDISC Submission Value") or "").strip()]
+            out += [s.strip()
+                    for s in (row.get("CDISC Synonym(s)") or "").split(";")]
+            yield [x for x in out if x]
+
+
+def load_vocab_aliases(b):
+    """NCIt and CDISC synonyms, used as a BRIDGE to MeSH and never as nodes.
+
+    What was left after rewriting was not missing concepts, it was a different
+    vocabulary: trials write "Lung Cancer" and "NSCLC" where MeSH heads "Lung
+    Neoplasms" and "Carcinoma, Non-Small-Cell Lung". Rewriting cannot cross
+    that - the strings have no shared shape - but NCI already curated the
+    mapping, and the lake already holds it.
+
+    The rule is one line: if ANY name on a concept already resolves to a MeSH
+    Disease, the concept's OTHER names become aliases for that same node.
+    Nothing is created and nothing is inferred - a bridge exists only where
+    the two vocabularies already agree on one string, and 232,275 concepts
+    that touch no MeSH node contribute nothing at all.
+
+    This is also how "Diabetes" is reached safely. Expanding it by prefix was
+    measured and rejected: it is a prefix of ten headings including Diabetes
+    Insipidus, so picking one is a guess. NCIt lists it as a synonym of
+    Diabetes Mellitus, which is a decision someone qualified already made.
+
+    Kept in its own dictionary so the edge can say `vocab_alias` and a curated
+    synonym is never mistaken for the registry having written the MeSH heading.
+    """
+    t0 = b._step("vocab_aliases")
+    n = touched = 0
+    for names in _vocab_concepts():
+        hit = None
+        for x in names:
+            hit = b.mesh_by_name.get(fold(x))
+            if hit:
+                break
+        if not hit:
+            continue
+        touched += 1
+        for x in names:
+            f = fold(x)
+            # Never shadow MeSH's own wording, and never re-point an alias
+            # another concept already claimed - first writer wins, as
+            # everywhere else in this build.
+            if len(f) >= MIN_ALIAS and f not in b.mesh_by_name:
+                if b.alias_by_name.setdefault(f, hit) == hit:
+                    n += 1
+    b.stats["vocab_alias_concepts_matched"] = touched
+    b.stats["vocab_aliases"] = len(b.alias_by_name)
+    b._done("vocab_aliases", t0, n)
+
+
+ALL = ALL + [load_vocab_aliases]

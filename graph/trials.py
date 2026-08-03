@@ -474,11 +474,22 @@ def _trial(b, key, registry, source, sponsor="", conditions="", interventions=""
         #                 a plural, "cancer" for "neoplasms" - 3.9% more
         #   icd_name      no MeSH form matched but an ICD title did - 1.1%,
         #                 and the weakest, so it is last and labelled
+        #   vocab_alias   NCIt or CDISC lists the phrase as a synonym of a
+        #                 concept that already reaches MeSH - this is how
+        #                 "NSCLC" and "Lung Cancer" arrive, and neither is a
+        #                 rewriting of any MeSH string
         dkey = mth = None
         for i, v in enumerate(condition_variants(c)):
-            dkey = b.mesh_by_name.get(fold(v))
+            fv = fold(v)
+            dkey = b.mesh_by_name.get(fv)
             if dkey:
                 mth = "name" if i == 0 else "name_variant"
+                break
+            # Tried at each variant level rather than after all of them, so
+            # the most specific form still wins across both dictionaries.
+            dkey = b.alias_by_name.get(fv)
+            if dkey:
+                mth = "vocab_alias"
                 break
         if not dkey:
             dkey = b.icd_by_name.get(fold(c))

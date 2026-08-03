@@ -97,6 +97,10 @@ class Build:
         # ICD titles, kept apart from mesh_by_name so a MeSH hit always wins
         # and a match against the weaker dictionary is recorded as such.
         self.icd_by_name: dict[str, str] = {}
+        # NCIt/CDISC synonyms that reach a MeSH node. Separate again, so the
+        # edge can record that the match came from a curated crosswalk rather
+        # than from the registry writing MeSH's own heading.
+        self.alias_by_name: dict[str, str] = {}
         # Disease nodes named for a category rather than a condition. A
         # rewritten or ICD match may never land here; an exact one may.
         self.generic_disease_keys: set[str] = set()

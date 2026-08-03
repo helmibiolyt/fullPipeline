@@ -405,6 +405,23 @@ TRAPS = [
  ("the rewriting tier actually fires",
   "MATCH ()-[e:STUDIES {match_method:'name_variant'}]->() "
   "RETURN count(e) AS n", lambda r: r[0]["n"] > 10_000),
+ # NCIt/CDISC as a bridge to MeSH. These two terms matched nothing at all
+ # before it: NSCLC is not a MeSH heading or an entry term, and "Lung Cancer"
+ # is indexed as "Lung Neoplasms".
+ ("the vocabulary bridge fires",
+  "MATCH ()-[e:STUDIES {match_method:'vocab_alias'}]->() RETURN count(e) AS n",
+  lambda r: r[0]["n"] > 5_000),
+ ("NSCLC trials reach the lung carcinoma heading",
+  "MATCH (d:Disease {name:'Carcinoma, Non-Small-Cell Lung'}) "
+  "RETURN COUNT { (:ClinicalTrial)-[:STUDIES]->(d) } AS n",
+  lambda r: r[0]["n"] > 1_000),
+ # Diabetes is the case prefix expansion could not do safely - it is a prefix
+ # of ten headings including Diabetes Insipidus. NCIt lists it as a synonym
+ # of Diabetes Mellitus, which is a curated decision rather than a guess.
+ ("diabetes reaches Diabetes Mellitus, not Insipidus",
+  "MATCH (t:ClinicalTrial)-[e:STUDIES]->(d:Disease {name:'Diabetes Insipidus'}) "
+  "WHERE e.match_method = 'vocab_alias' RETURN count(t) AS n",
+  lambda r: r[0]["n"] == 0),
  ("the ICD tier fires and stays the smallest",
   "MATCH ()-[e:STUDIES]->() WITH e.match_method AS m, count(*) AS n "
   "WHERE m IN ['name','icd_name'] RETURN m, n ORDER BY n DESC",
