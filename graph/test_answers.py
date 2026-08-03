@@ -429,6 +429,12 @@ TRAPS = [
   "MATCH (t:ClinicalTrial {registry:'ctri'}) "
   "WHERE COUNT { ()-[:TESTED_IN]->(t) } > 0 RETURN count(t) AS n",
   lambda r: r[0]["n"] > 1_000),
+ # A combination arm names several drugs in one cell and the resolver was
+ # asked for the whole string. 16,183 drug-typed ct.gov trials, 6.9%.
+ ("combination arms contribute every component",
+  "MATCH (a:Substance)-[:TESTED_IN]->(t:ClinicalTrial)<-[:TESTED_IN]-(b:Substance) "
+  "WHERE a.name = 'CARBOPLATIN' AND b.name = 'PACLITAXEL' "
+  "RETURN count(DISTINCT t) AS n", lambda r: r[0]["n"] > 200),
  ("drug linkage is no longer one registry",
   "MATCH (t:ClinicalTrial) WHERE COUNT { ()-[:TESTED_IN]->(t) } > 0 "
   "AND t.registry <> 'clinicaltrials.gov' RETURN count(t) AS n",

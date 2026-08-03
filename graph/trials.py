@@ -405,6 +405,17 @@ _ARM_LABEL = re.compile(r"^[A-Za-z][A-Za-z0-9 /()-]{0,38}?\s*:\s*(?=\S)")
 # Not a drug, however often it is written in the intervention field. Placebo
 # alone is 47,882 rows in WHO, and a Substance node for it would connect tens
 # of thousands of unrelated trials to each other.
+# A combination arm names several drugs in one cell - "Carboplatin +
+# Paclitaxel", "Cisplatin/Etoposide", "Rituximab and Bendamustine" - and the
+# resolver was asked for the whole string, which is not a substance. 16,183
+# drug-typed ct.gov trials are written that way, 6.9% of them.
+#
+# products.py has split ingredient lists like this from the start; the trial
+# path never did. Applied to interventions only: a CONDITION containing "and"
+# is usually one condition ("Overweight and Obesity" is handled separately,
+# where both halves have to hit the dictionary).
+_COMBO = re.compile(r"\s*[+]\s*|\s+and\s+|\s*/\s*", re.I)
+
 _NOT_A_DRUG = {
     "placebo", "placebos", "control", "controls", "no intervention",
     "standard care", "standard of care", "usual care", "routine care",
@@ -434,6 +445,17 @@ def _terms(raw: str, kind: str = "condition") -> list[str]:
                 p = nxt
             if is_placeholder(p) or " ".join(p.lower().split()) in _NOT_A_DRUG:
                 continue
+            # Split the combination and keep every component that survives the
+            # same filters. One arm can legitimately contribute three drugs.
+            for c in _COMBO.split(p):
+                c = c.strip(" -	")
+                if not c or is_placeholder(c):
+                    continue
+                if " ".join(c.lower().split()) in _NOT_A_DRUG:
+                    continue
+                if 3 <= len(c) <= 120:
+                    out.append(c)
+            continue
         # Strip the registry's own labelling before the dictionary sees it.
         # Order matters: the label wraps the code, so the label goes first.
         p = _ICD_PREFIX.sub("", _COND_LABEL.sub("", p)).strip(" -\t")
