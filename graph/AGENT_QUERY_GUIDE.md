@@ -164,11 +164,38 @@ Every edge records how it was established.
 | `structured` | the source stated it | high |
 | `unii`, `salt`, `stereo` | resolved via identifier tiers | high |
 | `symbol` | matched on a gene symbol | good |
-| `name` | matched free prose against a dictionary | **treat as a hint** |
+| `name` | the condition as written IS a MeSH heading or entry term | **treat as a hint** |
+| `name_variant` | a rewriting reached MeSH - a stage qualifier stripped, a plural, "cancer" for "neoplasms" | weaker |
+| `vocab_alias` | NCIt or CDISC lists the phrase as a synonym of a concept that reaches MeSH | weaker |
+| `icd_name` | no MeSH form matched, an ICD title did | **weakest** |
 | `provisional` | the name never resolved | **weak** |
 
-`CONDUCTED_IN` and `STUDIES` are entirely `name`-matched. They are useful for
+`CONDUCTED_IN` and `STUDIES` are entirely name-matched - **not one
+trial-to-disease edge in this graph is structured**. They are useful for
 aggregate questions and should not be cited as fact about one specific trial.
+
+The four tiers above are how a `STUDIES` edge was made, most reliable first.
+If an answer rests on a handful of trials, check the tier; if it rests on
+thousands, the mix matters less. Roughly 84% are `name`, 16% the other three.
+
+### How complete is the disease linkage, really
+
+60% of trials carry a disease link. Measured against ClinicalTrials.gov
+itself, for the trials this graph took from that registry:
+
+| condition | ClinicalTrials.gov | this graph | recall |
+|---|---|---|---|
+| Eczema | 1,726 | 1,409 | 82% |
+| Non-small cell lung cancer | 7,969 | 5,741 | 72% |
+| Type 2 diabetes | 11,302 | 8,890 | 79% |
+
+So a count from this graph is a **floor, not a total**. Say so. ct.gov's own
+search also matches title and description text while the graph links only on
+the condition field, so true recall is somewhat better than these numbers.
+
+Two things are deliberately never linked and should not be chased:
+`Healthy` (9,333 trials - healthy-volunteer studies have no disease), and any
+term MeSH files outside its disease trees.
 
 ### Dates do not compare
 
@@ -188,6 +215,60 @@ Orange Book, ChiCTR and jRCT are blocked at IP level. Their data is in the
 graph and cannot be refreshed. **Orange Book supplies essentially all Patent
 and Exclusivity nodes**, so patent-expiry answers are as of the last successful
 scrape.
+
+### `NA` is a value, not a gap
+
+`ClinicalTrial.phase`, `ClinicalTrial.study_type` and `Product.status` are on
+**every** node, carrying `NA` where the source said nothing usable.
+
+```cypher
+WHERE t.phase <> 'NA'          // correct
+WHERE t.phase IS NOT NULL      // matches everything, filters nothing
+```
+
+This was deliberate: an absent property and a stated "not applicable" used to
+be indistinguishable, and an observational study genuinely HAS no phase.
+Beware the reverse error too - `Country.iso2 = 'NA'` is **Namibia**.
+
+### Absence of data is not absence of the thing
+
+Five of the eleven agencies hold **no products at all**: NHRA (Bahrain), DHA
+(Dubai), DOH (Abu Dhabi), MOH-OM (Oman), MOPH-QA (Qatar). The nodes exist so
+region queries work; nothing was ever published for them.
+
+So "how many approvals in Qatar" returns 0 because the data is missing, not
+because the market is empty. Say which you mean.
+
+Same shape: all 38,914 MHRA products carry `status = 'NA'`, because that
+agency's column is a row flag rather than a status. A UK product whose status
+says nothing is not an unapproved product.
+
+### `Product.status` is ten values, and `status_raw` is free text
+
+`MARKETED APPROVED TENTATIVE_APPROVAL DISCONTINUED WITHDRAWN SUSPENDED
+REFUSED EXPIRED UNDER_REVIEW NA`.
+
+`MARKETED` covers the Orange Book's `Rx` and `OTC`, which describe how a
+product is **sold**, not whether it still is. `APPROVED` means authorised but
+not necessarily on a shelf. The agency's own wording survives in
+`status_raw` - free text, so `CONTAINS`, never equality.
+
+### `Target` is not only proteins
+
+2,782 are organisms, 1,999 cell lines, 293 tissues, and 5,210 of 16,624 have
+no relationship at all. "How many targets" is a misleading count. For
+druggable proteins use `(t:Target {target_type:'SINGLE PROTEIN'})`.
+
+### Some properties hold a list in one cell
+
+`Disease.synonyms`, `Disease.tree_numbers`, `Substance.synonyms` and
+`RegulatoryEvent.name` are semicolon-separated. Equality matches only a row
+whose **entire** list is that one value.
+
+```cypher
+WHERE d.synonyms CONTAINS 'Atopic Eczema'      // correct
+WHERE d.synonyms = 'Atopic Eczema'             // matches almost nothing
+```
 
 ### Trial keys look doubled
 
