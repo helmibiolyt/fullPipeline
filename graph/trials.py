@@ -445,7 +445,13 @@ def _trial(b, key, registry, source, sponsor="", conditions="", interventions=""
     props["study_type_raw"] = raw_st
     # A registry writing "NA" in the title field has not titled the trial.
     # Left in, those 16 rows are findable by a title search for NA.
-    if is_placeholder(props.get("title", "")):
+    #
+    # "NA" is spelled out here rather than added to is_placeholder, which
+    # excludes it on purpose: it is Namibia's ISO code and the value phase and
+    # study_type carry. A title is one of the places it means nothing, and
+    # that judgement belongs at the call site.
+    title = (props.get("title") or "").strip()
+    if is_placeholder(title) or title.upper() in {"NA", "N.A"}:
         props["title"] = ""
     b.w.node("ClinicalTrial", key, source=source,
              registry=norm_registry(registry), **props)

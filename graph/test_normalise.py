@@ -239,6 +239,11 @@ check("not specified", is_placeholder("Not Specified"), True)
 # Namibia's ISO code, and the value phase/study_type carry on purpose.
 check("bare NA is NOT a placeholder", is_placeholder("NA"), False)
 check("a real name is not", is_placeholder("Tablet"), False)
+# Which is why a caller that wants "NA" treated as absent - a trial title -
+# has to say so itself. It shipped once relying on is_placeholder and all 16
+# rows survived.
+check("...so a title needs its own check",
+      is_placeholder("NA") or "NA".upper() in {"NA", "N.A"}, True)
 
 print()
 if FAILS:

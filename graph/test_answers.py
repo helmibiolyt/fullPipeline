@@ -388,6 +388,13 @@ TRAPS = [
   "MATCH (n) WHERE (n:Modality OR n:Route) "
   "AND toLower(n.name) IN ['unknown','nil','n/a','none'] "
   "RETURN count(n) AS n", lambda r: r[0]["n"] == 0),
+ # This one shipped broken and the gate did not notice, because there was no
+ # check for it: the title cleanup called is_placeholder, which excludes bare
+ # "NA" by design, so all 16 survived a rebuild that reported 216 passed.
+ ("no trial is titled with a non-value",
+  "MATCH (t:ClinicalTrial) WHERE toUpper(trim(t.title)) IN "
+  "['NA','N/A','N.A','NONE','UNKNOWN','NIL','NOT APPLICABLE'] "
+  "RETURN count(t) AS n", lambda r: r[0]["n"] == 0),
  ("the Purple Book definition is English, not a CSV header",
   "MATCH (e:Exclusivity) WHERE e.definition CONTAINS '_' "
   "RETURN count(e) AS n", lambda r: r[0]["n"] == 0),
