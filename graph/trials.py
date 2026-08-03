@@ -27,7 +27,7 @@ import re
 
 import countries
 import lake
-from normalise import fold, norm_company
+from normalise import fold, is_placeholder, norm_company
 
 # --------------------------------------------------------------------------
 # Nine registries describe the same three facts in their own words. Left raw,
@@ -443,6 +443,10 @@ def _trial(b, key, registry, source, sponsor="", conditions="", interventions=""
     raw_st = (props.get("study_type") or "").strip()
     props["study_type"] = norm_study_type(raw_st)
     props["study_type_raw"] = raw_st
+    # A registry writing "NA" in the title field has not titled the trial.
+    # Left in, those 16 rows are findable by a title search for NA.
+    if is_placeholder(props.get("title", "")):
+        props["title"] = ""
     b.w.node("ClinicalTrial", key, source=source,
              registry=norm_registry(registry), **props)
 

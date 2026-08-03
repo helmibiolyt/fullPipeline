@@ -36,7 +36,10 @@ NODE_COLUMNS: dict[str, list[str]] = {
     "Substance":       ["key", "name", "norm_name", "synonyms",
                         "substance_class", "status", "max_phase",
                         "resolved_by"],
-    "Product":         ["key", "name", "brand_name", "agency", "status", "form",
+    # brand_name is gone: it was set to the same value as name at every one
+    # of the eight call sites, so 205,711 products carried the string twice
+    # and neither copy was a brand - they are generic names like PREGABALIN.
+    "Product":         ["key", "name", "agency", "status", "status_raw", "form",
                         "strength"],
     "Identifier":      ["key", "scheme", "value"],
     "Target":          ["key", "symbol", "name", "organism", "target_type"],

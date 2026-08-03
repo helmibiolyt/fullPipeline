@@ -33,7 +33,8 @@ import safety
 import trials
 import variants
 from emit import Writer
-from normalise import Resolver, fold, norm_company, split_synonyms
+from normalise import (Resolver, fold, is_placeholder, norm_company,
+                       split_synonyms)
 
 LAKE = {
     "atc_classes":   "Drug_Substance_Reference/atcddd.fhi.no/atc_ddd_data/atc_classes.csv",
@@ -46,6 +47,24 @@ LAKE = {
     "mechanisms":    "Drug_Substance_Reference/ebi.ac.uk-chembl/chembl_data/chembl_mechanisms.csv",
     "action_types":  "Drug_Substance_Reference/ebi.ac.uk-chembl/chembl_data/chembl_action_types.csv",
 }
+
+
+
+def _no_placeholder(v: str) -> str:
+    """Empty out a value that only means 'we do not know'."""
+    v = (v or "").strip()
+    return "" if is_placeholder(v) else v
+
+
+def _chembl_phase(v: str) -> str:
+    """ChEMBL's max_phase, with its sentinel removed.
+
+    -1 is not a phase. ChEMBL uses it for "unknown", and stored as a number it
+    sorts below 0 and satisfies `max_phase < 1`, so 426 substances of unknown
+    development stage counted as preclinical in every such filter.
+    """
+    v = (v or "").strip()
+    return "" if v.startswith("-1") else v
 
 
 class Build:
@@ -268,12 +287,15 @@ class Build:
             skey = m.key if (m and m.resolved) else f"CHEMBL:{chembl_id}"
             self.w.node("Substance", skey, source=key, name=pref,
                         norm_name=fold(pref),
-                        max_phase=row.get("max_phase", ""),
+                        max_phase=_chembl_phase(row.get("max_phase", "")),
                         resolved_by=(m.method if m else "chembl_id"))
             self.w.identifier(skey, "CHEMBL_ID", chembl_id, source=key,
                               match_method=(m.method if m else "structured"))
             mt = (row.get("molecule_type") or "").strip()
-            if mt:
+            # ChEMBL writes 'Unknown' as a molecule type. Taken at face value
+            # it became a Modality node, and every substance of unknown type
+            # hung off it as though that were a shared property.
+            if mt and not is_placeholder(mt):
                 self.w.node("Modality", f"MODALITY:{fold(mt)}", source=key, name=mt)
                 self.w.edge("HAS_MODALITY", skey, f"MODALITY:{fold(mt)}", source=key)
             self.molregno_key[molregno] = skey
@@ -382,7 +404,7 @@ class Build:
                         symbol=symbol_by_acc.get(acc, "") if acc else "",
                         name=row.get("pref_name", ""),
                         organism=row.get("organism", ""),
-                        target_type=row.get("target_type", ""))
+                        target_type=_no_placeholder(row.get("target_type", "")))
             if acc:
                 self.w.identifier(tkey, "UNIPROT", acc, source=key)
                 # The accessions that actually became Targets. NCIt's crosswalk

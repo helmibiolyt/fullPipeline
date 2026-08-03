@@ -200,6 +200,47 @@ check("empty is NA", norm_study_type(""), "NA")
 check("no substring false positive", norm_study_type("symptoms study"), "NA")
 
 print()
+print("Product status - six agency vocabularies, two of them not statuses")
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from products import norm_product_status, norm_form
+from normalise import is_placeholder
+check("HC lowercase", norm_product_status("marketed"), "MARKETED")
+check("SFDA title case", norm_product_status("Marketed"), "MARKETED")
+# The Orange Book keeps how a product is SOLD in the same column as whether
+# it is still sold. Rx and OTC both mean it is on the market today.
+check("FDA sells-as is marketed", norm_product_status("Prescription"), "MARKETED")
+check("FDA OTC is marketed", norm_product_status("Over-the-counter"), "MARKETED")
+check("authorised is not marketed", norm_product_status("Authorised"), "APPROVED")
+check("tentative is its own thing",
+      norm_product_status("None (Tentative Approval)"), "TENTATIVE_APPROVAL")
+check("abbreviation", norm_product_status("Disc"), "DISCONTINUED")
+check("stray asterisk", norm_product_status("Disc*"), "DISCONTINUED")
+check("HC inactive", norm_product_status("inactive"), "DISCONTINUED")
+check("EMA revoked", norm_product_status("Revoked"), "WITHDRAWN")
+check("EMA suspended stays apart", norm_product_status("Suspended"), "SUSPENDED")
+check("EMA lapsed", norm_product_status("Lapsed"), "EXPIRED")
+# MHRA writes 'Y' on all 38,914 of its rows. It is a row flag, and reading it
+# as a status would assert something the source never said about a fifth of
+# the label.
+check("MHRA flag is not a status", norm_product_status("Y"), "NA")
+check("empty", norm_product_status(""), "NA")
+check("unseen wording is NA, not invented",
+      norm_product_status("Marketing cessation pending"), "NA")
+check("form placeholder emptied", norm_form("UNKNOWN"), "")
+check("form N/A emptied", norm_form("N/A"), "")
+check("real form survives", norm_form("Tablet"), "TABLET")
+
+print()
+print("Placeholders - and the one that must NOT be treated as one")
+check("unknown", is_placeholder("Unknown"), True)
+check("nil", is_placeholder("NIL"), True)
+check("n/a", is_placeholder("N/A"), True)
+check("not specified", is_placeholder("Not Specified"), True)
+# Namibia's ISO code, and the value phase/study_type carry on purpose.
+check("bare NA is NOT a placeholder", is_placeholder("NA"), False)
+check("a real name is not", is_placeholder("Tablet"), False)
+
+print()
 if FAILS:
     print(f"{len(FAILS)} FAILURES\n")
     for f in FAILS:

@@ -15,7 +15,7 @@ import re
 
 import countries
 import lake
-from normalise import fold, norm_company
+from normalise import fold, is_placeholder, norm_company
 
 L = {
     "ca_drug":    "Regulatory_Approvals/health-products.canada.ca/canada_dpd_data/drug.csv",
@@ -80,7 +80,9 @@ def _routes(raw: str) -> list[str]:
     out = []
     for part in re.split(r"\s*,\s*", raw or ""):
         p = part.strip()
-        if p and fold(p) not in _ROUTE_JUNK:
+        # _ROUTE_JUNK caught the ones seen at the time; is_placeholder is the
+        # shared list, and it is what stopped a Route node called 'NIL'.
+        if p and fold(p) not in _ROUTE_JUNK and not is_placeholder(p):
             out.append(p)
     return out
 
@@ -172,7 +174,89 @@ def norm_form(raw: str) -> str:
     into two rows that look like different products.
     """
     s = " ".join(unwrap_lookup(raw).split())
-    return s.upper() if s else ""
+    if not s or is_placeholder(s):
+        return ""            # 'UNKNOWN' and 'N/A' are not dosage forms
+    return s.upper()
+
+
+# Product status, where six agencies write six vocabularies into one column
+# and two of them are not statuses at all:
+#
+#   MHRA   'Y' on all 38,914 rows - a flag, and it says nothing about status
+#   FDA    'Prescription' / 'Over-the-counter' / 'Rx' / 'OTC' - how the
+#          product is SOLD, which the Orange Book keeps in the same column as
+#          'Discontinued'. Rx and OTC both mean it is currently marketed.
+#   HC     lowercase: marketed / approved / inactive / dormant
+#   SFDA   title case: 'Marketed'  - the same word as HC's, split by case
+#   EMA    the authorisation lifecycle: Authorised, Refused, Withdrawn,
+#          Suspended, Revoked, Lapsed, Expired, Opinion
+#
+# Canonicalised to the question a caller actually asks - can you get this
+# product today, and if not, why not. Approved is kept apart from marketed
+# because the sources distinguish them: a product can be authorised and never
+# reach a shelf. The agency's own word survives in status_raw, which is where
+# the Rx/OTC distinction still lives.
+_STATUS_MAP = {
+    # currently on the market
+    "marketed": "MARKETED",
+    "prescription": "MARKETED",
+    "over-the-counter": "MARKETED",
+    "over the counter": "MARKETED",
+    "rx": "MARKETED",
+    "otc": "MARKETED",
+    "active": "MARKETED",
+    # authorised, not necessarily on a shelf
+    "approved": "APPROVED",
+    "authorised": "APPROVED",
+    "authorized": "APPROVED",
+    "none (tentative approval)": "TENTATIVE_APPROVAL",
+    "tentative approval": "TENTATIVE_APPROVAL",
+    # was available, is not
+    "discontinued": "DISCONTINUED",
+    "disc": "DISCONTINUED",
+    "disc*": "DISCONTINUED",
+    "inactive": "DISCONTINUED",
+    "dormant": "DISCONTINUED",
+    "medicine discontinued": "DISCONTINUED",
+    # taken off, or never got on
+    "withdrawn": "WITHDRAWN",
+    "application withdrawn": "WITHDRAWN",
+    "withdrawn from rolling review": "WITHDRAWN",
+    "revoked": "WITHDRAWN",
+    "cancelled": "WITHDRAWN",
+    "refused": "REFUSED",
+    "negative": "REFUSED",
+    "suspended": "SUSPENDED",
+    "expired": "EXPIRED",
+    "lapsed": "EXPIRED",
+    # still being decided
+    "opinion": "UNDER_REVIEW",
+    "opinion under re-examination": "UNDER_REVIEW",
+    "under evaluation": "UNDER_REVIEW",
+    "procedure started": "UNDER_REVIEW",
+}
+
+#: What a product carries when the agency said nothing usable about status.
+STATUS_NA = "NA"
+
+
+def norm_product_status(raw: str) -> str:
+    """An agency's status text -> one of nine values, or NA.
+
+    MHRA's bare 'Y' maps to NA on purpose. It is a row flag, and reading it
+    as a status would put 38,914 products - a fifth of the label - into
+    whichever bucket it landed in, all of them asserting something the source
+    never said.
+    """
+    s = " ".join(unwrap_lookup(raw).split())
+    if not s or is_placeholder(s):
+        return STATUS_NA
+    low = s.lower()
+    if low in _STATUS_MAP:
+        return _STATUS_MAP[low]
+    if low in {"y", "n"}:
+        return STATUS_NA
+    return STATUS_NA
 
 
 def _product(b, key, agency, source, contains, **props):
@@ -181,6 +265,11 @@ def _product(b, key, agency, source, contains, **props):
     # is normalised without touching that loader.
     if "form" in props:
         props["form"] = norm_form(props["form"])
+    # Set unconditionally, like the trial enums: an absent status and a status
+    # the agency declined to give are the same fact and get the same value.
+    raw_status = (props.get("status") or "").strip()
+    props["status"] = norm_product_status(raw_status)
+    props["status_raw"] = raw_status
     b.w.node("Product", key, source=source, agency=agency, **props)
     b.w.edge("APPROVED_BY", key, f"AGENCY:{agency}", match_method="derived",
              source=source)
@@ -245,7 +334,7 @@ def load_canada(b):
         n += 1
         key = f"CA:{din}"
         _product(b, key, "HC", L["ca_drug"], ing_by_code.get(code, []),
-                 name=row.get("BRAND_NAME", ""), brand_name=row.get("BRAND_NAME", ""),
+                 name=row.get("BRAND_NAME", ""),
                  status=row.get("STATUS_CATEGORY", ""),
                  form=form_by_code.get(code, ""))
         b.w.identifier(key, "CA_DIN", din, source=L["ca_drug"])
@@ -350,7 +439,6 @@ def load_mhra(b):
         key = f"MHRA:{pl}"
         _product(b, key, "MHRA", L["mhra"], subs,
                  name=row.get("product_name", ""),
-                 brand_name=row.get("product_name", ""),
                  status=row.get("release_state", ""))
         b.w.identifier(key, "MHRA_PL", pl, source=L["mhra"])
     b._done("mhra", t0, n)
@@ -370,7 +458,7 @@ def load_ema(b):
             continue
         n += 1
         key = f"EMA:{pnum}"
-        _product(b, key, "EMA", L["ema"], subs, name=name, brand_name=name,
+        _product(b, key, "EMA", L["ema"], subs, name=name,
                  status=row.get("medicine_status", ""))
         b.w.identifier(key, "EMA_PRODUCT", pnum, source=L["ema"])
         atc = (row.get("atc_code_human") or "").strip()
@@ -409,7 +497,7 @@ def load_orangebook(b):
         dfr = (row.get("Dosage_Form_Route") or "")
         form, _, route = dfr.partition(";")
         _product(b, key, "FDA", L["ob"], ing,
-                 name=row.get("Trade_Name", ""), brand_name=row.get("Trade_Name", ""),
+                 name=row.get("Trade_Name", ""),
                  strength=row.get("Strength", ""), form=form.strip())
         b.w.identifier(key, "FDA_APPL_NO", appl, source=L["ob"])
         for one in _routes(route):
@@ -494,7 +582,7 @@ def load_purplebook(b):
         key = f"FDA:BLA{bla}"
         bla_key[bla] = key
         _product(b, key, "FDA", L["pb"], split_ingredients(proper),
-                 name=prop or proper, brand_name=prop,
+                 name=prop or proper,
                  strength=row.get("strength", ""),
                  form=row.get("dosage_form", ""),
                  status=row.get("marketing_status", ""))
@@ -504,14 +592,24 @@ def load_purplebook(b):
             b.w.node("Approval", akey, source=L["pb"], date=appr,
                      type=row.get("license_type", ""), agency="FDA")
             b.w.edge("HAS_APPROVAL", key, akey, source=L["pb"])
-        for col, label in (("exclusivity_expiration_date", "exclusivity"),
-                           ("ref_product_exclusivity_exp_date", "reference_product"),
-                           ("orphan_exclusivity_exp_date", "orphan")):
+        # The Orange Book gives a code and a written definition; the Purple
+        # Book gives neither, only three dated columns. Passing `col` through
+        # as the definition put the CSV header - 'orphan_exclusivity_exp_date'
+        # - in the field that every other row uses for English, so the code is
+        # upper-cased to match the Orange Book's and the definition is spelled
+        # out here rather than borrowed from the file's own plumbing.
+        for col, label, defn in (
+                ("exclusivity_expiration_date", "EXCLUSIVITY",
+                 "BIOLOGIC EXCLUSIVITY"),
+                ("ref_product_exclusivity_exp_date", "REFERENCE_PRODUCT",
+                 "REFERENCE PRODUCT EXCLUSIVITY"),
+                ("orphan_exclusivity_exp_date", "ORPHAN",
+                 "ORPHAN DRUG EXCLUSIVITY")):
             d = (row.get(col) or "").strip()
             if d:
                 ekey = f"EXCL:BLA{bla}:{label}"
                 b.w.node("Exclusivity", ekey, source=L["pb"], code=label, date=d,
-                         definition=col)
+                         definition=defn)
                 b.w.edge("HAS_EXCLUSIVITY", key, ekey, source=L["pb"])
         for pno in [p.strip() for p in (row.get("patent_numbers") or "").split(",") if p.strip()]:
             pkey = f"PATENT:US{pno}"
@@ -539,7 +637,7 @@ def load_openfda(b):
         n += 1
         key = f"FDA:{appl}:{pno}" if pno else f"FDA:{appl}"
         _product(b, key, "FDA", L["openfda"], subs,
-                 name=row.get("brand_name", ""), brand_name=row.get("brand_name", ""),
+                 name=row.get("brand_name", ""),
                  form=row.get("dosage_form", ""),
                  status=row.get("marketing_status", ""))
         for ndc in [x.strip() for x in (row.get("openfda_product_ndcs") or "").split(",") if x.strip()][:5]:
@@ -560,7 +658,7 @@ def load_sfda(b):
         n += 1
         key = f"SFDA:{reg}"
         _product(b, key, "SFDA", L["sfda"], split_ingredients(sci),
-                 name=trade, brand_name=trade,
+                 name=trade,
                  strength=row.get("strength", ""),
                  form=row.get("pharmaceuticalForm", ""),
                  status=unwrap_lookup(row.get("marketingStatus", "")))
@@ -598,8 +696,11 @@ def load_pmda(b):
             continue
         n += 1
         key = f"PMDA:{pid}"
+        # PMDA is the only source with a separate brand and generic column,
+        # and the generic reaches the graph as CONTAINS edges to Substance
+        # rather than as a second name property.
         _product(b, key, "PMDA", L["pmda"], split_ingredients(gen),
-                 name=brand or gen, brand_name=brand)
+                 name=brand or gen)
         date = (row.get("approval_date") or "").strip()
         if date:
             akey = f"PMDA:{pid}:{date}"

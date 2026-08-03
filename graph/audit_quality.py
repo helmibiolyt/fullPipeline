@@ -68,6 +68,23 @@ PLACEHOLDERS = {"n/a", "na", "none", "null", "nil", "unknown", "-", "--",
                 "not applicable", "not specified", "not available", "unknown",
                 "n.a.", "?", "tbd", "no data", "not stated", "", "0000-00-00"}
 
+# Columns where a placeholder-looking value is the correct value, and
+# flagging it trains the reader to skim past this section.
+#
+#   Country.iso2 'NA' is NAMIBIA. It is the single most convincing false
+#   positive this script can produce, because it looks exactly like the
+#   defect it is meant to catch.
+#
+#   ClinicalTrial.phase and study_type carry 'NA' by design, so that a trial
+#   with no phase and a trial nobody gave a phase read the same way instead
+#   of one being null. Product.status does the same.
+DELIBERATE_NA = {
+    ("Country", "iso2"),
+    ("ClinicalTrial", "phase"),
+    ("ClinicalTrial", "study_type"),
+    ("Product", "status"),
+}
+
 ENUM_MAX_DISTINCT = 400
 BIG = 500_000          # above this, expensive scans are sampled
 
@@ -216,7 +233,8 @@ class Audit:
                       f"ORDER BY n DESC LIMIT {ENUM_MAX_DISTINCT}")
 
         junk = [(r["v"], r["n"]) for r in vals
-                if str(r["v"]).strip().lower() in PLACEHOLDERS]
+                if str(r["v"]).strip().lower() in PLACEHOLDERS
+                and (label, p) not in DELIBERATE_NA]
         if junk:
             tot = sum(n for _, n in junk)
             self.add("PLACEHOLDER", f"{label}.{p}",

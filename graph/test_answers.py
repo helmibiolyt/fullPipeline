@@ -352,6 +352,46 @@ TRAPS = [
  ("salt forms carry the safety data",
   "MATCH (s:Substance) WHERE s.norm_name STARTS WITH 'metformin' "
   "MATCH (s)-[e:HAS_ADVERSE_EVENT]->() RETURN count(e) AS n", lambda r: r[0]["n"] > 100),
+ # Product.status held six agency vocabularies in one column, two of which
+ # were not statuses: MHRA's row flag 'Y' on 38,914 rows, and the Orange
+ # Book's Rx/OTC, which says how a product is sold rather than whether it is.
+ ("product status is a closed vocabulary",
+  "MATCH (p:Product) WITH DISTINCT p.status AS st "
+  "WHERE NOT st IN ['MARKETED','APPROVED','TENTATIVE_APPROVAL','DISCONTINUED',"
+  "'WITHDRAWN','SUSPENDED','REFUSED','EXPIRED','UNDER_REVIEW','NA'] "
+  "RETURN count(*) AS n", lambda r: r[0]["n"] == 0),
+ ("every product has a status property",
+  "MATCH (p:Product) WHERE p.status IS NULL RETURN count(p) AS n",
+  lambda r: r[0]["n"] == 0),
+ ("marketed products are reachable by one equality",
+  "MATCH (p:Product {status:'MARKETED'}) RETURN count(p) AS n",
+  lambda r: r[0]["n"] > 40_000),
+ # MHRA said nothing about status, and must not be counted as if it had.
+ ("MHRA's row flag did not become a status",
+  "MATCH (p:Product {agency:'MHRA'}) WHERE p.status <> 'NA' "
+  "RETURN count(p) AS n", lambda r: r[0]["n"] == 0),
+ ("the agency's own wording survives in status_raw",
+  "MATCH (p:Product) WHERE p.status_raw IN "
+  "['Prescription','Over-the-counter','Authorised','Disc'] "
+  "RETURN count(p) AS n", lambda r: r[0]["n"] > 20_000),
+ # brand_name duplicated name on all 205,711 products and held no brand.
+ ("brand_name is gone, not silently emptied",
+  "MATCH (p:Product) WHERE p.brand_name IS NOT NULL RETURN count(p) AS n",
+  lambda r: r[0]["n"] == 0),
+ # ChEMBL's -1 sentinel satisfied max_phase < 1, so substances of unknown
+ # development stage counted as preclinical.
+ ("no ChEMBL -1 sentinel survives as a phase",
+  "MATCH (s:Substance) WHERE s.max_phase < 0 RETURN count(s) AS n",
+  lambda r: r[0]["n"] == 0),
+ # Placeholders that had become nodes other things hung off.
+ ("no Modality or Route node is a placeholder",
+  "MATCH (n) WHERE (n:Modality OR n:Route) "
+  "AND toLower(n.name) IN ['unknown','nil','n/a','none'] "
+  "RETURN count(n) AS n", lambda r: r[0]["n"] == 0),
+ ("the Purple Book definition is English, not a CSV header",
+  "MATCH (e:Exclusivity) WHERE e.definition CONTAINS '_' "
+  "RETURN count(e) AS n", lambda r: r[0]["n"] == 0),
+
  # study_type was the one enum with no normaliser: four spellings of
  # "interventional" held 679,141 trials and {study_type:'INTERVENTIONAL'}
  # reached 455,213 of them, across 1,188 distinct raw values.

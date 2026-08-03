@@ -15,7 +15,7 @@ marketed, approved item). Everything else is unchanged. Rationale in §4.
 | # | label | key | key properties | built from |
 |---|---|---|---|---|
 | 1 | **Substance** | `UNII:<unii>` or `NAME:<norm_name>` | `name`, `norm_name`, `substance_class`, `status`, `max_phase` | gsrs `gsrs_substances` (173k), **chembl `chembl_molecules.csv` (~2.4M) + `chembl_structures.csv` (InChIKey)**, atcddd, pubchem, rxnav |
-| 2 | **Product** | `<AGENCY>:<local_id>` e.g. `MHRA:PL12345` | `name`, `brand_name`, `agency`, `status`, `form`, `strength` | ema `ema_medicines`, mhra `raw_metadata`, canada `drug.csv`, orangebook `orange_book_unified`, pmda `pmda_metadata`, dailymed `dailymed_catalog` |
+| 2 | **Product** | `<AGENCY>:<local_id>` e.g. `MHRA:PL12345` | `name`, `agency`, `status`, `status_raw`, `form`, `strength` | ema `ema_medicines`, mhra `raw_metadata`, canada `drug.csv`, orangebook `orange_book_unified`, pmda `pmda_metadata`, dailymed `dailymed_catalog` |
 | 3 | **ClinicalTrial** | `<REGISTRY>:<id>` e.g. `NCT:NCT01234567` | `title`, `status`, `phase`, `study_type`, `enrollment`, `start_date` | ctgov, who, eu_ctr, ctri, chictr, anzctr, isrctn, jrct, ctis |
 | 4 | **Company** | `norm(name)` | `name`, `raw_names[]` | ctgov `lead_sponsor`, ema MAH, orangebook `Applicant`, canada `comp.COMPANY_NAME`, all registries |
 | 5 | **Disease** | `MESH:<descriptor_ui>` (also `EFO:`, `ICD:`) | `name`, `synonyms[]`, `tree_numbers[]` | meshb `mesh_descriptors`, icd `icd11_codes`, opentargets `disease_id`; **chembl `chembl_indications.csv` bridges EFO↔MeSH** |

@@ -304,3 +304,23 @@ def usable_name(s: str) -> bool:
     """Reject strings too short or too featureless to be a real name."""
     f = fold(s)
     return len(f) >= MIN_SYNONYM and not f.isdigit()
+
+
+# Strings a source writes to mean "we do not know", which become data if
+# stored: a Modality named 'Unknown', a Route named 'NIL', a dosage form of
+# 'N/A'. Each one is a node or a value that answers a question it should not
+# have been able to answer.
+#
+# Deliberately NOT here: "NA" as a bare string. It is Namibia's ISO code, and
+# it is the value ClinicalTrial.phase and study_type carry on purpose. A
+# caller that wants it treated as absent must say so at the call site.
+_PLACEHOLDER = {
+    "unknown", "n/a", "n.a.", "nil", "none", "null", "not applicable",
+    "not specified", "not available", "not stated", "unspecified", "-", "--",
+    "?", "tbd", "no data", "unassigned",
+}
+
+
+def is_placeholder(s: str) -> bool:
+    """True when a value means 'we do not know' rather than naming a thing."""
+    return " ".join((s or "").split()).lower() in _PLACEHOLDER

@@ -162,6 +162,15 @@ REAL VALUES — use these exactly, never invent one.
   RegulatoryAgency.code  FDA EMA MHRA PMDA HC SFDA NHRA DHA DOH MOH-OM MOPH-QA
   RegulatoryEvent.type   recall · shortage · orphan_designation · referral ·
                  safety_alert · dhpc · paediatric_investigation_plan
+  Product.status  MARKETED APPROVED TENTATIVE_APPROVAL DISCONTINUED
+                 WITHDRAWN SUSPENDED REFUSED EXPIRED UNDER_REVIEW NA
+                 On every product. MARKETED covers the Orange Book's Rx and
+                 OTC, which say how a product is sold, not whether it is.
+                 APPROVED means authorised but not necessarily on a shelf.
+                 All 38,914 MHRA products are NA - that agency's column is a
+                 row flag, not a status. The agency's own word is in
+                 status_raw (free text, use CONTAINS).
+
   ClinicalTrial.study_type  INTERVENTIONAL OBSERVATIONAL EXPANDED_ACCESS NA
                  Exactly these four, on every trial. The registries' own
                  wording - a purpose like "Screening", a modality like
