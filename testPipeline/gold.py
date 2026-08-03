@@ -80,6 +80,66 @@ GOLD: list[tuple[str, str, list[list[str]], list[str]]] = [
      [["approved", "approval"]],
      ["not approved", "no approval", "is not currently approved"]),
 
+    # ---- absence must never be reported as a negative fact -----------------
+    #
+    # These exist because the graph now says NA in places it used to say
+    # nothing, and NA is easy to read as "no". Both are traps built from real
+    # properties of this data:
+    #
+    #   every one of the 38,914 MHRA products carries status NA, because that
+    #   agency's column is a row flag and not a status. A UK approval question
+    #   therefore finds a product whose status says nothing.
+    #
+    #   five of the eleven agencies - NHRA, DHA, DOH, MOH-OM, MOPH-QA - hold
+    #   no products at all. Nothing was ever published for them.
+    #
+    # In both cases the honest answer distinguishes "this source does not say"
+    # from "the drug is not approved". Getting this wrong is the rimegepant
+    # failure again, and it is the failure a "did it answer" metric passes.
+    ("trap", "Is atorvastatin approved in the United Kingdom?",
+     [["approved", "authorised", "authorized", "available", "mhra"]],
+     ["not approved", "no approval", "is not approved", "not authorised",
+      "not available in the uk", "no evidence it is approved"]),
+
+    ("trap", "Is atorvastatin approved in Qatar?",
+     [["no data", "not available", "does not contain", "no records",
+       "not covered", "cannot determine", "no information"]],
+     ["it is not approved in qatar", "atorvastatin is not approved",
+      "there are no approvals in qatar because none exist"]),
+
+    # ---- prose the graph does not hold -------------------------------------
+    # A boxed warning is a paragraph on a label, not a row. If the corpus is
+    # doing anything the graph cannot, it should show here.
+    ("fact", "Does metformin carry a boxed warning, and what for?",
+     [["lactic acidosis"]],
+     ["no boxed warning", "does not carry a boxed warning",
+      "metformin has no boxed warning"]),
+
+    ("fact", "What is the boxed warning on warfarin?",
+     [["bleeding", "haemorrhage", "hemorrhage"]],
+     ["no boxed warning", "does not have a boxed warning"]),
+
+    # ---- target and mechanism, the harder ones -----------------------------
+    ("fact", "What is the molecular target of trastuzumab?",
+     [["her2", "erbb2", "erbb-2"]],
+     ["egfr", "pd-1", "cd20", "vegf"]),
+
+    ("fact", "What is the molecular target of rituximab?",
+     [["cd20", "ms4a1"]],
+     ["her2", "pd-1", "egfr", "cd19"]),
+
+    ("fact", "What does imatinib inhibit?",
+     [["bcr-abl", "bcr abl", "abl", "kit", "c-kit", "pdgfr"]],
+     ["her2", "pd-1", "cd20", "hmg-coa"]),
+
+    ("fact", "What is the mechanism of action of semaglutide?",
+     [["glp-1", "glp 1", "glucagon-like peptide"]],
+     ["insulin analogue", "sglt2", "dpp-4 inhibitor", "biguanide"]),
+
+    ("fact", "What is the molecular target of infliximab?",
+     [["tnf", "tumor necrosis factor", "tumour necrosis factor"]],
+     ["il-6", "cd20", "her2", "pd-1"]),
+
     # ---- target and mechanism ----------------------------------------------
     ("fact", "What is the molecular target of pembrolizumab?",
      [["pd-1", "pd1", "programmed cell death protein 1", "pdcd1"]],

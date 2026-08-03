@@ -130,6 +130,26 @@ def variants(term: str):
             yield part.strip()
 
 
+# MEASURED AND NOT BUILT: expanding a condition to a MeSH heading it is a
+# PREFIX of. It sounds like the obvious next tier - "Diabetes" reaching
+# "Diabetes Mellitus" - and 75% of the 16,294 distinct prefixes do resolve to
+# exactly one heading. The catch is that the frequent unmatched terms are all
+# in the other 25%:
+#
+#   "diabetes"  -> 10 headings, including Diabetes Insipidus AND Diabetes
+#                  Mellitus, which are unrelated diseases
+#   "stress"    -> 8 headings
+#   "asthma"    -> 4 headings
+#
+# So it would help the tail, where the terms are rare, and guess wrong on the
+# head, where they are common. A wrong disease link is worse than none: it
+# reads as a finding. Not built on purpose - if someone measures the 75% and
+# proposes this again, this is the number that matters instead.
+#
+# "NSCLC" and "solid tumor" match no heading and no entry term at all, so
+# they need a real abbreviation source, not a rewriting of what we have.
+
+
 def main():
     want = sys.argv[1:] or ["ctgov"]
     mesh, icd = load_names()
