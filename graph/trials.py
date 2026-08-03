@@ -570,7 +570,8 @@ def load_ctgov(b):
         _trial(b, k, "clinicaltrials.gov", key,
                sponsor=row.get("lead_sponsor", ""),
                conditions=row.get("conditions", ""),
-               interventions=row.get("interventions", ""),
+               interventions=_ctri_interventions(
+                   row.get("interventions", "")),
                iso=countries.from_locations(row.get("locations", "")),
                title=row.get("brief_title", ""),
                status=row.get("overall_status", ""),
@@ -788,6 +789,36 @@ def _ctri_conditions(raw: str) -> str:
     return "; ".join(out)
 
 
+def _ctri_interventions(raw: str) -> str:
+    """CTRI stores interventions as a JSON array, the same as its conditions.
+
+        [{"type": "Intervention",
+          "name": "Buccal misoprostol",
+          "details": "Administration of buccal misoprostol for induction..."}]
+
+    Passed through as text this is not prose, it is a serialised object, and
+    _terms cannot see a drug name inside it. The 1,929 CTRI trials that did
+    reach a drug got there by a substring of the blob happening to match -
+    which is worse than no link, because it looks like the loader working.
+
+    `name` only. `details` is a paragraph of protocol prose that mentions
+    doses, comparators and routes, and mining it would resolve the comparator
+    as readily as the drug under test.
+    """
+    if not raw or not raw.strip().startswith("["):
+        return raw or ""
+    try:
+        items = json.loads(raw)
+    except Exception:                                          # noqa: BLE001
+        return ""
+    out = []
+    for it in items if isinstance(items, list) else []:
+        nm = str((it or {}).get("name", "")).strip()
+        if nm:
+            out.append(nm)
+    return "; ".join(out)
+
+
 def load_ctri(b):
     t0 = b._step("ctri")
     key = L["ctri"]
@@ -803,7 +834,8 @@ def load_ctri(b):
         # all 61,738 of its trials had no drug link - the same oversight as
         # the condition columns three registries were publishing unread.
         _trial(b, trial_key(tid), "ctri", key,
-               interventions=row.get("interventions", ""),
+               interventions=_ctri_interventions(
+                   row.get("interventions", "")),
                conditions=_ctri_conditions(row.get("health_conditions", "")),
                sponsor=row.get("primary_sponsor_name", ""),
                iso=countries.from_list(row.get("countries_of_recruitment", "")),
