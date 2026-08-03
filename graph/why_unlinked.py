@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import collections
 import pathlib
+import re
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -74,6 +75,53 @@ def load_names():
     return mesh, icd
 
 
+# What the unmatched terms actually are. Measured on ct.gov's 146,576 misses:
+# they are not missing concepts, they are the same concepts written the way a
+# protocol writes them - a stage qualifier in front, a plural on the end, and
+# "cancer" where MeSH indexes "Neoplasms".
+_QUALIFIER = re.compile(
+    r"^(?:metastatic|advanced|recurrent|refractory|relapsed|unresectable|"
+    r"locally advanced|early|late|acute|chronic|severe|mild|moderate|"
+    r"newly diagnosed|previously treated|unspecified|adult|paediatric|"
+    r"pediatric|primary|secondary|stage [0-9iv]+)\s+", re.I)
+
+_CANCER = re.compile(r"(?<![a-z])(cancers?|tumou?rs?|carcinomas?|malignanc(?:y|ies))(?![a-z])",
+                     re.I)
+
+
+def variants(term: str):
+    """Rewritings worth trying before declaring a condition unmatched.
+
+    Each one is a guess about how the writer differed from MeSH, and they are
+    tried cheapest-first. Nothing here invents a concept: every variant still
+    has to hit the dictionary to count.
+    """
+    t = " ".join((term or "").split())
+    if not t:
+        return
+    yield t
+    stripped = _QUALIFIER.sub("", t)
+    while stripped != t:                       # "metastatic advanced X"
+        t, stripped = stripped, _QUALIFIER.sub("", stripped)
+    if stripped != term:
+        yield stripped
+    base = stripped
+    # Plural/singular. MeSH heads are plural for neoplasms, singular for most
+    # diseases, and protocols pick whichever.
+    if base.endswith("s"):
+        yield base[:-1]
+    else:
+        yield base + "s"
+    # "cancer" -> "neoplasms" is the single biggest vocabulary difference.
+    if _CANCER.search(base):
+        yield _CANCER.sub("neoplasms", base)
+        yield _CANCER.sub("neoplasm", base)
+    # "Overweight and Obesity" is two conditions, and both are MeSH headings.
+    for part in re.split(r"\s+and\s+|\s*,\s*", base):
+        if len(part.strip()) >= 4:
+            yield part.strip()
+
+
 def main():
     want = sys.argv[1:] or ["ctgov"]
     mesh, icd = load_names()
@@ -83,7 +131,7 @@ def main():
         if reg not in SOURCES:
             print(f"{reg}: no condition column"); continue
         path, col = SOURCES[reg]
-        n = no_text = by_mesh = by_icd = unmatched = 0
+        n = no_text = by_mesh = by_icd = by_variant = unmatched = 0
         misses = collections.Counter()
         for row in lake.stream_csv(path):
             n += 1
@@ -95,6 +143,8 @@ def main():
                 by_mesh += 1
             elif any(fold(t) in icd for t in terms):
                 by_icd += 1                 # ICD WOULD match, today it does not
+            elif any(fold(v) in mesh for t in terms for v in variants(t)):
+                by_variant += 1             # a rewriting would reach MeSH
             else:
                 unmatched += 1
                 for t in terms[:3]:
@@ -103,6 +153,7 @@ def main():
         print(f"   no condition text        {no_text:>9,} ({no_text/n:5.1%})")
         print(f"   matched by MeSH today    {by_mesh:>9,} ({by_mesh/n:5.1%})")
         print(f"   ICD would match, unused  {by_icd:>9,} ({by_icd/n:5.1%})  <-- the gap")
+        print(f"   a rewriting would match  {by_variant:>9,} ({by_variant/n:5.1%})  <-- the real gap")
         print(f"   neither                  {unmatched:>9,} ({unmatched/n:5.1%})")
         print("   most common unmatched terms:")
         for term, c in misses.most_common(12):
