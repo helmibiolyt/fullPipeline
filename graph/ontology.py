@@ -60,6 +60,9 @@ def load_ncit_targets(b):
         n += 1
         b.w.identifier(f"UNIPROT:{acc}", "NCIT", code, source=key,
                        match_method="structured")
+        # Which node each NCIt code names, so the other three crosswalk files
+        # can attach to the same thing instead of re-deriving it.
+        b.ncit_key[code] = f"UNIPROT:{acc}"
     b.stats["ncit_targets_not_in_graph"] = missing
     b._done("ncit_targets", t0, n)
 
@@ -113,3 +116,50 @@ def load_mesh_actions(b):
 
 
 ALL = [load_ncit_targets, load_mesh_actions]
+
+
+NCIT_CHEBI = ("Ontologies_Standards/evs.nci.nih.gov/nci_thesaurus_data/"
+              "mapping_ncit_chebi.csv")
+NCIT_HGNC = ("Ontologies_Standards/evs.nci.nih.gov/nci_thesaurus_data/"
+             "mapping_ncit_hgnc.csv")
+NCIT_CUI = ("Ontologies_Standards/evs.nci.nih.gov/nci_thesaurus_data/"
+            "nci_code_cui_map.csv")
+
+
+def load_ncit_crosswalks(b):
+    """Three more NCIt crosswalks, for the same reason as load_ncit_targets:
+    they are structural joins, not name matches.
+
+    Each attaches an identifier to a node that already exists and creates
+    nothing. That is the entire contribution and it is deliberately small -
+    NCIt's 212,234 concepts are NOT loaded, because they would arrive with a
+    hierarchy that argues with MeSH's and a name-matching problem on top.
+
+    An identifier is worth having even when nothing queries it yet: it is how
+    two records become one node on the next scrape, and adding it later cannot
+    retroactively merge what has already been written apart.
+    """
+    t0 = b._step("ncit_crosswalks")
+    n = 0
+    ncit_owner = b.ncit_key
+    for path, scheme, col in ((NCIT_CHEBI, "CHEBI", "chebi_id"),
+                              (NCIT_HGNC, "HGNC", "hgnc_id"),
+                              (NCIT_CUI, "UMLS_CUI", "cui")):
+        got = 0
+        for row in lake.stream_csv(path, limit=b.limit):
+            code = (row.get("ncit_code") or row.get("code") or "").strip()
+            val = (row.get(col) or "").strip()
+            if not code or not val:
+                continue
+            key = ncit_owner.get(code)
+            if not key:
+                continue          # NCIt code names nothing in this graph
+            b.w.identifier(key, scheme, val, source=path,
+                           match_method="crosswalk")
+            got += 1
+        b.stats[f"ncit_{scheme.lower()}_attached"] = got
+        n += got
+    b._done("ncit_crosswalks", t0, n)
+
+
+ALL = ALL + [load_ncit_crosswalks]

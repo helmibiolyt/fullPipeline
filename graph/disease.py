@@ -20,7 +20,7 @@ disappearing.
 from __future__ import annotations
 
 import lake
-from normalise import COND_TOO_GENERIC, fold
+from normalise import COND_TOO_GENERIC, fold, usable_name
 
 L = {
     "mesh":        "Ontologies_Standards/meshb.nlm.nih.gov/mesh_data/mesh_descriptors.csv",
@@ -564,4 +564,88 @@ def load_vocab_aliases(b):
     b._done("vocab_aliases", t0, n)
 
 
-ALL = ALL + [load_vocab_aliases]
+MESH_SCR = ("Ontologies_Standards/meshb.nlm.nih.gov/mesh_data/"
+            "mesh_supplemental_concepts.csv")
+ANTINEO = ("Ontologies_Standards/evs.nci.nih.gov/nci_thesaurus_data/"
+           "antineoplastic_agents.csv")
+
+
+def load_mesh_scr(b):
+    """MeSH Supplementary Concept Records - 324,045 of them, none read before.
+
+    An SCR is a name MeSH did not give a descriptor of its own, and every one
+    carries the descriptor it maps TO. That is the bridge already drawn: no
+    inference, no string similarity, just a crosswalk NLM maintains.
+
+    Only the 6,547 that map to a DISEASE descriptor are used here. The other
+    317,498 map to chemical headings - "bevonium" to "Benzilates" - and
+    attaching a trial to a chemical class because its drug name appeared in
+    the condition field would be a wrong link, not a thin one.
+
+    Worth 17,032 aliases, and they are the rare-disease tail: the names that
+    are too specific for a MeSH heading are exactly the ones a trial studying
+    a rare disease writes.
+    """
+    t0 = b._step("mesh_scr")
+    disease_uis = {k.split(":", 1)[1] for k in b.generic_disease_keys} | set()
+    # Rebuild the set of descriptors that became Disease nodes: mesh_by_name
+    # holds their keys, and a MESH: key is a Disease by construction here.
+    disease_uis = {v.split(":", 1)[1] for v in b.mesh_by_name.values()
+                   if v.startswith("MESH:")}
+    n = 0
+    for row in lake.stream_csv(MESH_SCR, limit=b.limit):
+        uis = [u.strip().lstrip("*")
+               for u in (row.get("heading_mapped_to_uis") or "").split(";")
+               if u.strip()]
+        hit = next((u for u in uis if u in disease_uis), None)
+        if not hit:
+            continue
+        dkey = f"MESH:{hit}"
+        names = [(row.get("name") or "").strip()]
+        names += [x.strip() for x in (row.get("synonyms") or "").split(";")]
+        for x in names:
+            f = fold(x)
+            if len(f) >= MIN_ALIAS and f not in b.mesh_by_name:
+                if b.alias_by_name.setdefault(f, dkey) == dkey:
+                    n += 1
+    b.stats["mesh_scr_aliases"] = n
+    b._done("mesh_scr", t0, n)
+
+
+def load_antineoplastic_aliases(b):
+    """NCIt's antineoplastic agents, as substance aliases only.
+
+    Same bridge rule as the disease vocabularies, applied to Substance: a
+    concept contributes its synonyms only where one of its names already
+    resolves to a substance this graph knows. Oncology drug names are where
+    trial intervention text is most varied - a code name, a generic, and three
+    spellings of the same salt - and the resolver never sees most of them.
+
+    Registered through add_alias, so these map to the node key directly and
+    can never outrank a UNII: the resolver's own tier order decides, and this
+    is its last tier.
+    """
+    t0 = b._step("antineoplastic")
+    n = 0
+    for row in lake.stream_csv(ANTINEO, limit=b.limit):
+        names = [(row.get("NCIt Preferred Name") or "").strip()]
+        names += [x.strip() for x in (row.get("Synonyms") or "").split("||")]
+        names = [x for x in names if x and usable_name(x)]
+        hit = None
+        for x in names:
+            m = b.r.resolve(x)
+            if m.key and m.resolved:
+                hit = m.key
+                break
+        if not hit:
+            continue
+        for x in names:
+            if b.r.resolve(x).resolved:
+                continue
+            b.r.add_alias(x, hit)
+            n += 1
+    b.stats["antineoplastic_aliases"] = n
+    b._done("antineoplastic", t0, n)
+
+
+ALL = ALL + [load_vocab_aliases, load_mesh_scr, load_antineoplastic_aliases]

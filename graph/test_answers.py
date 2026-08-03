@@ -422,6 +422,20 @@ TRAPS = [
   "MATCH (t:ClinicalTrial)-[e:STUDIES]->(d:Disease {name:'Diabetes Insipidus'}) "
   "WHERE e.match_method = 'vocab_alias' RETURN count(t) AS n",
   lambda r: r[0]["n"] == 0),
+ # MeSH Supplementary Concepts: 324,045 records, none read before. Only the
+ # 6,547 mapping to a DISEASE descriptor are used - the rest map to chemical
+ # headings, and linking a trial to "Benzilates" because a drug name appeared
+ # in its condition field is a wrong link, not a thin one.
+ ("supplementary concepts reach rare diseases",
+  "MATCH ()-[e:STUDIES {match_method:'vocab_alias'}]->(d:Disease) "
+  "RETURN count(DISTINCT d) AS n", lambda r: r[0]["n"] > 500),
+ # Crosswalks attach identifiers to nodes that already exist and create none.
+ ("NCIt crosswalks attached identifiers",
+  "MATCH (i:Identifier) WHERE i.scheme IN ['CHEBI','HGNC','UMLS_CUI'] "
+  "RETURN count(i) AS n", lambda r: r[0]["n"] > 100),
+ ("no crosswalk invented a node",
+  "MATCH (i:Identifier) WHERE i.scheme IN ['CHEBI','HGNC','UMLS_CUI'] "
+  "AND COUNT { (i)--() } = 0 RETURN count(i) AS n", lambda r: r[0]["n"] == 0),
  ("the ICD tier fires and stays the smallest",
   "MATCH ()-[e:STUDIES]->() WITH e.match_method AS m, count(*) AS n "
   "WHERE m IN ['name','icd_name'] RETURN m, n ORDER BY n DESC",

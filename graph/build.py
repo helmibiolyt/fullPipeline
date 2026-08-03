@@ -101,6 +101,10 @@ class Build:
         # edge can record that the match came from a curated crosswalk rather
         # than from the registry writing MeSH's own heading.
         self.alias_by_name: dict[str, str] = {}
+        # NCIt code -> the node key it names. Filled by load_ncit_targets and
+        # read by the other three crosswalk files, so each attaches to what is
+        # already there rather than deriving the join again.
+        self.ncit_key: dict[str, str] = {}
         # Disease nodes named for a category rather than a condition. A
         # rewritten or ICD match may never land here; an exact one may.
         self.generic_disease_keys: set[str] = set()
