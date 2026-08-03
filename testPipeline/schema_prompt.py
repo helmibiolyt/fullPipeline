@@ -287,6 +287,24 @@ THINGS THAT WILL MISLEAD YOU
   Never use `WHERE t.name = '...'`: stored names are capitalised, so equality
   on a lowercase phrase matches nothing.
 
+* Five of the eleven agencies hold NO products: NHRA (Bahrain), DHA (Dubai),
+  DOH (Abu Dhabi), MOH-OM (Oman), MOPH-QA (Qatar). The nodes exist so the
+  region query works, but nothing was ever published for them. A count of
+  approvals in Qatar returns 0 because the data is absent, NOT because
+  nothing is approved there - say which of the two you mean, never report 0
+  as a finding about the market.
+* Some properties hold a semicolon-separated LIST in one cell, so equality
+  matches only a row whose whole list is that one value. Use CONTAINS:
+  Disease.synonyms, Disease.tree_numbers, Substance.synonyms,
+  RegulatoryEvent.name.
+      MATCH (d:Disease) WHERE d.synonyms CONTAINS 'Atopic Eczema'
+* Target is not only proteins. 2,782 are organisms, 1,999 cell lines, 293
+  tissues, and 5,210 of the 16,624 have no relationship at all. "How many
+  targets" is a misleading count - for druggable proteins say
+  (t:Target {{target_type:'SINGLE PROTEIN'}}).
+* The *_raw properties - Product.status_raw, ClinicalTrial.study_type_raw -
+  keep the source's own wording, in every case and spelling it used. They are
+  free text: CONTAINS, never equality, and never GROUP BY them.
 * Trial keys look doubled — `NCT:NCT01045135` is correct. 19 of 22 registries
   embed their prefix in the id. Filter registry with
   (t:ClinicalTrial {{registry:'clinicaltrials.gov'}}).
