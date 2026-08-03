@@ -105,6 +105,8 @@ class Build:
         # read by the other three crosswalk files, so each attaches to what is
         # already there rather than deriving the join again.
         self.ncit_key: dict[str, str] = {}
+        # CDISC dosage-form key -> the submission value regulators write.
+        self.form_std: dict[str, str] = {}
         # Disease nodes named for a category rather than a condition. A
         # rewritten or ICD match may never land here; an exact one may.
         self.generic_disease_keys: set[str] = set()

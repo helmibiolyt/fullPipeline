@@ -461,13 +461,24 @@ TRAPS = [
   "AND toLower(d.name) IN ['disease','diseases','disorder','disorders',"
   "'syndrome','condition','illness','symptoms','infection','injuries'] "
   "RETURN count(e) AS n", lambda r: r[0]["n"] == 0),
- ("dosage form has one spelling per form",
-  "MATCH (p:Product) WHERE p.form <> '' "
-  "AND (p.form CONTAINS ',' OR p.form CONTAINS '(' OR p.form CONTAINS '-') "
-  "RETURN count(p) AS n", lambda r: r[0]["n"] == 0),
- ("the extended-release tablets are one value now",
-  "MATCH (p:Product {form:'TABLET EXTENDED RELEASE'}) RETURN count(p) AS n",
+ # Forms now carry CDISC's spelling where it has one - the vocabulary FDA and
+ # EMA submissions are written in - and the stripped form where it does not.
+ # 99 of our 378 are in CDISC and cover 82.1% of products; INJECTABLE alone is
+ # 16,794 and CDISC has no term for it, so the rest keep what they had.
+ ("the extended-release tablets are one value, spelled the standard way",
+  "MATCH (p:Product {form:'TABLET, EXTENDED RELEASE'}) RETURN count(p) AS n",
   lambda r: r[0]["n"] > 6_000),
+ ("a form CDISC does not define keeps its own spelling",
+  "MATCH (p:Product {form:'INJECTABLE'}) RETURN count(p) AS n",
+  lambda r: r[0]["n"] > 10_000),
+ # Standardising the NAME must not regroup: the punctuation-insensitive key
+ # means every form that merged under norm_form still merges.
+ ("no form differs from another only by punctuation",
+  "MATCH (p:Product) WHERE p.form <> '' "
+  "WITH DISTINCT p.form AS f "
+  "WITH replace(replace(replace(replace(f,',',''),'(',''),')',''),'-',' ') AS k, "
+  "collect(f) AS fs WHERE size(fs) > 1 RETURN count(*) AS n",
+  lambda r: r[0]["n"] == 0),
  ("the Purple Book definition is English, not a CSV header",
   "MATCH (e:Exclusivity) WHERE e.definition CONTAINS '_' "
   "RETURN count(e) AS n", lambda r: r[0]["n"] == 0),

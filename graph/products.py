@@ -165,6 +165,15 @@ def unwrap_lookup(raw: str) -> str:
     return ""            # a wrapper with no readable name is not a value
 
 
+def form_key(raw: str) -> str:
+    """Punctuation-insensitive comparison key for a dosage form.
+
+    The one place the graph's spelling and CDISC's meet: we hold 'TABLET
+    EXTENDED RELEASE' and CDISC writes 'TABLET, EXTENDED RELEASE'.
+    """
+    return " ".join(re.sub(r"[^A-Z0-9]+", " ", (raw or "").upper()).split())
+
+
 def norm_form(raw: str) -> str:
     """Dosage form to one casing.
 
@@ -274,7 +283,11 @@ def _product(b, key, agency, source, contains, **props):
     # One funnel for ten agencies, so a form written a new way by an eleventh
     # is normalised without touching that loader.
     if "form" in props:
-        props["form"] = norm_form(props["form"])
+        f = norm_form(props["form"])
+        # CDISC's spelling where it has one, ours where it does not. The key
+        # is punctuation-insensitive, so this renames without regrouping:
+        # anything that merged under norm_form still merges.
+        props["form"] = b.form_std.get(form_key(f), f) if f else f
     # Set unconditionally, like the trial enums: an absent status and a status
     # the agency declined to give are the same fact and get the same value.
     raw_status = (props.get("status") or "").strip()

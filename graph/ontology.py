@@ -17,6 +17,7 @@ are recorded in stats so the number is visible rather than assumed.
 from __future__ import annotations
 
 import lake
+import products
 from normalise import fold
 
 L = {
@@ -163,3 +164,45 @@ def load_ncit_crosswalks(b):
 
 
 ALL = ALL + [load_ncit_crosswalks]
+
+
+SDTM_TERMS = "Ontologies_Standards/cdisc.org/CDISC/data/SDTM Terminology.csv"
+
+
+def load_cdisc_forms(b):
+    """CDISC's Dosage Form codelist, as the spelling Product.form normalises to.
+
+    norm_form already merges the variants - it upper-cases and strips
+    punctuation, which is what took 'TABLET, EXTENDED RELEASE' and 'TABLET
+    (EXTENDED-RELEASE)' down to one row. What it could not do is decide what
+    that row should be CALLED, because there was no authority to normalise
+    towards; it produced 'TABLET EXTENDED RELEASE', which is a spelling no
+    regulator uses.
+
+    CDISC publishes the vocabulary that FDA and EMA submissions are written
+    in, 197 terms. Measured against the graph first: 99 of our 378 forms are
+    in it and they cover 82.1% of products. The other 279 keep the stripped
+    form - 'INJECTABLE' alone is 16,794 products and CDISC has no term for it,
+    so dropping or forcing those would lose more than it standardises.
+
+    The lookup is punctuation-insensitive on both sides, so this changes the
+    stored NAME and never the grouping: forms that merged before still merge.
+    """
+    t0 = b._step("cdisc_forms")
+    n = 0
+    for row in lake.stream_csv(SDTM_TERMS, limit=b.limit):
+        if (row.get("Codelist Name") or "").strip() != "Dosage Form":
+            continue
+        val = (row.get("CDISC Submission Value") or "").strip()
+        if not val or val == "FRM":          # the codelist's own header row
+            continue
+        keys = [val] + [s.strip()
+                        for s in (row.get("CDISC Synonym(s)") or "").split(";")]
+        for kx in keys:
+            if kx and b.form_std.setdefault(products.form_key(kx), val) == val:
+                n += 1
+    b.stats["cdisc_dosage_forms"] = len(b.form_std)
+    b._done("cdisc_forms", t0, n)
+
+
+ALL = ALL + [load_cdisc_forms]
