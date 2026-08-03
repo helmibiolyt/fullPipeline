@@ -370,6 +370,20 @@ TRAPS = [
   "MATCH (t:ClinicalTrial) WHERE t.study_type IN ['TREATMENT','PREVENTION'] "
   "RETURN count(t) AS n", lambda r: r[0]["n"] > 10_000),
 
+ # Every trial carries a phase now - NA where none applies - so an absent
+ # property and "not applicable" stop looking identical. Filter real phases
+ # with t.phase <> 'NA', never with IS NOT NULL.
+ ("every trial has a phase property",
+  "MATCH (t:ClinicalTrial) WHERE t.phase IS NULL RETURN count(t) AS n",
+  lambda r: r[0]["n"] == 0),
+ ("NA is the value for no phase, and it is common",
+  "MATCH (t:ClinicalTrial {phase:'NA'}) RETURN count(t) AS n",
+  lambda r: r[0]["n"] > 500_000),
+ ("observational trials all read NA",
+  "MATCH (t:ClinicalTrial {study_type:'OBSERVATIONAL'}) "
+  "WHERE t.phase <> 'NA' RETURN count(t) AS n",
+  lambda r: r[0]["n"] == 0),
+
  ("phase is normalised, equality works",
   "MATCH (t:ClinicalTrial {phase:'PHASE3'}) RETURN count(t) AS n",
   lambda r: r[0]["n"] > 50_000),

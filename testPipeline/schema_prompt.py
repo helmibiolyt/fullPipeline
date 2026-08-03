@@ -164,9 +164,13 @@ REAL VALUES — use these exactly, never invent one.
                  safety_alert · dhpc · paediatric_investigation_plan
   ClinicalTrial.registry  lowercase: clinicaltrials.gov · chictr · ctri · irct
                  · eu_ctr · anzctr · isrctn · ctis · drks · nl-omon
-  ClinicalTrial.phase   PHASE1 PHASE2 PHASE3 PHASE4 EARLY_PHASE1
-                 PHASE1_PHASE2 PHASE2_PHASE3 PHASE3_PHASE4, or "" where no
-                 phase applies. These are normalised - equality works.
+  ClinicalTrial.phase   PHASE1 PHASE2 PHASE3 PHASE4 EARLY_PHASE1 PHASE0
+                 PHASE1_PHASE2 PHASE2_PHASE3 PHASE3_PHASE4, or NA. Every
+                 trial has this property - NA means no phase applies (most
+                 observational studies) or the registry never stated one.
+                 Normalised, so equality works. For trials with a real phase
+                 filter `t.phase <> 'NA'`, NOT `t.phase IS NOT NULL` - that
+                 is true for every trial in the graph and filters nothing.
   ClinicalTrial.status  COMPLETED RECRUITING NOT_YET_RECRUITING
                  ACTIVE_NOT_RECRUITING ENROLLING_BY_INVITATION TERMINATED
                  WITHDRAWN SUSPENDED

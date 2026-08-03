@@ -52,15 +52,31 @@ _PHASE_PAT = [
     (r"(phase[\s_-]*3|phase[\s_-]*iii|therapeutic confirmatory)", "PHASE3"),
     (r"(phase[\s_-]*2|phase[\s_-]*ii|therapeutic exploratory)", "PHASE2"),
     (r"(phase[\s_-]*1|phase[\s_-]*i\b|human pharmacology)", "PHASE1"),
-    (r"^\s*0\s*$", "PHASE0"),
+    # "phase 0" spelled out is a real exploratory micro-dosing study. A BARE
+    # "0" is not: registries write it for "no phase applies", which is why it
+    # lives in _PHASE_NONE below. An earlier version had `^0$` -> PHASE0 here
+    # and _PHASE_NONE tested first, so the rule could never fire and the graph
+    # holds zero PHASE0 trials.
+    (r"phase[\s_-]*0(?![0-9])", "PHASE0"),
     (r"^\s*4\s*$", "PHASE4"),
     (r"^\s*3\s*$", "PHASE3"),
     (r"^\s*2\s*$", "PHASE2"),
     (r"^\s*1\s*$", "PHASE1"),
 ]
 
-# Values meaning "no phase applies". Stored as "" rather than kept, so a
-# filter on phase does not return 409,721 rows that assert nothing.
+#: What a trial with no phase carries. Every ClinicalTrial has this property.
+#:
+#: Stored rather than left off, because an absent property and a phase of "not
+#: applicable" look identical in the browser and in `IS NULL`, and they are not
+#: the same statement. An observational study HAS no phase; a registry that
+#: simply never filled the field is a gap. Both read as NA today - separating
+#: them would need the loaders to distinguish a blank from an "N/A", which no
+#: registry makes easy.
+#:
+#: Filter with `t.phase <> 'NA'` for trials that carry a real phase.
+PHASE_NA = "NA"
+
+# Values meaning "no phase applies". Mapped to NA, not dropped.
 _PHASE_NONE = {
     "na", "n/a", "n.a.", "not applicable", "not specified", "none",
     "unknown", "not available", "others", "other", "0", "",
@@ -88,10 +104,10 @@ _STATUS_MAP = {
 
 
 def norm_phase(raw: str) -> str:
-    """112 registry spellings -> one of eight canonical values, or ""."""
+    """112 registry spellings -> a canonical phase, or "NA" if none applies."""
     s = (raw or "").strip()
     if s.lower() in _PHASE_NONE:
-        return ""
+        return PHASE_NA
     low = s.lower()
     # The Indian registry writes every phase on one line with Yes/No against
     # each; only the Yes matters.
@@ -105,7 +121,9 @@ def norm_phase(raw: str) -> str:
     for pat, tag in _PHASE_PAT:
         if re.search(pat, low):
             return tag
-    return ""
+    # Prose that mentions no phase at all - "Treatment study", a purpose, a
+    # sentence. Unreadable is still "no phase we can state".
+    return PHASE_NA
 
 
 def norm_status(raw: str) -> str:
@@ -340,8 +358,10 @@ def _trial(b, key, registry, source, sponsor="", conditions="", interventions=""
     # Normalise here rather than in each loader: this is the one funnel every
     # registry passes through, so a tenth registry gets the same treatment
     # without anyone remembering to add it.
-    if "phase" in props:
-        props["phase"] = norm_phase(props["phase"])
+    # Always set, even when the loader passed nothing: a trial with no phase
+    # property and a trial whose phase is "not applicable" are different facts
+    # and used to be indistinguishable.
+    props["phase"] = norm_phase(props.get("phase", ""))
     if "status" in props:
         props["status"] = norm_status(props["status"])
     if "study_type" in props:
