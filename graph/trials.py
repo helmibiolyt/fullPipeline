@@ -148,11 +148,34 @@ def norm_status(raw: str) -> str:
 # `{study_type:'INTERVENTIONAL'}` reached 455,213 of them - the same silent
 # two-thirds miss that phase, status and registry each had before their maps.
 #
-# Only the top-level distinction is canonicalised. Registries also use this
-# field for the study's PURPOSE - Treatment, Prevention, Screening, Diagnostic,
-# Quality of life - and those are real values that mean something; folding them
-# into INTERVENTIONAL would destroy information to tidy a column. They keep
-# their own upper-cased form.
+# The harder half of the problem is that three registries put three DIFFERENT
+# concepts in a column they all call "study type", across 1,188 distinct
+# values:
+#
+#   ct.gov, WHO   the study type proper       Interventional / Observational
+#   ISRCTN        the study's PURPOSE         Treatment / Screening / Efficacy
+#   ChiCTR        a design family             Prognosis study / Basic Science
+#   CTRI          the intervention MODALITY   Drug / Ayurveda / Medical Device
+#                 concatenated without a separator: "DrugSurgical/Anesthesia"
+#
+# So `study_type` is kept to what the name promises - is an intervention
+# assigned or only observed - with four values and nothing else. Registry text
+# is mapped only where the term is DEFINITIONALLY one or the other: a cohort
+# study assigns nothing, and naming the modality you administer presupposes
+# you administer something. Purpose words do not decide it - a screening study
+# can be either - so they stay NA rather than being guessed into a bucket.
+#
+# Phase looked like it could arbitrate the ambiguous 6% and cannot: CTRI writes
+# no phase for anything, so its 0% means "this registry omits the field", not
+# "observational". Measured before relying on it.
+#
+# Nothing is discarded. `study_type_raw` keeps the registry's own string, which
+# is where CTRI's traditional-medicine modalities (Ayurveda, Siddha, Unani,
+# Homeopathy) and ISRCTN's purposes survive.
+
+#: What a trial whose type cannot be decided carries.
+STUDY_TYPE_NA = "NA"
+
 _STUDY_TYPE_MAP = {
     "interventional": "INTERVENTIONAL",
     "intervention": "INTERVENTIONAL",
@@ -164,22 +187,68 @@ _STUDY_TYPE_MAP = {
     "observational invasive": "OBSERVATIONAL",
     "observational non invasive": "OBSERVATIONAL",
     "expanded access": "EXPANDED_ACCESS",
-    "expanded_access": "EXPANDED_ACCESS",
-    "not specified": "",
-    "n a": "",
-    "other": "OTHER",
 }
+
+# Designs that observe and assign nothing. ChiCTR and CTRI wording, including
+# ChiCTR's two misspellings, which are in the register itself and not ours to
+# correct silently.
+_OBSERVATIONAL_DESIGN = (
+    "cross sectional", "cohort study", "case control", "follow up study",
+    "epidemilogical", "epidemiological", "cause relative factors",
+    "prognosis study", "natural history", "post marketing surveillance",
+    "registry study", "case series", "case report",
+)
+
+# Abbreviations matched as a whole token, never as a substring: "pms" inside a
+# longer word would be a silent miscategorisation, and this list is checked
+# against text no one has seen yet on the next scrape.
+_OBSERVATIONAL_TOKEN = {"pms", "pmos", "rwe"}
+
+# CTRI's modality vocabulary. Naming what you administer presupposes that
+# something is administered, so each of these implies an interventional study.
+# Matched as a PREFIX because CTRI concatenates them with no separator -
+# "DrugAyurvedaPreventive" is one cell.
+_INTERVENTIONAL_MODALITY = (
+    "drug", "ayurveda", "homeopathy", "unani", "siddha", "yoga",
+    "naturopathy", "dentistry", "physiotherapy", "surgical anesthesia",
+    "medical device", "nutraceutical", "biological", "behavioral",
+    "behavioural", "vaccine", "radiation therapy", "ba be", "bioequivalence",
+    "preventive", "treatment study",
+)
+
+
+def _st_key(raw: str) -> str:
+    """Lowercase, punctuation to spaces, runs collapsed. "Surgical/Anesthesia"
+    and "BA/BE" become "surgical anesthesia" and "ba be"."""
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", (raw or "").lower()).split())
 
 
 def norm_study_type(raw: str) -> str:
-    """Registry spellings of study type -> a canonical value, or ""."""
-    s = (raw or "").strip()
-    if not s:
-        return ""
-    key = " ".join(re.sub(r"[^a-z0-9 ]+", " ", s.lower()).split())
+    """A registry's study-type text -> INTERVENTIONAL, OBSERVATIONAL,
+    EXPANDED_ACCESS or NA. Never invents a fifth value: an unrecognised
+    string is NA and survives verbatim in study_type_raw."""
+    key = _st_key(raw)
+    if not key:
+        return STUDY_TYPE_NA
     if key in _STUDY_TYPE_MAP:
         return _STUDY_TYPE_MAP[key]
-    return s.upper().replace(" ", "_").replace("-", "_")
+    # Substring, not equality: WHO and CTIS write "Interventional clinical
+    # trial of medicinal product" and a dozen longer variants of it.
+    if "expanded access" in key:
+        return "EXPANDED_ACCESS"
+    if "observational" in key:
+        return "OBSERVATIONAL"
+    if any(d in key for d in _OBSERVATIONAL_DESIGN):
+        return "OBSERVATIONAL"
+    if _OBSERVATIONAL_TOKEN & set(key.split()):
+        return "OBSERVATIONAL"
+    if "intervention" in key:
+        return "INTERVENTIONAL"
+    if key.startswith(_INTERVENTIONAL_MODALITY):
+        return "INTERVENTIONAL"
+    # Purpose words (Treatment, Screening, Quality of life, Efficacy, Other,
+    # Not Specified) and anything unseen. A purpose does not decide the type.
+    return STUDY_TYPE_NA
 
 
 # One registry, two names. Case folding alone leaves these split, because WHO
@@ -364,8 +433,11 @@ def _trial(b, key, registry, source, sponsor="", conditions="", interventions=""
     props["phase"] = norm_phase(props.get("phase", ""))
     if "status" in props:
         props["status"] = norm_status(props["status"])
-    if "study_type" in props:
-        props["study_type"] = norm_study_type(props["study_type"])
+    # Set unconditionally, like phase: euctr and ctis pass no study_type, and
+    # an absent property is not the same claim as "we could not decide".
+    raw_st = (props.get("study_type") or "").strip()
+    props["study_type"] = norm_study_type(raw_st)
+    props["study_type_raw"] = raw_st
     b.w.node("ClinicalTrial", key, source=source,
              registry=norm_registry(registry), **props)
 

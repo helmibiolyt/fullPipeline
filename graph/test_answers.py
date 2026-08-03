@@ -354,21 +354,31 @@ TRAPS = [
   "MATCH (s)-[e:HAS_ADVERSE_EVENT]->() RETURN count(e) AS n", lambda r: r[0]["n"] > 100),
  # study_type was the one enum with no normaliser: four spellings of
  # "interventional" held 679,141 trials and {study_type:'INTERVENTIONAL'}
- # reached 455,213 of them.
+ # reached 455,213 of them, across 1,188 distinct raw values.
  ("study_type is normalised, equality works",
   "MATCH (t:ClinicalTrial {study_type:'INTERVENTIONAL'}) RETURN count(t) AS n",
   lambda r: r[0]["n"] > 600_000),
- ("study_type has no case or wording variants left",
-  "MATCH (t:ClinicalTrial) WHERE t.study_type IS NOT NULL "
-  "WITH DISTINCT t.study_type AS st "
-  "WHERE st <> toUpper(st) OR st CONTAINS ' ' RETURN count(*) AS n",
+ # The column is now closed: exactly four values, no fifth invented by an
+ # upper-casing fallback. This is the check that catches a new registry
+ # spelling silently becoming its own enum member on the next scrape.
+ ("study_type holds only its four values",
+  "MATCH (t:ClinicalTrial) WITH DISTINCT t.study_type AS st "
+  "WHERE NOT st IN ['INTERVENTIONAL','OBSERVATIONAL','EXPANDED_ACCESS','NA'] "
+  "RETURN count(*) AS n", lambda r: r[0]["n"] == 0),
+ ("every trial has a study_type property",
+  "MATCH (t:ClinicalTrial) WHERE t.study_type IS NULL RETURN count(t) AS n",
   lambda r: r[0]["n"] == 0),
- # Purpose values are NOT folded into INTERVENTIONAL - Treatment, Prevention
- # and Screening say something the top-level word does not, and tidying the
- # column by discarding them would lose it.
- ("purpose values survive normalisation",
-  "MATCH (t:ClinicalTrial) WHERE t.study_type IN ['TREATMENT','PREVENTION'] "
+ # Purpose and modality are a different concept from study type and are not
+ # folded into it - they survive verbatim, which is where CTRI's Ayurveda,
+ # Siddha and Unani trials and ISRCTN's purposes still live.
+ ("the registry's own wording survives in study_type_raw",
+  "MATCH (t:ClinicalTrial) WHERE t.study_type_raw IN "
+  "['Treatment','Ayurveda','Screening','Quality of life','BA/BE'] "
   "RETURN count(t) AS n", lambda r: r[0]["n"] > 10_000),
+ ("CTRI's concatenated modalities are read as interventional",
+  "MATCH (t:ClinicalTrial) WHERE t.study_type_raw STARTS WITH 'Drug' "
+  "AND t.study_type <> 'INTERVENTIONAL' RETURN count(t) AS n",
+  lambda r: r[0]["n"] == 0),
 
  # Every trial carries a phase now - NA where none applies - so an absent
  # property and "not applicable" stop looking identical. Filter real phases

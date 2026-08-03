@@ -155,6 +155,51 @@ check("first writer wins", r2.resolve("Ambiguous").key, "UNII:UNII-A")
 check("collision recorded", len(r2.collisions), 1)
 
 print()
+print("Trial phase - never absent, and NA is a value not a blank")
+from trials import norm_phase, norm_study_type
+check("phase 3", norm_phase("Phase 3"), "PHASE3")
+check("roman combined", norm_phase("Phase I/II"), "PHASE1_PHASE2")
+check("bare 4", norm_phase("4"), "PHASE4")
+check("early", norm_phase("early phase 1"), "EARLY_PHASE1")
+# The rule these two pin down: registries write a bare "0" for "no phase
+# applies", and spell it out when they mean a real micro-dosing study. An
+# earlier version matched "^0$" to PHASE0 behind a no-phase set that was
+# tested first, so the rule never fired and the graph held zero PHASE0.
+check("spelled-out phase 0 is real", norm_phase("Phase 0"), "PHASE0")
+check("bare 0 means no phase", norm_phase("0"), "NA")
+check("phase 03 is not phase 0", norm_phase("Phase 03"), "NA")
+check("n/a", norm_phase("N/A"), "NA")
+check("empty is NA, not blank", norm_phase(""), "NA")
+check("None is NA", norm_phase(None), "NA")
+check("unreadable prose is NA", norm_phase("Treatment study"), "NA")
+
+print()
+print("Study type - four values, and no fifth invented from new text")
+check("interventional", norm_study_type("Interventional"), "INTERVENTIONAL")
+check("long WHO wording",
+      norm_study_type("Interventional clinical trial of medicinal product"),
+      "INTERVENTIONAL")
+check("observational", norm_study_type("Observational study"), "OBSERVATIONAL")
+check("expanded access", norm_study_type("Expanded Access"), "EXPANDED_ACCESS")
+# CTRI concatenates its modality vocabulary with no separator. Naming what is
+# administered presupposes something is administered.
+check("CTRI concatenation", norm_study_type("DrugAyurvedaPreventive"), "INTERVENTIONAL")
+check("CTRI modality", norm_study_type("Surgical/Anesthesia"), "INTERVENTIONAL")
+check("CTRI bioequivalence", norm_study_type("BA/BE"), "INTERVENTIONAL")
+# Designs that assign nothing, including ChiCTR's own misspelling.
+check("cohort", norm_study_type("Cohort Study"), "OBSERVATIONAL")
+check("ChiCTR misspelling", norm_study_type("Epidemilogical research"), "OBSERVATIONAL")
+check("post-marketing", norm_study_type("PMS"), "OBSERVATIONAL")
+# A purpose does not decide the type: a screening study can be either, so it
+# stays NA rather than being guessed into a bucket.
+check("purpose stays undecided", norm_study_type("Screening"), "NA")
+check("purpose stays undecided 2", norm_study_type("Quality of life"), "NA")
+check("empty is NA", norm_study_type(""), "NA")
+# pms is matched as a token. As a substring it would silently swallow words
+# no one has seen yet.
+check("no substring false positive", norm_study_type("symptoms study"), "NA")
+
+print()
 if FAILS:
     print(f"{len(FAILS)} FAILURES\n")
     for f in FAILS:

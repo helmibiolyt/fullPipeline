@@ -162,6 +162,11 @@ REAL VALUES — use these exactly, never invent one.
   RegulatoryAgency.code  FDA EMA MHRA PMDA HC SFDA NHRA DHA DOH MOH-OM MOPH-QA
   RegulatoryEvent.type   recall · shortage · orphan_designation · referral ·
                  safety_alert · dhpc · paediatric_investigation_plan
+  ClinicalTrial.study_type  INTERVENTIONAL OBSERVATIONAL EXPANDED_ACCESS NA
+                 Exactly these four, on every trial. The registries' own
+                 wording - a purpose like "Screening", a modality like
+                 "Ayurveda" - is in study_type_raw, which is free text and
+                 needs CONTAINS, not equality.
   ClinicalTrial.registry  lowercase: clinicaltrials.gov · chictr · ctri · irct
                  · eu_ctr · anzctr · isrctn · ctis · drks · nl-omon
   ClinicalTrial.phase   PHASE1 PHASE2 PHASE3 PHASE4 EARLY_PHASE1 PHASE0
