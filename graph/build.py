@@ -94,6 +94,9 @@ class Build:
         # loaders that own the vocabulary, read by every loader after them -
         # which is why load order in run() is not cosmetic.
         self.mesh_by_name: dict[str, str] = {}      # folded name -> Disease key
+        # ICD titles, kept apart from mesh_by_name so a MeSH hit always wins
+        # and a match against the weaker dictionary is recorded as such.
+        self.icd_by_name: dict[str, str] = {}
         self.efo_mesh: dict[str, str] = {}          # EFO/MONDO id -> MeSH key
         self.symbol_target: dict[str, str] = {}     # gene symbol -> Target key
         self.salt_parent: dict[str, str] = {}       # salt key -> parent key

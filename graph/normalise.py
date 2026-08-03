@@ -324,3 +324,79 @@ _PLACEHOLDER = {
 def is_placeholder(s: str) -> bool:
     """True when a value means 'we do not know' rather than naming a thing."""
     return " ".join((s or "").split()).lower() in _PLACEHOLDER
+
+
+# ---------------------------------------------------------------- conditions
+
+# Trials write a condition the way a protocol writes it; MeSH indexes it the
+# way a librarian does. Measured on ct.gov's 596,490 rows: 73.8% match
+# outright and 3.9% more match after one of these rewritings. Nothing here
+# invents a link - every variant still has to hit the real dictionary.
+#
+# Stage and course qualifiers. "Metastatic Breast Cancer" is a breast
+# neoplasm; the qualifier narrows it but does not change which disease it is.
+_COND_QUALIFIER = re.compile(
+    r"^(?:metastatic|advanced|locally advanced|recurrent|refractory|relapsed|"
+    r"unresectable|newly diagnosed|previously treated|untreated|early|late|"
+    r"acute|chronic|severe|mild|moderate|unspecified|adult|adults|"
+    r"paediatric|pediatric|childhood|primary|secondary|"
+    r"stage [0-9ivx]+)[ ]+", re.I)
+
+# The single biggest vocabulary difference between protocols and MeSH.
+_COND_CANCER = re.compile(
+    r"(?<![a-z])(cancers?|tumou?rs?|malignanc(?:y|ies))(?![a-z])", re.I)
+
+_COND_SPLIT = re.compile(r"[ ]+and[ ]+|[ ]*[/][ ]*", re.I)
+
+
+def condition_variants(term: str):
+    """Rewritings of a trial's condition worth trying against the dictionary.
+
+    Yields the original first, then progressively looser forms, so a caller
+    taking the FIRST hit gets the most specific match available. Order is the
+    whole design: taking any hit rather than the first would link a renal-cell
+    trial to plain "Carcinoma".
+    """
+    t = " ".join((term or "").split())
+    if not t:
+        return
+    seen = {t.lower()}
+    yield t
+
+    # Strip qualifiers repeatedly: "metastatic advanced solid tumor".
+    base = t
+    while True:
+        nxt = _COND_QUALIFIER.sub("", base)
+        if nxt == base:
+            break
+        base = nxt
+    for cand in (base,):
+        if cand and cand.lower() not in seen:
+            seen.add(cand.lower())
+            yield cand
+
+    def _push(c):
+        c = " ".join((c or "").split())
+        if len(c) >= 4 and c.lower() not in seen:
+            seen.add(c.lower())
+            return c
+        return None
+
+    # Plural and singular. MeSH heads neoplasms plural, most diseases singular.
+    for cand in ((base[:-1],) if base.endswith("s") else (base + "s",)):
+        c = _push(cand)
+        if c:
+            yield c
+
+    if _COND_CANCER.search(base):
+        for repl in ("Neoplasms", "Neoplasm"):
+            c = _push(_COND_CANCER.sub(repl, base))
+            if c:
+                yield c
+
+    # "Overweight and Obesity" is two headings in one cell. Last, because a
+    # part is always a weaker claim than the whole.
+    for part in _COND_SPLIT.split(base):
+        c = _push(part)
+        if c:
+            yield c

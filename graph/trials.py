@@ -27,7 +27,8 @@ import re
 
 import countries
 import lake
-from normalise import fold, is_placeholder, norm_company
+from normalise import (condition_variants, fold, is_placeholder,
+                       norm_company)
 
 # --------------------------------------------------------------------------
 # Nine registries describe the same three facts in their own words. Left raw,
@@ -462,9 +463,28 @@ def _trial(b, key, registry, source, sponsor="", conditions="", interventions=""
         b.w.edge("SPONSORED_BY", key, ckey, match_method="structured", source=source)
 
     for c in _terms(conditions):
-        dkey = b.mesh_by_name.get(fold(c))
-        if dkey:                                  # exact dictionary hit only
-            b.w.edge("STUDIES", key, dkey, match_method="name", source=source)
+        # Tried in order, first hit wins, and the tier is recorded. Order is
+        # the design: taking ANY hit rather than the first would link a
+        # renal-cell trial to plain "Carcinoma" via the split variant.
+        #
+        #   name          the condition as written is a MeSH heading or entry
+        #                 term - 73.8% of ct.gov, and the only tier that was
+        #                 ever consulted
+        #   name_variant  a rewriting reached MeSH: a stage qualifier removed,
+        #                 a plural, "cancer" for "neoplasms" - 3.9% more
+        #   icd_name      no MeSH form matched but an ICD title did - 1.1%,
+        #                 and the weakest, so it is last and labelled
+        dkey = mth = None
+        for i, v in enumerate(condition_variants(c)):
+            dkey = b.mesh_by_name.get(fold(v))
+            if dkey:
+                mth = "name" if i == 0 else "name_variant"
+                break
+        if not dkey:
+            dkey = b.icd_by_name.get(fold(c))
+            mth = "icd_name" if dkey else None
+        if dkey:
+            b.w.edge("STUDIES", key, dkey, match_method=mth, source=source)
 
     for i in _terms(interventions):
         m = b.r.resolve(i)

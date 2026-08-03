@@ -89,13 +89,19 @@ def load_mesh(b):
         # Non-Small-Cell Lung" and the query is "NSCLC". Capped at 30 because a
         # handful of descriptors carry hundreds and the tail is chemical
         # registry strings nobody types.
-        syns = [s.strip() for s in (row.get("synonyms") or "").split(";")
-                if len(s.strip()) >= 2][:30]
+        all_syns = [s.strip() for s in (row.get("synonyms") or "").split(";")
+                    if len(s.strip()) >= 2]
+        syns = all_syns[:30]
         b.w.node("Disease", dkey, source=key, name=name, vocabulary="MeSH",
                  synonyms=";".join(syns), tree_numbers=";".join(trees))
         b.w.identifier(dkey, "MESH", ui, source=key)
         b.mesh_by_name.setdefault(fold(name), dkey)
-        for syn in syns:
+        # The stored property is capped at 30 for readability; the MATCHER is
+        # not. One number was deciding both, and 'renal cell carcinoma' is
+        # entry term 40 of 'Carcinoma, Renal Cell' - so 313 ct.gov trials
+        # naming it found nothing while the term sat in the same row. The
+        # longest list is 127; uncapping the matcher links 4,303 more trials.
+        for syn in all_syns:
             f = fold(syn)
             if len(f) >= 4:
                 b.mesh_by_name.setdefault(f, dkey)
@@ -109,6 +115,30 @@ def load_mesh(b):
         if parent and parent != child:
             b.w.edge("SUBTYPE_OF", child, parent, source=key)
     b._done("mesh", t0, n)
+
+
+# ICD writes housekeeping titles that are not conditions anyone runs a trial
+# on. Indexing them would attach trials to "Other specified disorders of the
+# ear", which is worse than leaving the trial unlinked.
+_ICD_NOT_A_CONDITION = (
+    "other specified", "unspecified", "not elsewhere classified",
+    "without mention", "other disorders of", "other diseases of",
+    "sequelae of", "personal history", "family history", "encounter for",
+)
+
+
+def _index_icd(b, title: str, dkey: str) -> None:
+    """Make an ICD title reachable by trial condition matching.
+
+    A SECOND dictionary, not mesh_by_name, so a MeSH hit always wins and the
+    weaker source stays visible on the edge. Worth only 1.1% of ct.gov on its
+    own - measured before it was written - which is also why it is guarded
+    hard: a generic ICD title matches far more prose than it should.
+    """
+    low = " ".join(title.lower().split())
+    if len(low) < 6 or any(w in low for w in _ICD_NOT_A_CONDITION):
+        return
+    b.icd_by_name.setdefault(fold(title), dkey)
 
 
 def load_icd11(b):
@@ -137,6 +167,7 @@ def load_icd11(b):
         else:
             b.w.node("Disease", dkey, source=key, name=title,
                      vocabulary="ICD-11")
+            _index_icd(b, title, dkey)
         b.w.identifier(dkey, "ICD11", code, source=key,
                        match_method="name" if hit else "structured")
     b.stats["icd11_name_matched"] = matched
@@ -215,6 +246,7 @@ def load_icd10(b):
         if hit:
             matched += 1
         else:
+            _index_icd(b, title, dkey)
             b.w.node("Disease", dkey, source=L["icd10_codes"], name=title,
                      vocabulary="ICD-10")
         b.w.identifier(dkey, "ICD10", code, source=L["icd10_codes"],

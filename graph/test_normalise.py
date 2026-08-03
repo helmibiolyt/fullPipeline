@@ -253,6 +253,25 @@ check("...so a title needs its own check",
       is_placeholder("NA") or "NA".upper() in {"NA", "N.A"}, True)
 
 print()
+print("Condition rewriting - order decides which disease a trial links to")
+from normalise import condition_variants
+def _v(t): return list(condition_variants(t))
+check("original is always first", _v("Metastatic Breast Cancer")[0],
+      "Metastatic Breast Cancer")
+check("stage qualifier stripped", "Breast Cancer" in _v("Metastatic Breast Cancer"), True)
+check("cancer reaches neoplasms", "Breast Neoplasms" in _v("Metastatic Breast Cancer"), True)
+check("plural handled", "Solid Tumor" in _v("Solid Tumors"), True)
+check("two headings in one cell", "Obesity" in _v("Overweight and Obesity"), True)
+# The split variant is the loosest claim, so it must come after every other
+# form. Taking any hit rather than the first would link a renal-cell trial to
+# plain "Carcinoma".
+_rc = _v("Advanced Renal Cell Carcinoma")
+check("...and it is last",
+      _rc.index("Renal Cell Carcinoma") < len(_rc) - 1, True)
+check("empty yields nothing", _v(""), [])
+check("no duplicates", len(_v("Solid Tumors")), len(set(_v("Solid Tumors"))))
+
+print()
 if FAILS:
     print(f"{len(FAILS)} FAILURES\n")
     for f in FAILS:

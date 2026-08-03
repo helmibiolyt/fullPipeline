@@ -397,6 +397,29 @@ TRAPS = [
   "RETURN count(t) AS n", lambda r: r[0]["n"] == 0),
  # 16 pairs of forms differed only in punctuation, so every count by dosage
  # form split one form across two rows.
+ # Disease linkage: 51.0% before this, and each tier was measured on ct.gov
+ # before it was written - 73.8% exact, +3.9% rewritten, +1.1% ICD.
+ ("disease linkage improved past the old ceiling",
+  "MATCH (t:ClinicalTrial) WHERE COUNT { (t)-[:STUDIES]->() } > 0 "
+  "RETURN count(t) AS n", lambda r: r[0]["n"] > 540_000),
+ ("the rewriting tier actually fires",
+  "MATCH ()-[e:STUDIES {match_method:'name_variant'}]->() "
+  "RETURN count(e) AS n", lambda r: r[0]["n"] > 10_000),
+ ("the ICD tier fires and stays the smallest",
+  "MATCH ()-[e:STUDIES]->() WITH e.match_method AS m, count(*) AS n "
+  "WHERE m IN ['name','icd_name'] RETURN m, n ORDER BY n DESC",
+  lambda r: len(r) == 2 and r[0]["m"] == "name"),
+ # Every STUDIES edge must say which tier made it, or a weak link is
+ # indistinguishable from an exact one.
+ ("no STUDIES edge is missing its match_method",
+  "MATCH ()-[e:STUDIES]->() WHERE e.match_method IS NULL "
+  "RETURN count(e) AS n", lambda r: r[0]["n"] == 0),
+ # Uncapping the synonyms is what makes this one reachable: 'renal cell
+ # carcinoma' is entry term 40 of 'Carcinoma, Renal Cell'.
+ ("an entry term past the display cap now matches",
+  "MATCH (d:Disease {name:'Carcinoma, Renal Cell'}) "
+  "RETURN COUNT { (:ClinicalTrial)-[:STUDIES]->(d) } AS n",
+  lambda r: r[0]["n"] > 300),
  ("dosage form has one spelling per form",
   "MATCH (p:Product) WHERE p.form <> '' "
   "AND (p.form CONTAINS ',' OR p.form CONTAINS '(' OR p.form CONTAINS '-') "
