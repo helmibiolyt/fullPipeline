@@ -178,6 +178,28 @@ The four tiers above are how a `STUDIES` edge was made, most reliable first.
 If an answer rests on a handful of trials, check the tier; if it rests on
 thousands, the mix matters less. Roughly 84% are `name`, 16% the other three.
 
+### Drug linkage: 19% is the wrong denominator
+
+19.1% of trials have a `TESTED_IN` edge. That number counts every behavioural,
+device and surgical trial as a drug-linkage failure, and they are not - those
+trials name no drug and should resolve to nothing.
+
+ClinicalTrials.gov labels its interventions by type, which gives the honest
+split:
+
+| | trials | |
+|---|---|---|
+| name a Drug or Biological | 232,988 | 39.1% — the only ones that should resolve |
+| non-drug interventions only | 271,800 | 45.6% — behavioural, device, procedure |
+| no intervention label | 91,702 | 15.4% |
+
+Of the 232,988 that name a drug, **149,468 resolve — 64%**. That is the figure
+to improve and the figure to quote.
+
+So: "how many trials tested drug X" is answerable. "What fraction of trials
+test a drug" is not a question this graph should be asked, because more than
+half of all trials are not drug trials at all.
+
 ### How complete is the disease linkage, really
 
 60% of trials carry a disease link. Measured against ClinicalTrials.gov
