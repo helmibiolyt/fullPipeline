@@ -255,10 +255,67 @@ GOLD: list[tuple[str, str, list[list[str]], list[str]]] = [
 ]
 
 
+# Sentences a must_not phrase may appear in without the answer being wrong.
+# Ported from bench.py, which had exactly this bug: substring-matching the
+# whole answer scored a caveat about the SCHEMA as a claim about the WORLD.
+#
+# Two real cases from the first run of the extended set, both counted as
+# contradictions and both correct answers:
+#
+#   "The graph shows an FDA product with status TENTATIVE_APPROVAL and
+#    another, NURTEC ODT, with status MARKETED"    <- found both and
+#                                                     reconciled them
+#   "I could not establish whether metformin carries a boxed warning; the
+#    graph holds structural data, not label text"  <- the right answer
+#
+# The first is the rimegepant case from ROUTING.md, which the graph used to
+# get wrong and now gets right. Scoring it as a contradiction would have
+# hidden the improvement it was written to detect.
+_EXEMPT = (
+    # describing the data model, not the drug
+    "the graph", "graph holds", "graph stores", "graph shows", "schema",
+    "field", "column", "property", "this dataset", "the dataset",
+    "data source", "not in the graph", "structural data",
+    # reporting what a lookup did
+    "query", "queries", "search", "lookup", "returned no", "sources:",
+    # explicitly declining to conclude
+    "could not establish", "cannot determine", "would need", "may indicate",
+    "not necessarily", "does not mean",
+)
+
+
+def _sentences(text):
+    """Split on sentence enders and newlines, without a regex.
+
+    Written by hand because the escape sequences in the pattern this
+    replaces were twice corrupted in transit, producing a file that
+    looked correct and would not parse.
+    """
+    out, buf = [], []
+    enders = set(chr(46) + chr(33) + chr(63) + chr(10) + chr(13))
+    for ch in text or '':
+        buf.append(ch)
+        if ch in enders:
+            out.append(''.join(buf))
+            buf = []
+    if buf:
+        out.append(''.join(buf))
+    return out
+
+
+def _really_wrong(answer: str, phrase: str) -> bool:
+    """The phrase appears, and not inside a sentence that explains it away."""
+    for sent in _sentences(answer or ""):
+        low = sent.lower()
+        if phrase in low and not any(w in low for w in _EXEMPT):
+            return True
+    return False
+
+
 def score(answer: str, must: list[list[str]], must_not: list[str]) -> dict:
     a = (answer or "").lower()
     missing = [alts for alts in must if not any(x in a for x in alts)]
-    wrong = [p for p in must_not if p in a]
+    wrong = [p for p in must_not if _really_wrong(answer or "", p)]
     return {
         "has_fact": not missing,
         "contradicts": bool(wrong),
@@ -289,11 +346,30 @@ def run_arm(name: str, k: int) -> list[dict]:
             res = {"steps": [], "total_ms": 0, "error": str(e)}
         s = score(ans, must, must_not)
         steps = [x for x in res.get("steps", []) if x.get("tool") in ("graph", "documents")]
+        # An arm exists to show that ITS STORE holds the fact. An answer with
+        # no lookup behind it demonstrates the model's pharmacology knowledge
+        # and nothing about the store, so it cannot count as correct however
+        # right it reads.
+        #
+        # This is not hypothetical: on the first run of the extended set the
+        # documents arm answered 11 of 37 with no lookup at all and 10 of
+        # those scored correct, including the molecular target of trastuzumab
+        # and the ATC code for atorvastatin. That inflated the arm to 36/37
+        # and made the comparison meaningless - the number being compared was
+        # partly the model's memory.
+        #
+        # agent.py retries once when step 0 returns no tool call, because this
+        # provider does not always honour tool_choice="required". When even
+        # that fails, the run is unevidenced and is scored as such.
+        s["unevidenced"] = not steps
+        if not steps:
+            s["correct"] = False
         out.append({"arm": name, "kind": kind, "question": q, **s,
                     "seq": "".join(x["tool"][0] for x in steps),
                     "ms": res.get("total_ms", 0),
                     "answer": ans[:400]})
-        mark = "ok  " if s["correct"] else ("WRONG" if s["contradicts"] else "thin ")
+        mark = ("ok  " if s["correct"] else "NO-EV" if s.get("unevidenced")
+                else "WRONG" if s["contradicts"] else "thin ")
         print(f"  {mark} {kind:<6} [{out[-1]['seq']:<5}] {q[:50]}", flush=True)
         if not s["correct"]:
             print(f"        missing={s['missing']} wrong={s['wrong']}")
@@ -318,12 +394,18 @@ def main() -> None:
         for r in allrows:
             fh.write(json.dumps(r, ensure_ascii=False) + "\n")
 
-    print(f"\n{'arm':<8}{'correct':>9}{'has fact':>10}{'CONTRADICTS':>13}{'sec':>7}")
+    # NO EVID is reported beside the score, not folded into it. An arm that
+    # answers without a lookup has not shown its store holds anything, and
+    # burying that in a single "correct" number is how the documents arm read
+    # 36/37 on a run where 10 of its answers came from the model's memory.
+    print(f"\n{'arm':<8}{'correct':>9}{'has fact':>10}{'CONTRADICTS':>13}"
+          f"{'NO EVID':>9}{'sec':>7}")
     for name in arms:
         rs = [r for r in allrows if r["arm"] == name]
         print(f"  {name:<6}{sum(r['correct'] for r in rs):>9}/{len(rs)}"
               f"{sum(r['has_fact'] for r in rs):>9}"
               f"{sum(r['contradicts'] for r in rs):>13}"
+              f"{sum(r.get('unevidenced', False) for r in rs):>9}"
               f"{sum(r['ms'] for r in rs)/1000/max(1,len(rs)):>7.0f}")
     print(f"\nwritten to {a.out}")
 
