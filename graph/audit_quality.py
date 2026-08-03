@@ -86,7 +86,11 @@ DELIBERATE_NA = {
 }
 
 ENUM_MAX_DISTINCT = 400
-BIG = 500_000          # above this, expensive scans are sampled
+BIG = 500_000
+
+# Above this an exact duplicate-edge scan exhausts the transaction memory
+# pool, so it is sampled. 2M pairs sits well inside the 512 MB default.
+DUPEDGE_MAX = 2_000_000          # above this, expensive scans are sampled
 
 _TTY = sys.stdout.isatty()
 def _c(code, s): return f"\033[{code}m{s}\033[0m" if _TTY else s
@@ -232,6 +236,11 @@ class Audit:
                       f"RETURN n.`{p}` AS v, count(*) AS n "
                       f"ORDER BY n DESC LIMIT {ENUM_MAX_DISTINCT}")
 
+        # A *_raw column holds the source's own wording on purpose, so every
+        # case and punctuation variant in it is the point, not a defect.
+        if p.endswith("_raw"):
+            return
+
         junk = [(r["v"], r["n"]) for r in vals
                 if str(r["v"]).strip().lower() in PLACEHOLDERS
                 and (label, p) not in DELIBERATE_NA]
@@ -324,8 +333,23 @@ class Audit:
             print(amber(f"      {'self-loops':<24} {loops:,}"))
 
         if not self.quick:
+            # Grouping every (a,b) pair holds the whole set in the aggregation
+            # and blew Neo4j's 512 MB transaction limit on HAS_IDENTIFIER's 8M
+            # edges - which killed the run before ANY later type was checked,
+            # so one big type meant the other 31 went unaudited. Bounded now:
+            # a sample above the threshold still finds duplication, and the
+            # summary says it sampled rather than implying it read everything.
+            n_edges = self.one(f"MATCH ()-[r:{etype}]->() RETURN count(r) AS n",
+                               "n")
+            scan = "" if n_edges <= DUPEDGE_MAX else f"LIMIT {DUPEDGE_MAX}"
+            if scan:
+                self.add("SAMPLED", etype,
+                         f"duplicate-edge scan read {DUPEDGE_MAX:,} of "
+                         f"{n_edges:,} - a duplicate outside the sample is "
+                         f"not reported")
             dup = self.q(
-                f"MATCH (a)-[r:{etype}]->(b) WITH a, b, count(r) AS c "
+                f"MATCH (a)-[r:{etype}]->(b) WITH a, b, r {scan} "
+                f"WITH a, b, count(r) AS c "
                 f"WHERE c > 1 RETURN count(*) AS pairs, max(c) AS worst")
             if dup and dup[0]["pairs"]:
                 self.add("DUPEDGE", etype,
@@ -334,8 +358,12 @@ class Audit:
                 print(amber(f"      {'duplicate pairs':<24} "
                             f"{dup[0]['pairs']:,}"))
 
+            # Same bound as the duplicate scan, and for the same reason:
+            # grouping by `a` over 8M edges holds every distinct source node
+            # in the aggregation.
             deg = self.q(
-                f"MATCH (a)-[r:{etype}]->() WITH a, count(r) AS c "
+                f"MATCH (a)-[r:{etype}]->() WITH a, r {scan} "
+                f"WITH a, count(r) AS c "
                 f"ORDER BY c DESC LIMIT 3 "
                 f"RETURN a.key AS k, coalesce(a.name, a.term, a.title, '') "
                 f"AS nm, c")
@@ -348,9 +376,10 @@ class Audit:
                             f"{deg[0]['k']} {deg[0]['c']:,}"))
 
 
-ORDER = ["EMPTY_LABEL", "EMPTY_EDGE", "EMPTY", "UNNORMALISED", "KEYFORM",
+ORDER = ["UNCHECKED", "EMPTY_LABEL", "EMPTY_EDGE", "EMPTY", "UNNORMALISED", "KEYFORM",
          "ENDPOINTS", "PLACEHOLDER", "NUMERIC", "WHITESPACE", "SELFLOOP",
-         "DUPEDGE", "DUPNAME", "ORPHAN", "DEGREE", "SPARSE", "METHOD"]
+         "DUPEDGE", "DUPNAME", "ORPHAN", "DEGREE", "SPARSE", "METHOD",
+         "SAMPLED"]
 SERIOUS = {"EMPTY_LABEL", "EMPTY_EDGE", "EMPTY", "UNNORMALISED", "KEYFORM",
            "ENDPOINTS"}
 
@@ -382,7 +411,14 @@ def main():
         etypes = [a.edge] if a.edge else sorted(EDGE_COLUMNS)
         print(bold(f"\nRELATIONSHIPS  ({len(etypes)} types)\n"))
         for e in etypes:
-            au.edge_type(e)
+            try:
+                au.edge_type(e)
+            except Exception as exc:                         # noqa: BLE001
+                # An audit that dies partway reports "no defects" for every
+                # type it never reached, which reads as a clean bill of
+                # health. Record the failure and keep going.
+                au.add("UNCHECKED", e, f"audit failed: {type(exc).__name__}")
+                print(red(f"      {'UNCHECKED':<24} {type(exc).__name__}"))
 
     print()
     print(bold("=" * 72))

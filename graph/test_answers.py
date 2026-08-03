@@ -395,6 +395,15 @@ TRAPS = [
   "MATCH (t:ClinicalTrial) WHERE toUpper(trim(t.title)) IN "
   "['NA','N/A','N.A','NONE','UNKNOWN','NIL','NOT APPLICABLE'] "
   "RETURN count(t) AS n", lambda r: r[0]["n"] == 0),
+ # 16 pairs of forms differed only in punctuation, so every count by dosage
+ # form split one form across two rows.
+ ("dosage form has one spelling per form",
+  "MATCH (p:Product) WHERE p.form <> '' "
+  "AND (p.form CONTAINS ',' OR p.form CONTAINS '(' OR p.form CONTAINS '-') "
+  "RETURN count(p) AS n", lambda r: r[0]["n"] == 0),
+ ("the extended-release tablets are one value now",
+  "MATCH (p:Product {form:'TABLET EXTENDED RELEASE'}) RETURN count(p) AS n",
+  lambda r: r[0]["n"] > 6_000),
  ("the Purple Book definition is English, not a CSV header",
   "MATCH (e:Exclusivity) WHERE e.definition CONTAINS '_' "
   "RETURN count(e) AS n", lambda r: r[0]["n"] == 0),

@@ -229,6 +229,13 @@ check("unseen wording is NA, not invented",
 check("form placeholder emptied", norm_form("UNKNOWN"), "")
 check("form N/A emptied", norm_form("N/A"), "")
 check("real form survives", norm_form("Tablet"), "TABLET")
+# The 16 collisions: same form, two punctuations, two rows in every count.
+check("comma spelling", norm_form("TABLET, EXTENDED RELEASE"),
+      "TABLET EXTENDED RELEASE")
+check("bracket spelling folds onto it", norm_form("TABLET (EXTENDED-RELEASE)"),
+      "TABLET EXTENDED RELEASE")
+check("and the reverse-majority pair too", norm_form("POWDER, FOR SOLUTION"),
+      norm_form("POWDER FOR SOLUTION"))
 
 print()
 print("Placeholders - and the one that must NOT be treated as one")

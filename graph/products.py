@@ -176,7 +176,17 @@ def norm_form(raw: str) -> str:
     s = " ".join(unwrap_lookup(raw).split())
     if not s or is_placeholder(s):
         return ""            # 'UNKNOWN' and 'N/A' are not dosage forms
-    return s.upper()
+    # Case was only half of it. The same form arrives punctuated two ways -
+    # 'TABLET, EXTENDED RELEASE' (5,374) against 'TABLET (EXTENDED-RELEASE)'
+    # (929) - across 16 pairs, and each pair splits one form into two rows
+    # that read as different products.
+    #
+    # Punctuation is dropped rather than converted to one house style,
+    # because no single rule wins both directions: the comma spelling is the
+    # majority for TABLET and the minority for POWDER FOR SOLUTION (1 against
+    # 2,001). Removing it entirely is the only choice that does not need to
+    # know which spelling happens to be more common.
+    return " ".join(re.sub(r"[^A-Z0-9]+", " ", s.upper()).split())
 
 
 # Product status, where six agencies write six vocabularies into one column
