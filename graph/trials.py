@@ -416,8 +416,13 @@ def _same_study(b, key, other, source):
     ok = trial_key(other)
     if not ok or ok == key or ok.startswith("TRIAL:"):
         return
+    # phase and study_type are set here too, to the same NA the real loader
+    # would write, so "unknown" has ONE spelling across the label. A stub that
+    # left them off would be the null-versus-NA split all over again, just
+    # confined to the 10,580 nodes nobody looks at directly.
     b.w.node("ClinicalTrial", ok, source=source, registry="referenced",
-             title="", status="")
+             title="", status="", phase=PHASE_NA,
+             study_type=STUDY_TYPE_NA, study_type_raw="")
     b.w.edge("SAME_STUDY_AS", key, ok, match_method="structured", source=source)
 
 

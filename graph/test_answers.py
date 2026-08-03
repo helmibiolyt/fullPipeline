@@ -375,10 +375,16 @@ TRAPS = [
   "MATCH (t:ClinicalTrial) WHERE t.study_type_raw IN "
   "['Treatment','Ayurveda','Screening','Quality of life','BA/BE'] "
   "RETURN count(t) AS n", lambda r: r[0]["n"] > 10_000),
+ # A modality prefix implies interventional, EXCEPT where the registrant
+ # then says otherwise in the same cell: CTRI has one row reading
+ # "DrugAyurvedaOther (Specify) [OBSERVATIONAL]". An explicit statement beats
+ # an inference drawn from the prefix, so the rule order that produces this is
+ # right and it is the check that was too strict.
  ("CTRI's concatenated modalities are read as interventional",
   "MATCH (t:ClinicalTrial) WHERE t.study_type_raw STARTS WITH 'Drug' "
-  "AND t.study_type <> 'INTERVENTIONAL' RETURN count(t) AS n",
-  lambda r: r[0]["n"] == 0),
+  "AND t.study_type <> 'INTERVENTIONAL' "
+  "AND NOT toLower(t.study_type_raw) CONTAINS 'observational' "
+  "RETURN count(t) AS n", lambda r: r[0]["n"] == 0),
 
  # Every trial carries a phase now - NA where none applies - so an absent
  # property and "not applicable" stop looking identical. Filter real phases
@@ -389,10 +395,12 @@ TRAPS = [
  ("NA is the value for no phase, and it is common",
   "MATCH (t:ClinicalTrial {phase:'NA'}) RETURN count(t) AS n",
   lambda r: r[0]["n"] > 500_000),
- ("observational trials all read NA",
-  "MATCH (t:ClinicalTrial {study_type:'OBSERVATIONAL'}) "
-  "WHERE t.phase <> 'NA' RETURN count(t) AS n",
-  lambda r: r[0]["n"] == 0),
+ # There is deliberately NO check that an observational trial has no phase.
+ # I wrote one on the assumption that the two are exclusive and the graph
+ # disagreed: 4,522 observational trials carry a real phase, 2,353 of them
+ # PHASE4. That is not a defect - a post-marketing study is phase 4 and
+ # routinely observational, and ChiCTR lets a registrant set both fields
+ # independently. The assumption was mine, the data was right.
 
  ("phase is normalised, equality works",
   "MATCH (t:ClinicalTrial {phase:'PHASE3'}) RETURN count(t) AS n",
