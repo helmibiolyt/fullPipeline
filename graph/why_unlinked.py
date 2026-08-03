@@ -23,11 +23,19 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import os                                                # noqa: E402
+
 import lake                                              # noqa: E402
 import trials as T                                       # noqa: E402
 from normalise import fold                               # noqa: E402
 
 import disease as D                                     # noqa: E402
+
+# load_mesh keeps 30 entry terms per descriptor. That cap is right for the
+# stored `synonyms` property - nobody reads 127 of them - but it also decides
+# what the MATCHER can see, and 'renal cell carcinoma' is entry term 40 of
+# 'Carcinoma, Renal Cell'. SYN_CAP=0 measures the matcher without the cap.
+SYN_CAP = int(os.getenv("SYN_CAP", "30")) or None
 
 MESH = D.L["mesh"]
 ICD10 = D.L["icd10_codes"]
@@ -53,7 +61,7 @@ def load_names():
         if not name or not ui:
             continue
         mesh.setdefault(fold(name), ui)
-        for syn in (row.get("synonyms") or "").split(";")[:30]:
+        for syn in (row.get("synonyms") or "").split(";")[:SYN_CAP]:
             f = fold(syn)
             if len(f) >= 4:
                 mesh.setdefault(f, ui)
