@@ -218,6 +218,42 @@ Every later step stays `auto` so the loop can stop.
 
 ---
 
+---
+
+## 6. Entity resolution belongs in a tool, not in the caller
+
+Three times in one session the model queried the graph correctly and got a
+fraction of the answer, because nothing told it how MeSH is shaped:
+
+```
+"how many trials on eczema"          301 of 2,214
+   MeSH files it under "Dermatitis, Atopic" - the full-text index HAD
+   returned that node, matched on its synonym "Atopic Eczema", and the
+   model narrowed back to d.name = 'Eczema'
+
+"how many trials on Heart Diseases"  1,980 of 31,141
+   a category whose 204 subtypes hold the trials; one on heart failure is
+   tagged Heart Failure, never its parent
+```
+
+Both were fixed with prompt rules, and the rules work. But a rule asks the
+caller to get it right every time, and `resolve_condition` makes it hard to get
+wrong - it returns every candidate node with its trial count, its child count
+and its synonyms, so a category is visible as `children=204` rather than
+something the caller has to know.
+
+Measured against the prompt rules alone on five disease questions: **same
+answers, 11 lookups against 15**. It does not improve correctness, because the
+prompt already did that. It removes the exploratory queries the model
+otherwise spends discovering the shape - eczema went from five lookups to two.
+
+**For the research agent this is the shape to copy.** A raw Cypher tool assumes
+every caller knows MeSH inverts its headings and that a category node is nearly
+empty. A resolve tool assumes nothing and reports what is there. The same
+argument as §5: build it so the caller cannot quietly get a fraction of the
+answer.
+
+
 ## 7. What to carry into the research agent
 
 1. **Two tools, free order, decision after each result.** Not a router.

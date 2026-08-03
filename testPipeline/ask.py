@@ -124,6 +124,40 @@ def check_cypher(q: str) -> str | None:
 _driver = None
 
 
+def run_cypher_params(cypher: str, params: dict,
+                      _retry=True) -> tuple[list[dict], int]:
+    """Run a read query with bound parameters.
+
+    Separate from run_cypher because the model's Cypher arrives as one string
+    and cannot carry parameters, while the tools this file provides build their
+    own queries around user text. Binding rather than interpolating keeps a
+    condition named O'Brien's disease from ending the string early, and lets
+    Neo4j reuse the plan. Params is a dict rather than **kwargs so a parameter
+    called `q` or `_retry` cannot collide with this function's own arguments.
+    """
+    global _driver
+    from neo4j import GraphDatabase
+    from neo4j.exceptions import ServiceUnavailable, SessionExpired
+    if _driver is None:
+        _driver = GraphDatabase.driver(NEO4J_URI,
+                                       auth=(NEO4J_USER, NEO4J_PASSWORD))
+    t0 = time.time()
+    try:
+        with _driver.session(database=NEO4J_DB,
+                             default_access_mode="READ") as s:
+            rows = [dict(r) for r in s.run(cypher, **params)]
+    except (ServiceUnavailable, SessionExpired):
+        if not _retry:
+            raise
+        try:
+            _driver.close()
+        except Exception:                                      # noqa: BLE001
+            pass
+        _driver = None
+        return run_cypher_params(cypher, params, _retry=False)
+    return rows, int((time.time() - t0) * 1000)
+
+
 def run_cypher(q: str, _retry=True) -> tuple[list[dict], int]:
     """Run a read query, reconnecting once if the pooled connection is dead.
 

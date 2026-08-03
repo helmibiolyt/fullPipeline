@@ -123,13 +123,55 @@ TOOLS = [
     },
 ]
 
+TOOLS.append({
+    "type": "function",
+    "function": {
+        "name": "resolve_condition",
+        "description": (
+            "Find the Disease nodes for a condition, BEFORE querying about it. "
+            "Returns every candidate with its trial count, how many disease "
+            "types sit beneath it, and its synonyms - so you can tell a "
+            "category from a specific condition and spot near-misses. Use this "
+            "first for any question about a disease; matching on name equality "
+            "silently returns a fraction of the answer."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "condition": {"type": "string",
+                              "description": "The condition as the user said it."},
+                "why": {"type": "string",
+                        "description": "One short line: what this is for."},
+            },
+            "required": ["condition"],
+        },
+    },
+})
+
 SYSTEM = """You answer questions about drugs, trials, regulation and safety
-using two tools and nothing else.
+using three tools and nothing else.
 
 You have NO knowledge of your own. Every fact in your answer must come from a
 row or a document chunk a tool returned in this conversation. If the tools do
 not have it, say so - an honest "the graph returned no trials for this" is
 worth more than a fluent guess.
+
+RESOLVE A CONDITION BEFORE YOU QUERY IT
+
+For any question about a disease, call resolve_condition FIRST. It returns
+every Disease node that mentions the condition, with how many trials each
+holds, how many disease types sit beneath it, and its synonyms.
+
+You need it because a condition is almost never one node. MeSH files eczema
+under "Dermatitis, Atopic", so `d.name = 'Eczema'` returns 301 trials of
+2,214. And "Heart Diseases" is a category whose own node holds 1,980 trials
+while its 204 subtypes hold 31,141 - a trial on heart failure is tagged Heart
+Failure, never its parent.
+
+Read what comes back before choosing:
+  many children  -> a CATEGORY. Roll it up with SUBTYPE_OF.
+  no children, synonyms that are the same illness -> collect those keys.
+  a synonym match that is a DIFFERENT disease -> leave it out. Wiskott-Aldrich
+    Syndrome matches 'eczema' and is not eczema.
 
 WHAT EACH STORE ACTUALLY HOLDS
 
@@ -295,6 +337,9 @@ def _bound(cypher: str) -> tuple[str, bool]:
     return f"{q} LIMIT {DEFAULT_LIMIT}", True
 
 
+#: Which counter a tool spends from. resolve_condition is a graph read.
+_BUDGET_OF = {"resolve_condition": "query_graph"}
+
 #: Tool names the provider actually emits, mapped to the ones declared.
 #:
 #: MiniMax returns "graph" and "functions.graph" as often as "query_graph".
@@ -304,6 +349,8 @@ def _bound(cypher: str) -> tuple[str, bool]:
 #: The docs-only arm showed sequences like "gggd" while touching the graph
 #: exactly zero times.
 _TOOL_ALIASES = {
+    "resolve_condition": "resolve_condition", "resolve": "resolve_condition",
+    "resolve_disease": "resolve_condition",
     "graph": "query_graph", "query_graph": "query_graph",
     "cypher": "query_graph", "search_graph": "query_graph",
     "documents": "search_documents", "search_documents": "search_documents",
@@ -410,6 +457,86 @@ def _run_graph(args: dict) -> tuple[str, dict]:
     return f"{warn}{head}:\n{body}", rec
 
 
+#: How many candidates to hand back. Enough to cover a condition's spellings
+#: and its near-misses, few enough that the model reads them all.
+RESOLVE_LIMIT = 12
+
+
+def _run_resolve(args: dict) -> tuple[str, dict]:
+    """Disease nodes for a condition, with what is needed to choose between them.
+
+    This exists because the same failure kept happening and documenting it did
+    not stop it. Asked how many trials studied eczema, the model ran the
+    full-text index, was handed "Dermatitis, Atopic" matched on its synonym
+    "Atopic Eczema", and then queried d.name = 'Eczema' - 301 trials of 2,214.
+    Asked about Heart Diseases it queried the category node itself, which holds
+    1,923 of the 31,141 trials in its subtree, because a trial on heart failure
+    is tagged Heart Failure and never its parent.
+
+    Both are the same mistake: treating a condition as one node with one name.
+    A rule in the prompt asks the caller to get this right; a tool makes it
+    hard to get wrong, which is the difference that matters once a research
+    agent nobody is watching is the caller.
+
+    `children` is what separates the two cases. A node with 221 of them is a
+    category and the question almost certainly means the subtree; a node with
+    none is a leaf. `direct` is trials on that node alone, never the rollup -
+    reporting a subtree total as if it were one node would be the same class
+    of error in the other direction.
+    """
+    cond = (args.get("condition") or "").strip()
+    rec = {"tool": "graph", "why": args.get("why", "") or f"resolve {cond}",
+           "query": f"resolve_condition({cond!r})", "rows": [], "columns": [],
+           "total": 0, "ms": 0, "error": ""}
+    if not cond:
+        rec["error"] = "no condition given"
+        return "resolve_condition needs a condition.", rec
+
+    cypher = """
+    CALL db.index.fulltext.queryNodes('entity_names', $q) YIELD node, score
+    WHERE node:Disease
+    WITH node, score ORDER BY score DESC LIMIT $lim
+    OPTIONAL MATCH (node)<-[:STUDIES]-(t:ClinicalTrial)
+    WITH node, score, count(DISTINCT t) AS direct
+    OPTIONAL MATCH (kid:Disease)-[:SUBTYPE_OF*1..3]->(node)
+    RETURN node.name AS name, node.key AS key, direct,
+           count(DISTINCT kid) AS children,
+           left(coalesce(node.synonyms, ''), 160) AS synonyms
+    ORDER BY direct DESC
+    """
+    try:
+        rows, ms = A.run_cypher_params(
+            cypher, {"q": cond, "lim": RESOLVE_LIMIT})
+    except Exception as e:                                     # noqa: BLE001
+        rec["error"] = f"{type(e).__name__}: {str(e)[:160]}"
+        return f"ERROR: {rec['error']}", rec
+
+    rec["ms"] = ms
+    rec["total"] = len(rows)
+    rec["columns"] = list(rows[0].keys()) if rows else []
+    rec["rows"] = [{k: A._fmt(v) for k, v in r.items()} for r in rows]
+    if not rows:
+        return (f"No Disease node matches {cond!r}. Try a different wording, or "
+                f"the condition may only exist as prose in the documents."), rec
+
+    lines = [f"{len(rows)} Disease nodes match {cond!r}. Decide which belong - "
+             f"a high `children` count means it is a CATEGORY and the question "
+             f"probably means its whole subtree:"]
+    for r in rows:
+        lines.append(
+            f"  {r['name']}  [{r['key']}]  direct_trials={r['direct']}  "
+            f"children={r['children']}"
+            + (f"  synonyms: {r['synonyms']}" if r.get("synonyms") else ""))
+    lines.append("")
+    lines.append("Then query with the keys you chose:")
+    lines.append("  MATCH (t:ClinicalTrial)-[:STUDIES]->(d:Disease) "
+                 "WHERE d.key IN ['KEY1','KEY2'] RETURN count(DISTINCT t)")
+    lines.append("or roll a category up:")
+    lines.append("  MATCH (d:Disease)-[:SUBTYPE_OF*0..4]->(:Disease {key:'KEY'}) "
+                 "MATCH (t:ClinicalTrial)-[:STUDIES]->(d) RETURN count(DISTINCT t)")
+    return "\n".join(lines), rec
+
+
 def _run_docs(args: dict, k: int) -> tuple[str, dict]:
     query = args.get("query", "")
     section = args.get("section") or None
@@ -505,6 +632,8 @@ def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
     used = {"query_graph": 0, "search_documents": 0}
     limits = {"query_graph": MAX_GRAPH if max_graph is None else max_graph,
               "search_documents": MAX_DOCS if max_docs is None else max_docs}
+    # resolve_condition draws on the graph budget rather than its own.
+    limits["resolve_condition"] = limits["query_graph"]
     _NAME = {"graph": "query_graph", "documents": "search_documents"}
     usable = TOOLS if allow is None else [
         t for t in TOOLS
@@ -518,7 +647,9 @@ def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
             over = time.time() - t0 > MAX_SECONDS
             offered = [] if over else [
                 t for t in usable
-                if used[t["function"]["name"]] < limits[t["function"]["name"]]]
+                if used.get(_BUDGET_OF.get(t["function"]["name"],
+                                           t["function"]["name"]), 0)
+                < limits[t["function"]["name"]]]
 
             # After a run of calls to one store, that store is withheld for a
             # single step, so the next lookup has to go to the other one. Not
@@ -581,7 +712,8 @@ def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
                 else:
                     other = ("search_documents" if fn == "query_graph"
                              else "query_graph")
-                    if fn in limits and used[fn] >= limits[fn]:
+                    budget = _BUDGET_OF.get(fn, fn)
+                    if fn in limits and used.get(budget, 0) >= limits[fn]:
                         # Belt and braces: the tool was withdrawn above, so
                         # reaching here means the model called it anyway. The
                         # counter is NOT bumped - a refused call was not spent,
@@ -590,8 +722,8 @@ def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
                                   f"already have.")
                         rec = {"tool": fn, "query": "", "total": 0, "ms": 0,
                                "error": "budget exhausted", "why": ""}
-                    elif (switch_on_miss and fn in run_of
-                          and run_of[fn] >= RUN_BEFORE_SWITCH
+                    elif (switch_on_miss and budget in run_of
+                          and run_of[budget] >= RUN_BEFORE_SWITCH
                           and other in usable_names
                           and used[other] < limits[other]):
                         # Withholding the tool between steps was not enough:
@@ -616,6 +748,14 @@ def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
                         used[fn] += 1
                         result, rec = _run_graph(args)
                         run_of[fn] += 1
+                        run_of["search_documents"] = 0
+                    elif fn == "resolve_condition":
+                        # Counted against the graph budget: it is a graph read,
+                        # and letting it be free would make "resolve, resolve,
+                        # resolve" a way round the cap.
+                        used["query_graph"] += 1
+                        result, rec = _run_resolve(args)
+                        run_of["query_graph"] += 1
                         run_of["search_documents"] = 0
                     elif fn == "search_documents":
                         used[fn] += 1
