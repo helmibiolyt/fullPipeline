@@ -104,6 +104,56 @@ HOW TO FIND A STARTING NODE — this is where queries fail, not traversal.
    (AdverseEvent — term). Without the label filter "lung cancer" returns
    companies. Fuzzy works: 'pembrolizimab~'.
 
+4. A CONDITION IS USUALLY SEVERAL DISEASE NODES, NOT ONE. MeSH files a
+   condition under its clinical heading, which is often not the word anyone
+   searches with. Eczema is the example that matters:
+
+     Dermatitis, Atopic   1,815 trials   synonyms: Atopic Eczema, Infantile
+                                         Eczema, Atopic Neurodermatitis
+     Eczema                 251 trials
+     Skin Diseases, Eczematous  9
+     Eczema, Dyshidrotic        1
+
+   Asking for `d.name = 'Eczema'` returns 251 of 1,962 and looks like a
+   complete answer. The full-text index already told you the others — it
+   matched them on their SYNONYMS. Use the nodes it returned, do not narrow
+   back to the one whose name equals your search word:
+
+     CALL db.index.fulltext.queryNodes('entity_names','eczema')
+     YIELD node WHERE node:Disease
+     WITH collect(node)[..8] AS ds
+     UNWIND ds AS d
+     MATCH (t:ClinicalTrial)-[:STUDIES]->(d)
+     RETURN count(DISTINCT t) AS trials
+
+   Read the synonyms before you decide which hits belong. Wiskott-Aldrich
+   Syndrome matches 'eczema' too and is a different disease.
+
+5. A BROAD CONDITION IS A TREE, AND THE PARENT NODE HOLDS ALMOST NOTHING.
+   Trials are tagged with the specific condition, not the category above it.
+   "Heart Diseases" is a MeSH category with 221 disease types beneath it:
+
+     the 'Heart Diseases' node alone      1,923 trials
+     the whole subtree                   29,379 trials
+
+   A trial on heart failure is tagged Heart Failure, never Heart Diseases. So
+   for any question about a category — heart disease, cancer, diabetes,
+   infection — walk down with SUBTYPE_OF or you will report 6% of the answer
+   as if it were all of it:
+
+     MATCH (d:Disease)-[:SUBTYPE_OF*0..4]->(:Disease {{name:'Heart Diseases'}})
+     MATCH (t:ClinicalTrial)-[:STUDIES]->(d)
+     RETURN count(DISTINCT t) AS trials
+
+   `*0..4` includes the parent itself. The arrow points UP - child SUBTYPE_OF
+   parent - so this reads "every disease that is a kind of Heart Diseases".
+
+   How to tell a category from a specific condition: look at what the
+   full-text search returned. If the hits are things like Heart Valve
+   Diseases, Heart Failure and Coronary Disease, you searched for a category
+   and those are its children. Roll up. If they are spellings of one thing -
+   Atopic Eczema, Infantile Eczema - collect the nodes instead (rule 4).
+
 REAL VALUES — use these exactly, never invent one.
   Region.name    Asia · Central Asia · Europe · Latin America · MENA/GCC ·
                  North America · Oceania · South Asia · Sub-Saharan Africa
