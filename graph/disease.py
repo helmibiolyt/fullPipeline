@@ -236,6 +236,16 @@ def load_icd11(b):
         # an endpoint neo4j-admin then invents as an empty node.
         if not pkey or pkey == child:
             continue
+        # Never impose ICD-11's tree on two MeSH nodes. Both rows matched MeSH
+        # by name, so both are MeSH nodes, and MeSH already has a hierarchy for
+        # them that ICD-11 can disagree with - it put Glaucoma under
+        # Glaucoma, Open-Angle one way and MeSH the other, and 19 diseases
+        # ended up their own ancestor. A cycle makes every variable-length
+        # traversal in the agent's repertoire non-terminating, so this is not a
+        # tidiness rule. MeSH's tree wins for MeSH nodes; ICD-11's applies
+        # where ICD-11 is what the node came from.
+        if child.startswith("MESH:") and pkey.startswith("MESH:"):
+            continue
         b.w.edge("SUBTYPE_OF", child, pkey, match_method="structured",
                  source=key)
         edges += 1
