@@ -352,6 +352,24 @@ TRAPS = [
  ("salt forms carry the safety data",
   "MATCH (s:Substance) WHERE s.norm_name STARTS WITH 'metformin' "
   "MATCH (s)-[e:HAS_ADVERSE_EVENT]->() RETURN count(e) AS n", lambda r: r[0]["n"] > 100),
+ # study_type was the one enum with no normaliser: four spellings of
+ # "interventional" held 679,141 trials and {study_type:'INTERVENTIONAL'}
+ # reached 455,213 of them.
+ ("study_type is normalised, equality works",
+  "MATCH (t:ClinicalTrial {study_type:'INTERVENTIONAL'}) RETURN count(t) AS n",
+  lambda r: r[0]["n"] > 600_000),
+ ("study_type has no case or wording variants left",
+  "MATCH (t:ClinicalTrial) WHERE t.study_type IS NOT NULL "
+  "WITH DISTINCT t.study_type AS st "
+  "WHERE st <> toUpper(st) OR st CONTAINS ' ' RETURN count(*) AS n",
+  lambda r: r[0]["n"] == 0),
+ # Purpose values are NOT folded into INTERVENTIONAL - Treatment, Prevention
+ # and Screening say something the top-level word does not, and tidying the
+ # column by discarding them would lose it.
+ ("purpose values survive normalisation",
+  "MATCH (t:ClinicalTrial) WHERE t.study_type IN ['TREATMENT','PREVENTION'] "
+  "RETURN count(t) AS n", lambda r: r[0]["n"] > 10_000),
+
  ("phase is normalised, equality works",
   "MATCH (t:ClinicalTrial {phase:'PHASE3'}) RETURN count(t) AS n",
   lambda r: r[0]["n"] > 50_000),

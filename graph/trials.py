@@ -125,6 +125,45 @@ def norm_status(raw: str) -> str:
     return s.upper().replace(" ", "_").replace("-", "_")
 
 
+# study_type, which was the one enum nobody normalised. Four spellings of
+# "interventional" carried 679,141 trials between them and
+# `{study_type:'INTERVENTIONAL'}` reached 455,213 of them - the same silent
+# two-thirds miss that phase, status and registry each had before their maps.
+#
+# Only the top-level distinction is canonicalised. Registries also use this
+# field for the study's PURPOSE - Treatment, Prevention, Screening, Diagnostic,
+# Quality of life - and those are real values that mean something; folding them
+# into INTERVENTIONAL would destroy information to tidy a column. They keep
+# their own upper-cased form.
+_STUDY_TYPE_MAP = {
+    "interventional": "INTERVENTIONAL",
+    "intervention": "INTERVENTIONAL",
+    "interventional study": "INTERVENTIONAL",
+    "interventional clinical trial of medicinal product": "INTERVENTIONAL",
+    "interventional trial": "INTERVENTIONAL",
+    "observational": "OBSERVATIONAL",
+    "observational study": "OBSERVATIONAL",
+    "observational invasive": "OBSERVATIONAL",
+    "observational non invasive": "OBSERVATIONAL",
+    "expanded access": "EXPANDED_ACCESS",
+    "expanded_access": "EXPANDED_ACCESS",
+    "not specified": "",
+    "n a": "",
+    "other": "OTHER",
+}
+
+
+def norm_study_type(raw: str) -> str:
+    """Registry spellings of study type -> a canonical value, or ""."""
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    key = " ".join(re.sub(r"[^a-z0-9 ]+", " ", s.lower()).split())
+    if key in _STUDY_TYPE_MAP:
+        return _STUDY_TYPE_MAP[key]
+    return s.upper().replace(" ", "_").replace("-", "_")
+
+
 # One registry, two names. Case folding alone leaves these split, because WHO
 # writes the registry's full title where the native file writes its short one.
 _REGISTRY_ALIAS = {
@@ -305,6 +344,8 @@ def _trial(b, key, registry, source, sponsor="", conditions="", interventions=""
         props["phase"] = norm_phase(props["phase"])
     if "status" in props:
         props["status"] = norm_status(props["status"])
+    if "study_type" in props:
+        props["study_type"] = norm_study_type(props["study_type"])
     b.w.node("ClinicalTrial", key, source=source,
              registry=norm_registry(registry), **props)
 
