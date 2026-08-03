@@ -99,6 +99,60 @@ def _inputs(step: dict) -> set[str]:
     return {m.lower() for m in _TOKEN.findall(text)} - _STOP
 
 
+_SENTENCES = re.compile(r"(?<=[.!?])[ \t]+|[\r\n]+")
+
+_DENIAL_PHRASE = (
+    "no trials", "not found", "does not contain", "no data", "returned no",
+    "no results", "unable to find", "no information", "graph does not",
+    "no such", "nothing in the graph", "could not find",
+)
+
+# A sentence carrying a denial phrase but describing the DATA MODEL rather
+# than the world. "The graph does not contain a dedicated pipeline field" is
+# a true and useful caveat; it is not a claim that Roche has no pipeline.
+_ABOUT_SCHEMA = (
+    "field", "column", "property", "attribute", "schema", "node type",
+    "relationship type", "separate drug class", "dedicated", "explicit",
+    "specific category", "a category for", "stores structural",
+    "data source", "this dataset", "the dataset", "our data", "coverage",
+)
+
+# A sentence that states the limit and declines to conclude from it. The
+# epilepsy failure asserted absence outright; this hedges, which is the
+# behaviour the prompt asks for.
+_HEDGED = (
+    "could indicate", "could mean", "may indicate", "may mean", "might",
+    "not necessarily", "this does not mean", "does not mean that",
+    "cannot conclude", "would need", "it is possible",
+)
+
+
+# A sentence whose subject is the QUERY, not the world. "The query returned
+# no results" reports a tool outcome and is exactly what the prompt asks for;
+# one of these appeared inside a **SOURCES:** provenance block. The failure
+# this check exists to find said "seven of the eight mechanisms had no trials
+# at all" - a claim about trials, not about a lookup.
+_ABOUT_A_LOOKUP = (
+    "query", "queries", "search", "searching", "lookup", "my attempt",
+    "returned no results", "no relevant passage", "sources:", "i ran",
+    "the intersection", "full-text", "cypher",
+)
+
+
+def _is_denial(sent: str) -> bool:
+    """True only for a sentence asserting the ANSWER is absent."""
+    low = sent.strip().lower()
+    if not any(p in low for p in _DENIAL_PHRASE):
+        return False
+    if any(w in low for w in _ABOUT_SCHEMA):
+        return False
+    if any(w in low for w in _HEDGED):
+        return False
+    if any(w in low for w in _ABOUT_A_LOOKUP):
+        return False
+    return True
+
+
 def classify(question: str, res: dict) -> dict:
     """What shape did this answer have, and how did it fail if it did."""
     steps = [s for s in res.get("steps", []) if s.get("tool") in ("graph", "documents")]
@@ -153,10 +207,16 @@ def classify(question: str, res: dict) -> dict:
         "no tool", "not able to query", "outside my", "i don't have a tool"))
     # The failure that matters: a confident sentence saying the data is absent
     # when the query simply did not reach it.
-    denies = any(p in low for p in (
-        "no trials", "not found", "does not contain", "no data", "returned no",
-        "no results", "unable to find", "no information", "graph does not",
-        "no such", "nothing in the graph"))
+    #
+    # Matched per SENTENCE, not across the whole answer, and that is the whole
+    # correction. Substring-matching the answer scored 6 of 13 flagged
+    # failures wrongly: "What pipeline does Roche have for neurology?" opens
+    # with 28 drug-indication pairs and then notes the graph has no dedicated
+    # pipeline field. That sentence contains "does not contain" and says
+    # nothing about Roche - it describes the SCHEMA, which is true and worth
+    # saying. Counting it as a denial inflated the failure rate of the
+    # measurement itself.
+    denies = any(_is_denial(sent) for sent in _SENTENCES.split(ans))
 
     # A provider failure and a model that declined to use its tools both
     # produce zero steps, and they mean opposite things - one is infrastructure,

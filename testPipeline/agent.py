@@ -641,15 +641,22 @@ def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
     usable_names = {t["function"]["name"] for t in usable}
 
     run_of = {"query_graph": 0, "search_documents": 0}
+    retried_first = False
 
     try:
         for step in range(MAX_STEPS):
             over = time.time() - t0 > MAX_SECONDS
+            # Both sides go through _BUDGET_OF. Only the used[] side did, and
+            # limits["resolve_condition"] does not exist - that tool spends
+            # the graph budget - so offering it raised KeyError and cost a
+            # whole question its answer.
+            def _bud(t):
+                n = t["function"]["name"]
+                return _BUDGET_OF.get(n, n)
+
             offered = [] if over else [
                 t for t in usable
-                if used.get(_BUDGET_OF.get(t["function"]["name"],
-                                           t["function"]["name"]), 0)
-                < limits[t["function"]["name"]]]
+                if used.get(_bud(t), 0) < limits[_bud(t)]]
 
             # After a run of calls to one store, that store is withheld for a
             # single step, so the next lookup has to go to the other one. Not
@@ -690,6 +697,21 @@ def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
             out["tokens"] += data.get("usage", {}).get("total_tokens", 0)
             msg = data["choices"][0]["message"]
             calls = msg.get("tool_calls") or []
+
+            # tool_choice="required" is sent on step 0 and this provider does
+            # not always honour it: two of 116 questions came back fluent,
+            # sourced in tone, with zero lookups recorded. Asking again is the
+            # only enforcement available from this side of the API, and one
+            # retry was enough for both.
+            if step == 0 and offered and not calls and not retried_first:
+                retried_first = True
+                messages.append({"role": "user", "content": (
+                    "You did not call a tool. Do not answer from memory - "
+                    "you have no knowledge of this data. Call query_graph or "
+                    "search_documents now, then answer only from what it "
+                    "returns.")})
+                out["forced_retry"] = True
+                continue
 
             if not calls:
                 text = (msg.get("content") or "").strip()
