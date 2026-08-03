@@ -97,6 +97,9 @@ class Build:
         # ICD titles, kept apart from mesh_by_name so a MeSH hit always wins
         # and a match against the weaker dictionary is recorded as such.
         self.icd_by_name: dict[str, str] = {}
+        # Disease nodes named for a category rather than a condition. A
+        # rewritten or ICD match may never land here; an exact one may.
+        self.generic_disease_keys: set[str] = set()
         self.efo_mesh: dict[str, str] = {}          # EFO/MONDO id -> MeSH key
         self.symbol_target: dict[str, str] = {}     # gene symbol -> Target key
         self.salt_parent: dict[str, str] = {}       # salt key -> parent key

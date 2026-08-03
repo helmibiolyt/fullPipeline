@@ -422,9 +422,12 @@ TRAPS = [
   lambda r: r[0]["n"] > 300),
  # A rewritten link to a bare category word is worse than no link: it reads
  # as a finding. Exact matches are exempt - that is what the registry said.
- ("no trial is linked to a category word by a rewriting",
-  "MATCH ()-[e:STUDIES {match_method:'name_variant'}]->(d:Disease) "
-  "WHERE toLower(d.name) IN ['disease','diseases','disorder','disorders',"
+ # Widened after the first attempt let 10 through: the guard was on the query
+ # string, and "Symptom Cluster" is a specific phrase that is a synonym of the
+ # descriptor named "Syndrome". Checks both non-exact tiers now.
+ ("no trial is linked to a category word except by an exact match",
+  "MATCH ()-[e:STUDIES]->(d:Disease) WHERE e.match_method <> 'name' "
+  "AND toLower(d.name) IN ['disease','diseases','disorder','disorders',"
   "'syndrome','condition','illness','symptoms','infection','injuries'] "
   "RETURN count(e) AS n", lambda r: r[0]["n"] == 0),
  ("dosage form has one spelling per form",

@@ -20,7 +20,7 @@ disappearing.
 from __future__ import annotations
 
 import lake
-from normalise import fold
+from normalise import COND_TOO_GENERIC, fold
 
 L = {
     "mesh":        "Ontologies_Standards/meshb.nlm.nih.gov/mesh_data/mesh_descriptors.csv",
@@ -95,6 +95,13 @@ def load_mesh(b):
         b.w.node("Disease", dkey, source=key, name=name, vocabulary="MeSH",
                  synonyms=";".join(syns), tree_numbers=";".join(trees))
         b.w.identifier(dkey, "MESH", ui, source=key)
+        # A node whose NAME is a bare category word. Guarding the query string
+        # was not enough: "Symptom Cluster" is a perfectly specific phrase and
+        # a synonym of the descriptor called "Syndrome", so the variant looked
+        # fine and the destination was still meaningless. The guard belongs on
+        # where the edge LANDS, not on what was typed to find it.
+        if fold(name) in COND_TOO_GENERIC:
+            b.generic_disease_keys.add(dkey)
         b.mesh_by_name.setdefault(fold(name), dkey)
         # The stored property is capped at 30 for readability; the MATCHER is
         # not. One number was deciding both, and 'renal cell carcinoma' is

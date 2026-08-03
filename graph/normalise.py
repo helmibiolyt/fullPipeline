@@ -353,7 +353,7 @@ _COND_SPLIT = re.compile(r"[ ]+and[ ]+|[ ]*[/][ ]*", re.I)
 # 1,278 trials on a node that says nothing about any of them. Checked only on
 # REWRITTEN forms: a trial whose condition is literally "Disease" still
 # matches on the first tier, because that is what the registry actually said.
-_COND_TOO_GENERIC = {
+COND_TOO_GENERIC = {
     "disease", "diseases", "disorder", "disorders", "syndrome", "syndromes",
     "condition", "conditions", "illness", "illnesses", "symptom", "symptoms",
     "infection", "infections", "injury", "injuries", "complication",
@@ -383,14 +383,14 @@ def condition_variants(term: str):
             break
         base = nxt
     if base and base.lower() not in seen:
-        if base.lower() not in _COND_TOO_GENERIC:
+        if base.lower() not in COND_TOO_GENERIC:
             seen.add(base.lower())
             yield base
 
     def _push(c):
         c = " ".join((c or "").split())
         low = c.lower()
-        if len(c) >= 4 and low not in seen and low not in _COND_TOO_GENERIC:
+        if len(c) >= 4 and low not in seen and low not in COND_TOO_GENERIC:
             seen.add(low)
             return c
         return None

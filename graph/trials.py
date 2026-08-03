@@ -483,6 +483,12 @@ def _trial(b, key, registry, source, sponsor="", conditions="", interventions=""
         if not dkey:
             dkey = b.icd_by_name.get(fold(c))
             mth = "icd_name" if dkey else None
+        # Anything but an exact match must not land on a category node. A
+        # trial on "Chronic Disease" attached to the descriptor "Disease"
+        # reads as a finding and states nothing; 1,278 did before this, and
+        # 10 survived a first attempt that guarded the query string instead.
+        if dkey and mth != "name" and dkey in b.generic_disease_keys:
+            continue
         if dkey:
             b.w.edge("STUDIES", key, dkey, match_method=mth, source=source)
 
