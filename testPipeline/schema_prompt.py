@@ -295,6 +295,15 @@ THINGS THAT WILL MISLEAD YOU
       WHERE x = d OR (x)-[:SUBTYPE_OF*1..3]->(d)
       RETURN count(DISTINCT t)
   Bound the depth. `*` unbounded over 31,000 disease nodes is slow.
+* ONE DRUG HAS MANY PRODUCT RECORDS, and they disagree. Each agency files
+  its own, and the same substance appears under several with different
+  statuses - rimegepant is filed once as TENTATIVE_APPROVAL and again as
+  NURTEC ODT with status MARKETED. Answering from the first row you see gets
+  this wrong, and it reads as authoritative because the row is real.
+      MATCH (s:Substance)<-[:CONTAINS]-(p:Product)
+      WHERE s.norm_name = 'rimegepant'
+      RETURN p.name, p.agency, p.status, p.status_raw
+  Look at ALL of them before saying whether a drug is approved.
 * Five of the eleven agencies hold NO products: NHRA (Bahrain), DHA (Dubai),
   DOH (Abu Dhabi), MOH-OM (Oman), MOPH-QA (Qatar). The nodes exist so the
   region query works, but nothing was ever published for them. A count of

@@ -278,6 +278,38 @@ answer.
   `resolve_condition`, the prompt rules. What should not be assumed: the
   constants — `LIMIT 300`, the four-call budgets, `RUN_BEFORE_SWITCH`. Those
   were tuned against one model's behaviour.
+
+  **Measured on both, 37 gold questions:**
+
+  | arm | M2 | M2.7-highspeed |
+  |---|---|---|
+  | agent | 35/37 | 35/37 |
+  | graph | 36/37 | 34/37 |
+  | documents | 23/37, **14 unevidenced** | 35/37, **0 unevidenced** |
+
+  Two differences matter more than the scores.
+
+  **M2.7 uses its tools; M2 did not.** M2 answered 14 of 37 documents-arm
+  questions with no lookup at all — its own pharmacology knowledge, scored as
+  correct until the harness started requiring evidence. M2.7 never does this.
+  The whole documents-arm collapse reported for M2 is a property of that
+  model, not of the corpus.
+
+  **M2.7 stops looking sooner.** Asked whether rimegepant is FDA approved, M2
+  ran five graph queries, found both the TENTATIVE_APPROVAL record and the
+  MARKETED one, and reconciled them. M2.7 ran ONE, found the first, and
+  answered from it — the failure this question exists to catch. Same prompt,
+  same budget.
+
+  So a prompt rule that was redundant on M2 is load-bearing on M2.7: the
+  schema prompt now states that one drug has many product records and they
+  disagree. Fewer lookups is not cheaper if the second one held the answer.
+
+  **And a fluent invention beats an honest refusal on any "did it answer"
+  metric.** M2.7's documents arm asserted that the FDA removed metformin's
+  boxed warning in 2019. It did not; metformin carries one for lactic
+  acidosis. The graph arm said it could not establish the answer and was
+  scored worse for it.
 - 22 questions × 5 arms is enough to separate agentic from fixed-parallel, and
   not enough to tune the constant in §4. Three consecutive calls is a
   measured-plausible choice, not an optimum.
