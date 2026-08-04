@@ -295,6 +295,13 @@ THINGS THAT WILL MISLEAD YOU
       WHERE x = d OR (x)-[:SUBTYPE_OF*1..3]->(d)
       RETURN count(DISTINCT t)
   Bound the depth. `*` unbounded over 31,000 disease nodes is slow.
+* QUOTE A PHRASE IN A FULL-TEXT QUERY. The index is Lucene and an unquoted
+  phrase is an OR of its words, not the phrase:
+      queryNodes('document_titles','gene therapy')     57,443 trials
+      queryNodes('document_titles','"gene therapy"')      583 trials
+  The first counts every trial with "therapy" in the title - 54,876 of them
+  on its own. That is a 98x overcount and it reads as a finding. Escape the
+  quotes inside the Cypher string: '\\"gene therapy\\"'.
 * ONE DRUG HAS MANY PRODUCT RECORDS, and they disagree. Each agency files
   its own, and the same substance appears under several with different
   statuses - rimegepant is filed once as TENTATIVE_APPROVAL and again as

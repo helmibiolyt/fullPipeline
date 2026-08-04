@@ -260,6 +260,22 @@ graph and cannot be refreshed. **Orange Book supplies essentially all Patent
 and Exclusivity nodes**, so patent-expiry answers are as of the last successful
 scrape.
 
+### Quote a phrase in a full-text query
+
+The index is Lucene. An unquoted phrase is an **OR of its words**, not the
+phrase:
+
+```cypher
+queryNodes('document_titles','gene therapy')       // 57,443 trials
+queryNodes('document_titles','"gene therapy"')     //    583 trials
+```
+
+The first counts every trial with "therapy" in its title — 54,876 on that
+word alone. A 98x overcount, and it reads as a finding rather than an error.
+
+This is the most dangerous query mistake available in this graph, because
+nothing about the result looks wrong: a big number from a real index.
+
 ### `NA` is a value, not a gap
 
 `ClinicalTrial.phase`, `ClinicalTrial.study_type` and `Product.status` are on
