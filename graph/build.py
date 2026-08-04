@@ -114,7 +114,7 @@ class Build:
         # only way to see a cycle that spans two classifications: MeSH and
         # ICD disagree on direction, and a per-loader rule cannot detect a
         # loop that runs MeSH -> ICD-11 -> MeSH.
-        self.subtype_parent: dict[str, str] = {}
+        self.subtype_parent: dict[str, set[str]] = {}
         # Disease nodes named for a category rather than a condition. A
         # rewritten or ICD match may never land here; an exact one may.
         self.generic_disease_keys: set[str] = set()

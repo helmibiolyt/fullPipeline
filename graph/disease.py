@@ -83,16 +83,24 @@ def add_subtype(b, child: str, parent: str, source: str,
     """
     if not child or not parent or child == parent:
         return False
-    seen = 0
-    up = parent
-    while up and seen < 64:            # 64 is far deeper than any real tree
-        if up == child:
+    # Breadth-first over EVERY parent, not the first one. MeSH is a
+    # polyhierarchy - a disease sits under several headings - so a map of one
+    # parent per child follows a single path up and misses a loop that closes
+    # through a sibling branch. That left 2 cycles of the original 19 after
+    # the first version of this walked `parent` as a scalar.
+    frontier = [parent]
+    seen: set[str] = set()
+    while frontier:
+        node = frontier.pop()
+        if node == child:
             b.stats["subtype_cycles_refused"] = (
                 b.stats.get("subtype_cycles_refused", 0) + 1)
             return False
-        up = b.subtype_parent.get(up)
-        seen += 1
-    b.subtype_parent.setdefault(child, parent)
+        if node in seen or len(seen) > 4096:
+            continue
+        seen.add(node)
+        frontier.extend(b.subtype_parent.get(node, ()))
+    b.subtype_parent.setdefault(child, set()).add(parent)
     b.w.edge("SUBTYPE_OF", child, parent, match_method=match_method,
              source=source)
     return True
