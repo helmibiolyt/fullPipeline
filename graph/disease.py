@@ -57,6 +57,47 @@ def ot_disease_key(raw: str) -> str:
     return s.upper() if s else ""
 
 
+def add_subtype(b, child: str, parent: str, source: str,
+                match_method: str = "structured") -> bool:
+    """Write SUBTYPE_OF unless it would close a cycle.
+
+    Three loaders build this tree - MeSH, ICD-10 and ICD-11 - and they do not
+    agree. MeSH files Glaucoma under Ocular Hypertension; ICD puts it the
+    other way. A row that matches MeSH by name BECOMES the MeSH node, so the
+    two classifications end up writing opposing edges between the same pair,
+    and 19 diseases became their own ancestor.
+
+    Blocking one loader from writing between two MeSH nodes fixed 7 of them
+    and left 12, because the disagreements are not all MeSH-to-MeSH: some run
+    MeSH -> ICD-11 -> MeSH. Per-loader rules cannot see that; only the tree as
+    a whole can.
+
+    So the check is here, once, and it is the real one: walk up from the
+    proposed parent, and if the child is already an ancestor, refuse. First
+    writer wins, which means MeSH's own hierarchy is kept and a later
+    classification may only ADD to it.
+
+    A cycle is not cosmetic. `(x)-[:SUBTYPE_OF*]->(d)` is the shape every
+    broad-condition question uses - it is what took Heart Diseases from 1,980
+    trials to 31,141 - and a loop makes it non-terminating.
+    """
+    if not child or not parent or child == parent:
+        return False
+    seen = 0
+    up = parent
+    while up and seen < 64:            # 64 is far deeper than any real tree
+        if up == child:
+            b.stats["subtype_cycles_refused"] = (
+                b.stats.get("subtype_cycles_refused", 0) + 1)
+            return False
+        up = b.subtype_parent.get(up)
+        seen += 1
+    b.subtype_parent.setdefault(child, parent)
+    b.w.edge("SUBTYPE_OF", child, parent, match_method=match_method,
+             source=source)
+    return True
+
+
 def load_mesh(b):
     """Disease nodes and their hierarchy.
 
@@ -125,7 +166,7 @@ def load_mesh(b):
     for child, parent_tree in pending:
         parent = tree_owner.get(parent_tree)
         if parent and parent != child:
-            b.w.edge("SUBTYPE_OF", child, parent, source=key)
+            add_subtype(b, child, parent, key)
     b._done("mesh", t0, n)
 
 
@@ -236,18 +277,8 @@ def load_icd11(b):
         # an endpoint neo4j-admin then invents as an empty node.
         if not pkey or pkey == child:
             continue
-        # Never impose ICD-11's tree on two MeSH nodes. Both rows matched MeSH
-        # by name, so both are MeSH nodes, and MeSH already has a hierarchy for
-        # them that ICD-11 can disagree with - it put Glaucoma under
-        # Glaucoma, Open-Angle one way and MeSH the other, and 19 diseases
-        # ended up their own ancestor. A cycle makes every variable-length
-        # traversal in the agent's repertoire non-terminating, so this is not a
-        # tidiness rule. MeSH's tree wins for MeSH nodes; ICD-11's applies
-        # where ICD-11 is what the node came from.
-        if child.startswith("MESH:") and pkey.startswith("MESH:"):
+        if not add_subtype(b, child, pkey, key):
             continue
-        b.w.edge("SUBTYPE_OF", child, pkey, match_method="structured",
-                 source=key)
         edges += 1
 
     b.stats["icd11_name_matched"] = matched
@@ -298,7 +329,7 @@ def load_icd10(b):
         b.w.node("Disease", f"ICD10:{bid}", source=L["icd10_blocks"],
                  name=title, vocabulary="ICD-10")
         if cid:
-            b.w.edge("SUBTYPE_OF", f"ICD10:{bid}", f"ICD10:{cid}",
+            add_subtype(b, f"ICD10:{bid}", f"ICD10:{cid}",
                      match_method="structured", source=L["icd10_blocks"])
 
     # Nodes first, edges second - the same two-pass shape load_mesh uses, and
@@ -350,7 +381,7 @@ def load_icd10(b):
         dst = (f"ICD10:{above.split(chr(0))[2]}" if above.startswith("\0block\0")
                else resolved.get(above, ""))
         if dst and dst != child:
-            b.w.edge("SUBTYPE_OF", child, dst, match_method="structured",
+            add_subtype(b, child, dst,
                      source=L["icd10_codes"])
 
     b.stats["icd10_name_matched"] = matched

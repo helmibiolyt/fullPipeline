@@ -110,6 +110,11 @@ class Build:
         # Every MeSH descriptor name, all trees. A string MeSH already uses
         # for something must not become an alias for something else.
         self.mesh_any_name: set[str] = set()
+        # child key -> parent key, for every SUBTYPE_OF written so far. The
+        # only way to see a cycle that spans two classifications: MeSH and
+        # ICD disagree on direction, and a per-loader rule cannot detect a
+        # loop that runs MeSH -> ICD-11 -> MeSH.
+        self.subtype_parent: dict[str, str] = {}
         # Disease nodes named for a category rather than a condition. A
         # rewritten or ICD match may never land here; an exact one may.
         self.generic_disease_keys: set[str] = set()
