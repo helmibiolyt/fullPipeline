@@ -193,3 +193,73 @@ def load_dailymed(b):
 
 
 ALL = [load_atc_substances, load_hierarchy, load_rxnorm, load_dailymed]
+
+
+# International (INN) and US (USAN) names for the same drug. This data is
+# American, so it holds the USAN side; trial registries outside the US write
+# the INN, and the resolver had no way across.
+#
+# "Paracetamol" was found this way - 254 drug-typed ct.gov arms name it, the
+# graph holds only "Acetaminophen", and every one of those arms resolved to
+# nothing. The rest of this list is the same divergence in the drugs common
+# enough for a registry to name in an arm.
+#
+# Written out rather than derived. There is no rule connecting these spellings
+# - they are two committees' decisions - and a heuristic that turned one into
+# the other would also turn unrelated drugs into each other.
+INN_USAN = {
+    "paracetamol": "acetaminophen",
+    "adrenaline": "epinephrine",
+    "noradrenaline": "norepinephrine",
+    "salbutamol": "albuterol",
+    "frusemide": "furosemide",
+    "lignocaine": "lidocaine",
+    "pethidine": "meperidine",
+    "ciclosporin": "cyclosporine",
+    "rifampicin": "rifampin",
+    "glibenclamide": "glyburide",
+    "amoxycillin": "amoxicillin",
+    "oestradiol": "estradiol",
+    "indometacin": "indomethacin",
+    "beclometasone": "beclomethasone",
+    "dothiepin": "dosulepin",
+    "cephalexin": "cefalexin",
+    "cephradine": "cefradine",
+    "thiopentone": "thiopental",
+    "phenobarbitone": "phenobarbital",
+    "hyoscine": "scopolamine",
+    "chlorphenamine": "chlorpheniramine",
+    "trimethoprim sulfamethoxazole": "co-trimoxazole",
+    "sodium valproate": "valproate sodium",
+    "isoprenaline": "isoproterenol",
+    "methylthioninium chloride": "methylene blue",
+}
+
+
+def load_inn_usan(b):
+    """Register the INN spelling as an alias of the USAN substance.
+
+    Both directions are tried: whichever side this graph already holds becomes
+    the target, and the other becomes the alias. That matters because the
+    divergence is not consistently one way - the graph has "Acetaminophen" but
+    also has "Dosulepin", where the British spelling is the one it kept.
+
+    Only ever an alias onto a substance that already resolves. Nothing is
+    created, so a pair where the graph holds neither side contributes nothing.
+    """
+    t0 = b._step("inn_usan")
+    n = 0
+    for a, z in INN_USAN.items():
+        ma, mz = b.r.resolve(a), b.r.resolve(z)
+        if ma.resolved and not mz.resolved:
+            b.r.add_alias(z, ma.key, method="inn_usan")
+            n += 1
+        elif mz.resolved and not ma.resolved:
+            b.r.add_alias(a, mz.key, method="inn_usan")
+            n += 1
+    b.stats["inn_usan_aliases"] = n
+    b.stats["inn_usan_pairs"] = len(INN_USAN)
+    b._done("inn_usan", t0, n)
+
+
+ALL = ALL + [load_inn_usan]

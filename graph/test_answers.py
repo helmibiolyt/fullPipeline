@@ -446,6 +446,12 @@ TRAPS = [
  ("NCIt oncology aliases are attributable",
   "MATCH ()-[e:TESTED_IN]->() WHERE e.match_method = 'ncit_oncology' "
   "RETURN count(*) AS n", lambda r: r[0]["n"] >= 0),
+ # This data is American and holds the USAN spelling; registries outside the
+ # US write the INN. 254 ct.gov arms name "Paracetamol" and the graph holds
+ # only "Acetaminophen", so every one of them resolved to nothing.
+ ("the INN spelling reaches the USAN substance",
+  "MATCH (s:Substance) WHERE toLower(s.name) = 'acetaminophen' "
+  "RETURN COUNT { (s)-[:TESTED_IN]->() } AS n", lambda r: r[0]["n"] > 100),
  ("drug linkage is no longer one registry",
   "MATCH (t:ClinicalTrial) WHERE COUNT { ()-[:TESTED_IN]->(t) } > 0 "
   "AND t.registry <> 'clinicaltrials.gov' RETURN count(t) AS n",
