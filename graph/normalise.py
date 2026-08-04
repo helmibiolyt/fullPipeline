@@ -480,6 +480,20 @@ def condition_variants(term: str):
             if c:
                 yield c
 
+    # MeSH inverts its own headings - "Carcinoma, Renal Cell" for renal cell
+    # carcinoma - and registries copy the style with their own wording:
+    # "Lung Cancer, Non-Small Cell". Swapping around the comma is what MeSH
+    # means by that comma, so this reaches the uninverted form.
+    #
+    # A single comma only, with something substantial on both sides. A list of
+    # three conditions is left to the splitter below, where it belongs.
+    if base.count(",") == 1:
+        left, right = (x.strip() for x in base.split(","))
+        if len(left) >= 4 and len(right) >= 4:
+            c = _push(f"{right} {left}")
+            if c:
+                yield c
+
     # "Overweight and Obesity" is two headings in one cell. Last, because a
     # part is always a weaker claim than the whole.
     for part in _COND_SPLIT.split(base):

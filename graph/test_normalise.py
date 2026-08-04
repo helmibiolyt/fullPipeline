@@ -282,6 +282,12 @@ check("leading extensive-stage stripped",
 # here should invent that link.
 check("a procedure is not reduced to an organ",
       "Lung" in _v("Lung Transplantation"), False)
+# MeSH inverts its own headings and registries copy the style with their own
+# wording. Swapping around the comma is what that comma means.
+check("comma inversion is tried",
+      "Non-Small Cell Lung Cancer" in _v("Lung Cancer, Non-Small Cell"), True)
+check("...and MeSH's own inverted form still yields itself first",
+      _v("Carcinoma, Renal Cell")[0], "Carcinoma, Renal Cell")
 check("...and vaccines too", "COVID-19" in _v("COVID-19 Vaccines"), True)
 # The guard that matters: a general "drop the last word" rule would take Lung
 # Cancer to Lung, which is why prefix expansion was measured and rejected.
