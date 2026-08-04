@@ -375,6 +375,18 @@ _COND_CANCER = re.compile(
 # "&" is as common as "and" - "Obesity & Overweight" is 204 ct.gov trials -
 # and "&amp;" is the HTML entity arriving unescaped from a scrape, which
 # produced conditions reading "Obesity &Amp".
+# A clinical specifier attached to a disease. "Heart Failure With Preserved
+# Ejection Fraction" is 184 ct.gov trials, "With Reduced" 148, and the pattern
+# is how clinicians write everywhere - "Diabetes With Nephropathy", "Cirrhosis
+# With Ascites". The disease is the head; what follows says which presentation.
+#
+# Also the severity scales that get appended the same way: NYHA class for
+# heart failure, Child-Pugh for liver disease.
+_COND_SPECIFIER = re.compile(
+    r"[ ]+(?:with|without)[ ]+.+$"
+    r"|[ ]+(?:nyha|child[ -]pugh|gold|kdigo)[ ]+(?:class|stage)[ ]*"
+    r"[0-9ivx]*$", re.I)
+
 _COND_SPLIT = re.compile(
     r"[ ]+and[ ]+|[ ]*&(?:amp;?)?[ ]*|[ ]*[/][ ]*|[ ]+,[ ]+", re.I)
 
@@ -443,6 +455,14 @@ def condition_variants(term: str):
     # Plural and singular. MeSH heads neoplasms plural, most diseases singular.
     for cand in ((base[:-1],) if base.endswith("s") else (base + "s",)):
         c = _push(cand)
+        if c:
+            yield c
+
+    # A clinical specifier - "Heart Failure With Preserved Ejection Fraction",
+    # "Heart Failure NYHA Class III". The head is the disease.
+    spec = _COND_SPECIFIER.sub("", base)
+    if spec != base and len(spec) >= 5:
+        c = _push(spec)
         if c:
             yield c
 

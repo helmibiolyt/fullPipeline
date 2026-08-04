@@ -284,6 +284,15 @@ check("a procedure is not reduced to an organ",
       "Lung" in _v("Lung Transplantation"), False)
 # MeSH inverts its own headings and registries copy the style with their own
 # wording. Swapping around the comma is what that comma means.
+# How clinicians write a presentation: the disease, then what it presented
+# with. 184 ct.gov trials say "Heart Failure With Preserved Ejection
+# Fraction" and none of them reached Heart Failure.
+check("a with-clause is stripped",
+      "Heart Failure" in _v("Heart Failure With Preserved Ejection Fraction"), True)
+check("...and a severity scale too",
+      "Heart Failure" in _v("Heart Failure NYHA Class III"), True)
+check("without-clause as well",
+      "Cirrhosis" in _v("Cirrhosis Without Ascites"), True)
 check("comma inversion is tried",
       "Non-Small Cell Lung Cancer" in _v("Lung Cancer, Non-Small Cell"), True)
 check("...and MeSH's own inverted form still yields itself first",
