@@ -272,6 +272,16 @@ check("empty yields nothing", _v(""), [])
 # The suffix twin of the qualifier strip. "COVID-19 Pneumonia" is a COVID
 # trial; the tail says what the disease did.
 check("appended manifestation stripped", "COVID-19" in _v("COVID-19 Pneumonia"), True)
+# Registries put the stage wherever reads naturally, so it has to be stripped
+# from either end.
+check("trailing stage stripped",
+      "Non-small Cell Lung Cancer" in _v("Non-small Cell Lung Cancer Metastatic"), True)
+check("leading extensive-stage stripped",
+      "Small Cell Lung Cancer" in _v("Extensive Stage Small Cell Lung Cancer"), True)
+# A procedure is not the disease of the organ it is performed on, and nothing
+# here should invent that link.
+check("a procedure is not reduced to an organ",
+      "Lung" in _v("Lung Transplantation"), False)
 check("...and vaccines too", "COVID-19" in _v("COVID-19 Vaccines"), True)
 # The guard that matters: a general "drop the last word" rule would take Lung
 # Cancer to Lung, which is why prefix expansion was measured and rejected.

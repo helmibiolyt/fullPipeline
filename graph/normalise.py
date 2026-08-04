@@ -352,7 +352,21 @@ _COND_QUALIFIER = re.compile(
     r"unresectable|newly diagnosed|previously treated|untreated|early|late|"
     r"acute|chronic|severe|mild|moderate|unspecified|adult|adults|"
     r"paediatric|pediatric|childhood|primary|secondary|"
+    r"extensive[ -]stage|limited[ -]stage|"
     r"stage [0-9ivx]+)[ ]+", re.I)
+
+# The same idea at the END of the phrase. "Non-small Cell Lung Cancer
+# Metastatic" is 57 ct.gov trials; registries put the stage wherever reads
+# naturally to them.
+#
+# A separate, SHORTER list rather than making the leading pattern two-sided.
+# Only some of those words are safe to strip from a tail: "Chronic" in front
+# is a qualifier, and a disease name ENDING in a word like that is likelier
+# to have it as part of the name.
+_COND_QUALIFIER_TAIL = re.compile(
+    r"[ ]+(?:metastatic|advanced|recurrent|refractory|relapsed|unresectable|"
+    r"newly diagnosed|previously treated|untreated|"
+    r"extensive[ -]stage|limited[ -]stage|stage [0-9ivx]+)$", re.I)
 
 # The single biggest vocabulary difference between protocols and MeSH.
 _COND_CANCER = re.compile(
@@ -429,6 +443,20 @@ def condition_variants(term: str):
     # Plural and singular. MeSH heads neoplasms plural, most diseases singular.
     for cand in ((base[:-1],) if base.endswith("s") else (base + "s",)):
         c = _push(cand)
+        if c:
+            yield c
+
+    # The stage written AFTER the disease instead of before it. "Non-small
+    # Cell Lung Cancer Metastatic" is 57 ct.gov trials and "Lung Cancer
+    # Metastatic" more - registries put the stage wherever reads naturally.
+    tail = base
+    for _ in range(2):
+        nxt = _COND_QUALIFIER_TAIL.sub("", tail)
+        if nxt == tail:
+            break
+        tail = nxt
+    if tail != base and len(tail) >= 5:
+        c = _push(tail)
         if c:
             yield c
 
