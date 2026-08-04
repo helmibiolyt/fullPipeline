@@ -464,6 +464,12 @@ def load_hgnc(b):
         b.w.node("Target", tkey, source=key, symbol=sym,
                  name=row.get("name", ""), organism="Homo sapiens")
         b.symbol_target[sym.upper()] = tkey
+        # HGNC's own id, so mapping_ncit_hgnc has something to join on. It
+        # gives an hgnc_id, not a symbol, and without this the crosswalk
+        # attached 0 of its 6,470 rows.
+        hid = (row.get("hgnc_id") or "").strip()
+        if hid:
+            b.hgnc_target[hid] = tkey
         if ensg:
             b.ensg_target[ensg] = tkey
     b.stats["hgnc_genes_without_chembl_target"] = len(b.skipped_targets)

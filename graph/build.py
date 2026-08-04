@@ -120,6 +120,7 @@ class Build:
         self.generic_disease_keys: set[str] = set()
         self.efo_mesh: dict[str, str] = {}          # EFO/MONDO id -> MeSH key
         self.symbol_target: dict[str, str] = {}     # gene symbol -> Target key
+        self.hgnc_target: dict[str, str] = {}       # HGNC:1234 -> Target key
         self.salt_parent: dict[str, str] = {}       # salt key -> parent key
         self.ensg_target: dict[str, str] = {}       # ENSG id -> Target key
         self.skipped_targets: set[str] = set()      # HGNC genes ChEMBL lacks

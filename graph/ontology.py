@@ -143,8 +143,12 @@ def load_ncit_crosswalks(b):
     t0 = b._step("ncit_crosswalks")
     n = 0
     ncit_owner = b.ncit_key
-    for path, scheme, col in ((NCIT_CHEBI, "CHEBI", "chebi_id"),
-                              (NCIT_HGNC, "HGNC", "hgnc_id"),
+    # ChEBI is deliberately not here. It maps NCIt CHEMICAL codes to ChEBI
+    # ids, and this graph holds no NCIt code on any Substance - only on
+    # Targets, through the SwissProt crosswalk. It attached 1 row of 3,640 and
+    # there is nothing to join the rest on until Substances carry NCIt codes.
+    # Left out rather than left in attaching nothing, which reads as working.
+    for path, scheme, col in ((NCIT_HGNC, "HGNC", "hgnc_id"),
                               (NCIT_CUI, "UMLS_CUI", "cui")):
         got = 0
         for row in lake.stream_csv(path, limit=b.limit):
@@ -152,7 +156,14 @@ def load_ncit_crosswalks(b):
             val = (row.get(col) or "").strip()
             if not code or not val:
                 continue
+            # Joining only through ncit_key attached 1 ChEBI row and 0 HGNC
+            # rows out of 10,110, because ncit_key is filled by the SwissProt
+            # crosswalk and so only holds codes that are protein targets.
+            # HGNC maps genes, and the graph already knows which Target each
+            # HGNC id is - so join on the value when the code is a stranger.
             key = ncit_owner.get(code)
+            if not key and scheme == "HGNC":
+                key = b.hgnc_target.get(val)
             if not key:
                 continue          # NCIt code names nothing in this graph
             b.w.identifier(key, scheme, val, source=path,

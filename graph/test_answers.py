@@ -492,11 +492,16 @@ TRAPS = [
   "MATCH ()-[e:STUDIES {match_method:'vocab_alias'}]->(d:Disease) "
   "RETURN count(DISTINCT d) AS n", lambda r: r[0]["n"] > 500),
  # Crosswalks attach identifiers to nodes that already exist and create none.
+ # A crosswalk that attaches nothing is worse than one that is absent: the
+ # loader runs, the stats line reads plausibly, and no identifier exists.
  ("NCIt crosswalks attached identifiers",
-  "MATCH (i:Identifier) WHERE i.scheme IN ['CHEBI','HGNC','UMLS_CUI'] "
-  "RETURN count(i) AS n", lambda r: r[0]["n"] > 100),
+  "MATCH (i:Identifier) WHERE i.scheme IN ['HGNC','UMLS_CUI'] "
+  "RETURN count(i) AS n", lambda r: r[0]["n"] > 3_000),
+ ("the HGNC crosswalk joins on more than a handful",
+  "MATCH (i:Identifier {scheme:'HGNC'}) RETURN count(i) AS n",
+  lambda r: r[0]["n"] > 1_000),
  ("no crosswalk invented a node",
-  "MATCH (i:Identifier) WHERE i.scheme IN ['CHEBI','HGNC','UMLS_CUI'] "
+  "MATCH (i:Identifier) WHERE i.scheme IN ['HGNC','UMLS_CUI'] "
   "AND COUNT { (i)--() } = 0 RETURN count(i) AS n", lambda r: r[0]["n"] == 0),
  ("the ICD tier fires and stays the smallest",
   "MATCH ()-[e:STUDIES]->() WITH e.match_method AS m, count(*) AS n "

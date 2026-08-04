@@ -102,9 +102,13 @@ EDGES: dict[str, tuple[str, str, str, str]] = {
         "ClinicalTrial", "Company", "structured",
         "Trial sponsor, normalised by norm_company()."),
     "STUDIES": (
-        "ClinicalTrial", "Disease", "name",
+        "ClinicalTrial", "Disease", "name | name_variant | vocab_alias | icd_name",
         "Condition studied, matched from the registry's free-text condition "
-        "field against the MeSH dictionary."),
+        "field. Four tiers, most reliable first: the condition as written is a "
+        "MeSH heading or entry term; a rewriting reached MeSH (a stage "
+        "qualifier stripped, a plural, 'cancer' for 'neoplasms'); NCIt or "
+        "CDISC lists it as a synonym of a concept that reaches MeSH; or only "
+        "an ICD title matched."),
     "TESTED_IN": (
         "Substance", "ClinicalTrial", "resolver",
         "Intervention, matched from the registry's free-text intervention "
@@ -402,15 +406,29 @@ def main():
             ("aggregated", "counted across many reports, not one fact",
              "high in aggregate, meaningless per-report"),
             ("synonym", "matched via a brand name or research code", "good"),
+            ("ncit_oncology", "matched via an NCIt antineoplastic synonym",
+             "good"),
             ("name", "free prose matched against a dictionary",
              "<b>hint only</b>"),
+            ("name_variant", "a rewriting of the prose reached the dictionary",
+             "<b>weaker than name</b>"),
+            ("vocab_alias", "NCIt or CDISC names it as a synonym of a concept "
+             "that reaches MeSH", "<b>weaker than name</b>"),
+            ("icd_name", "no MeSH form matched, an ICD title did",
+             "<b>weakest</b>"),
             ("provisional", "the name never resolved", "<b>weak</b>"),
         ]]))
-    p.append("<div class=note><code>CONDUCTED_IN</code> and "
-             "<code>STUDIES</code> are entirely <code>name</code>-matched, and "
-             "so is <code>ABOUT</code>. They are sound for aggregate questions "
-             "(<i>how many trials in the Gulf</i>) and should not be cited as "
-             "fact about one specific trial.</div>")
+    p.append("<div class=note><code>CONDUCTED_IN</code>, <code>STUDIES</code> "
+             "and <code>ABOUT</code> rest entirely on matching text &mdash; "
+             "<b>not one trial-to-disease edge in this graph is structured</b>. "
+             "About 84% are exact <code>name</code> matches and the rest come "
+             "from the three weaker tiers. They are sound for aggregate "
+             "questions (<i>how many trials in the Gulf</i>) and should not be "
+             "cited as fact about one specific trial.<br><br>"
+             "Measured against ClinicalTrials.gov itself, over 15 conditions "
+             "and restricted to the trials taken from that registry, recall is "
+             "<b>75%</b> &mdash; so a count from this graph is a floor, not a "
+             "total.</div>")
 
     # ------------------------------------------------------------------ 6
     p.append("<h2>6. The joins in detail</h2>")
