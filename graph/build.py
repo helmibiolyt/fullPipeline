@@ -115,6 +115,10 @@ class Build:
         # ICD disagree on direction, and a per-loader rule cannot detect a
         # loop that runs MeSH -> ICD-11 -> MeSH.
         self.subtype_parent: dict[str, set[str]] = {}
+        # Disease nodes created under a NON-MeSH key, with the title they were
+        # created from. load_cross_vocab is the only reader: it is what lets an
+        # ICD concept be reached from the MeSH disease it is a kind of.
+        self.foreign_disease: dict[str, str] = {}
         # Disease nodes named for a category rather than a condition. A
         # rewritten or ICD match may never land here; an exact one may.
         self.generic_disease_keys: set[str] = set()

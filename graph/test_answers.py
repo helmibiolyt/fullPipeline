@@ -470,6 +470,19 @@ TRAPS = [
  ("no disease is its own ancestor",
   "MATCH (d:Disease)-[:SUBTYPE_OF*1..4]->(d) RETURN count(*) AS n",
   lambda r: r[0]["n"] == 0),
+ # Two classifications describing one illness were unconnected trees. COVID
+ # is the clearest case: MeSH COVID-19 with 8,043 trials, ICD-11 "COVID-19,
+ # virus identified" with 507, and no edge between them, so a question about
+ # COVID reached exactly one.
+ ("ICD concepts are reachable from the MeSH disease they specialise",
+  "MATCH (i:Disease)-[:SUBTYPE_OF]->(m:Disease {vocabulary:'MeSH'}) "
+  "WHERE i.vocabulary IN ['ICD-10','ICD-11'] RETURN count(*) AS n",
+  lambda r: r[0]["n"] > 1_000),
+ ("a COVID rollup now crosses the vocabularies",
+  "MATCH (d:Disease {name:'COVID-19', vocabulary:'MeSH'}) "
+  "MATCH (t:ClinicalTrial)-[:STUDIES]->(x:Disease) "
+  "WHERE x = d OR (x)-[:SUBTYPE_OF*1..3]->(d) "
+  "RETURN count(DISTINCT t) AS n", lambda r: r[0]["n"] > 8_500),
  ("the vocabulary bridge fires",
   "MATCH ()-[e:STUDIES {match_method:'vocab_alias'}]->() RETURN count(e) AS n",
   lambda r: r[0]["n"] > 5_000),

@@ -20,7 +20,8 @@ disappearing.
 from __future__ import annotations
 
 import lake
-from normalise import COND_TOO_GENERIC, fold, usable_name
+from normalise import (COND_TOO_GENERIC, condition_variants, fold,
+                       usable_name)
 
 L = {
     "mesh":        "Ontologies_Standards/meshb.nlm.nih.gov/mesh_data/mesh_descriptors.csv",
@@ -268,6 +269,7 @@ def load_icd11(b):
             b.w.node("Disease", dkey, source=key, name=title,
                      vocabulary="ICD-11")
             _index_icd(b, title, dkey)
+            b.foreign_disease[dkey] = title
         if code:
             b.w.identifier(dkey, "ICD11", code, source=key,
                            match_method="name" if hit else "structured")
@@ -367,6 +369,7 @@ def load_icd10(b):
             matched += 1
         else:
             _index_icd(b, title, dkey)
+            b.foreign_disease[dkey] = title
             b.w.node("Disease", dkey, source=L["icd10_codes"], name=title,
                      vocabulary="ICD-10")
         b.w.identifier(dkey, "ICD10", code, source=L["icd10_codes"],
@@ -788,3 +791,61 @@ def load_antineoplastic_aliases(b):
 
 
 ALL = ALL + [load_vocab_aliases, load_mesh_scr, load_antineoplastic_aliases]
+
+
+def load_cross_vocab(b):
+    """Link an ICD concept to the MeSH disease it is a kind of.
+
+    Two classifications describe the same illness and this graph held them as
+    unconnected trees. COVID-19 is the clearest case: MeSH COVID-19 carries
+    8,043 trials, ICD-11 "COVID-19, virus identified" carries 507, ICD-11
+    "Post COVID-19 condition" 85 - and no edge joined any of them, so a
+    question about COVID reached exactly one of the three.
+
+    Giving ICD-11 its own hierarchy did not fix that, and the reason is worth
+    stating because it was a wrong prediction: that hierarchy connects ICD-11
+    to ICD-11. A rollup from the MeSH node still cannot cross into it. The
+    missing edge was never vertical within a vocabulary, it was sideways
+    between two.
+
+    So: for a Disease node created under an ICD key, resolve its title through
+    the same machinery a trial's condition goes through - the rewritings, then
+    the NCIt/CDISC bridge. If that lands on a MeSH Disease, the ICD concept is
+    a kind of it, and SUBTYPE_OF says so.
+
+    Runs last, because alias_by_name does not exist until load_vocab_aliases
+    and load_mesh_scr have run.
+
+    Deliberately NOT symmetric and not SAME_AS. "COVID-19, virus identified"
+    is narrower than "COVID-19", not equal to it, and every one of these is a
+    specialisation or nothing. add_subtype refuses anything that would close a
+    cycle, which is what stops a chain of these from folding two trees into a
+    loop.
+    """
+    t0 = b._step("cross_vocab")
+    n = skipped = 0
+    for dkey, title in b.foreign_disease.items():
+        target = None
+        for v in condition_variants(title):
+            f = fold(v)
+            hit = b.mesh_by_name.get(f) or b.alias_by_name.get(f)
+            if hit and hit.startswith("MESH:"):
+                target = hit
+                break
+        if not target or target == dkey:
+            continue
+        # A MeSH node that is only a category word is where every unmatched
+        # ICD title would otherwise land - the same trap that put 5,027 trials
+        # on Anxiety Disorders through the bare word "Anxiety".
+        if target in b.generic_disease_keys:
+            skipped += 1
+            continue
+        if add_subtype(b, dkey, target, "cross_vocab",
+                       match_method="name_variant"):
+            n += 1
+    b.stats["cross_vocab_links"] = n
+    b.stats["cross_vocab_generic_skipped"] = skipped
+    b._done("cross_vocab", t0, n)
+
+
+ALL = ALL + [load_cross_vocab]
