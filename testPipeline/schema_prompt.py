@@ -287,6 +287,14 @@ THINGS THAT WILL MISLEAD YOU
   Never use `WHERE t.name = '...'`: stored names are capitalised, so equality
   on a lowercase phrase matches nothing.
 
+* A broad condition needs a rollup, and the tree now crosses vocabularies.
+  4,190 edges join an ICD concept to the MeSH disease it specialises, so
+  `COVID-19, virus identified` is reachable from `COVID-19`:
+      MATCH (d:Disease {{name:'COVID-19', vocabulary:'MeSH'}})
+      MATCH (t:ClinicalTrial)-[:STUDIES]->(x:Disease)
+      WHERE x = d OR (x)-[:SUBTYPE_OF*1..3]->(d)
+      RETURN count(DISTINCT t)
+  Bound the depth. `*` unbounded over 31,000 disease nodes is slow.
 * Five of the eleven agencies hold NO products: NHRA (Bahrain), DHA (Dubai),
   DOH (Abu Dhabi), MOH-OM (Oman), MOPH-QA (Qatar). The nodes exist so the
   region query works, but nothing was ever published for them. A count of

@@ -167,7 +167,10 @@ Every edge records how it was established.
 | `name` | the condition as written IS a MeSH heading or entry term | **treat as a hint** |
 | `name_variant` | a rewriting reached MeSH - a stage qualifier stripped, a plural, "cancer" for "neoplasms" | weaker |
 | `vocab_alias` | NCIt or CDISC lists the phrase as a synonym of a concept that reaches MeSH | weaker |
+| `name_squashed` | same letters, separators in different places — `Sars-CoV2` for `SARS-CoV 2` | weaker |
 | `icd_name` | no MeSH form matched, an ICD title did | **weakest** |
+| `ncit_oncology` | on `TESTED_IN` — matched via an NCIt antineoplastic synonym | good |
+| `inn_usan` | on `TESTED_IN` — the international spelling of a US-named drug | good |
 | `provisional` | the name never resolved | **weak** |
 
 `CONDUCTED_IN` and `STUDIES` are entirely name-matched - **not one
@@ -218,6 +221,25 @@ the condition field, so true recall is somewhat better than these numbers.
 Two things are deliberately never linked and should not be chased:
 `Healthy` (9,333 trials - healthy-volunteer studies have no disease), and any
 term MeSH files outside its disease trees.
+
+### A broad condition needs the rollup, and it now crosses vocabularies
+
+```cypher
+MATCH (d:Disease {name:'COVID-19', vocabulary:'MeSH'})
+MATCH (t:ClinicalTrial)-[:STUDIES]->(x:Disease)
+WHERE x = d OR (x)-[:SUBTYPE_OF*1..3]->(d)
+RETURN count(DISTINCT t)
+```
+
+Without the rollup that question returns the trials linked to the MeSH node
+alone. MeSH and ICD used to be unconnected trees, so an ICD-11 node like
+`COVID-19, virus identified` was unreachable from `COVID-19` however you
+traversed. 4,190 `SUBTYPE_OF` edges now join an ICD concept to the MeSH
+disease it specialises, and that is what the `*1..3` above walks.
+
+Always bound the depth. There is a gate check asserting no disease is its own
+ancestor, but an unbounded `*` over 31,000 nodes is slow even when the tree is
+sound.
 
 ### Dates do not compare
 
