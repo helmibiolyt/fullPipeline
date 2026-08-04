@@ -501,6 +501,15 @@ TRAPS = [
  # Registries write the same name with separators in different places:
  # "SARS-CoV 2" and "Sars-CoV2", "Covid19" and "COVID-19". fold() turns
  # punctuation into spaces, so those landed on different keys and never met.
+ # "Overweight and Obesity" is two diseases. The first-hit loop stopped at
+ # Overweight, so 670 ct.gov trials were linked to half of what they said.
+ ("a compound condition links to every part",
+  "MATCH ()-[e:STUDIES {match_method:'name_part'}]->() RETURN count(*) AS n",
+  lambda r: r[0]["n"] > 500),
+ ("a trial naming both reaches both",
+  "MATCH (t:ClinicalTrial)-[:STUDIES]->(a:Disease {name:'Obesity'}) "
+  "MATCH (t)-[:STUDIES]->(b:Disease {name:'Overweight'}) "
+  "RETURN count(DISTINCT t) AS n", lambda r: r[0]["n"] > 300),
  ("the separator-insensitive tier fires",
   "MATCH ()-[e:STUDIES {match_method:'name_squashed'}]->() RETURN count(*) AS n",
   lambda r: r[0]["n"] > 100),

@@ -27,8 +27,8 @@ import re
 
 import countries
 import lake
-from normalise import (condition_variants, fold, is_placeholder,
-                       norm_company, squash)
+from normalise import (condition_parts, condition_variants, fold,
+                       is_placeholder, norm_company, squash)
 
 # --------------------------------------------------------------------------
 # Nine registries describe the same three facts in their own words. Left raw,
@@ -579,9 +579,26 @@ def _trial(b, key, registry, source, sponsor="", conditions="", interventions=""
         # reads as a finding and states nothing; 1,278 did before this, and
         # 10 survived a first attempt that guarded the query string instead.
         if dkey and mth != "name" and dkey in b.generic_disease_keys:
-            continue
+            dkey = None
         if dkey:
             b.w.edge("STUDIES", key, dkey, match_method=mth, source=source)
+
+        # A cell naming several conditions is several conditions. The loop
+        # above stops at the first hit, so "Overweight and Obesity" linked to
+        # Overweight and never to Obesity - 670 ct.gov trials linked to half
+        # of what they said. Each part is resolved on its own and every one
+        # that lands gets an edge; the Writer drops a duplicate, so a part
+        # that agrees with the whole-term match costs nothing.
+        for part in condition_parts(c):
+            pk = b.mesh_by_name.get(fold(part))
+            if not pk:
+                for v in condition_variants(part):
+                    pk = b.mesh_by_name.get(fold(v))
+                    if pk:
+                        break
+            if pk and pk != dkey and pk not in b.generic_disease_keys:
+                b.w.edge("STUDIES", key, pk, match_method="name_part",
+                         source=source)
 
     for i in _terms(interventions, kind="intervention"):
         m = b.r.resolve(i)

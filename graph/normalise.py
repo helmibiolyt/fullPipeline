@@ -358,7 +358,11 @@ _COND_QUALIFIER = re.compile(
 _COND_CANCER = re.compile(
     r"(?<![a-z])(cancers?|tumou?rs?|malignanc(?:y|ies))(?![a-z])", re.I)
 
-_COND_SPLIT = re.compile(r"[ ]+and[ ]+|[ ]*[/][ ]*", re.I)
+# "&" is as common as "and" - "Obesity & Overweight" is 204 ct.gov trials -
+# and "&amp;" is the HTML entity arriving unescaped from a scrape, which
+# produced conditions reading "Obesity &Amp".
+_COND_SPLIT = re.compile(
+    r"[ ]+and[ ]+|[ ]*&(?:amp;?)?[ ]*|[ ]*[/][ ]*|[ ]+,[ ]+", re.I)
 
 # A manifestation appended to a disease name: "COVID-19 Pneumonia", "COVID-19
 # Respiratory Infection", "COVID-19 Vaccines". The disease is the head and the
@@ -454,6 +458,25 @@ def condition_variants(term: str):
         c = _push(part)
         if c:
             yield c
+
+
+def condition_parts(term: str):
+    """The independent conditions inside one cell, if there are several.
+
+    "Overweight and Obesity" is two diseases and a trial naming it studies
+    both. condition_variants yields the parts too, but a caller taking the
+    FIRST hit stops at "Overweight" and the trial never reaches Obesity - 670
+    ct.gov trials were linked to exactly half of what they said.
+
+    Only splits; no rewriting. The caller resolves each part itself, so a part
+    that reaches nothing costs nothing.
+    """
+    t = " ".join((term or "").split())
+    if not t:
+        return []
+    parts = [p.strip(" -	") for p in _COND_SPLIT.split(t)]
+    out = [p for p in parts if len(p) >= 4]
+    return out if len(out) > 1 else []
 
 
 def squash(s: str) -> str:
