@@ -268,8 +268,16 @@ answer.
 
 ## What is NOT established
 
-- These numbers come from MiniMax-M2. A different model may need different
-  budgets — the *rules* should hold, the constants may not.
+- **Every number in this file was measured on `MiniMax-M2`. The backend ships
+  `MiniMax-M2.7-highspeed`** — orchestrator, subagent, schema and verification
+  all use it. `testPipeline` now points at the same model, so the next full run
+  measures what actually ships, and the figures above should be treated as the
+  previous model's until it has been repeated.
+
+  What should transfer: the store-choice findings, the truncation handling,
+  `resolve_condition`, the prompt rules. What should not be assumed: the
+  constants — `LIMIT 300`, the four-call budgets, `RUN_BEFORE_SWITCH`. Those
+  were tuned against one model's behaviour.
 - 22 questions × 5 arms is enough to separate agentic from fixed-parallel, and
   not enough to tune the constant in §4. Three consecutive calls is a
   measured-plausible choice, not an optimum.
