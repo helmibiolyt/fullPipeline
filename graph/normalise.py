@@ -164,19 +164,31 @@ class Resolver:
     # molregno became may have no UNII at all. Last tier, so a gsrs name always
     # wins over a ChEMBL research code.
     alias: dict[str, str] = field(default_factory=dict)
+    #: folded alias -> the tier name a hit reports, so a vocabulary's
+    #: contribution can be measured instead of assumed.
+    alias_method: dict[str, str] = field(default_factory=dict)
     collisions: list[tuple[str, str, str]] = field(default_factory=list)
     blocked_stereo: set[str] = field(default_factory=set)
     _pending: list[tuple[str, str]] = field(default_factory=list)
     _final: bool = False
 
-    def add_alias(self, name: str, key: str) -> None:
+    def add_alias(self, name: str, key: str, method: str = "synonym") -> None:
         """Register name -> an arbitrary node key. Never overrides a real
-        identifier match; see `alias`."""
+        identifier match; see `alias`.
+
+        `method` is what a hit through this name reports, and it exists so a
+        contribution can be attributed afterwards. Every alias used to report
+        "synonym", which is also what ChEMBL's own synonyms report - so once
+        NCIt's antineoplastic names were added there was no way to ask whether
+        they had produced a single edge. The STUDIES tiers were separated for
+        exactly this reason and TESTED_IN was not.
+        """
         if not name or not key:
             return
         e = fold(name)
         if e and usable_name(e) and e not in self.exact:
-            self.alias.setdefault(e, key)
+            if self.alias.setdefault(e, key) == key:
+                self.alias_method.setdefault(e, method)
 
     def add(self, name: str, unii: str) -> None:
         """Register one name -> UNII mapping. Stereo is deferred to finalise()."""
@@ -262,7 +274,7 @@ class Resolver:
             return Match(f"UNII:{u}", "stereo", t)
         a = self.alias.get(e)
         if a:
-            return Match(a, "synonym", e)
+            return Match(a, self.alias_method.get(e, "synonym"), e)
         return Match(f"NAME:{e}", "provisional", e)
 
     def stats(self) -> dict:

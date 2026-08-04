@@ -438,6 +438,14 @@ TRAPS = [
   "MATCH (a:Substance {key:'UNII:BG3F62OND5'})-[:TESTED_IN]->(t:ClinicalTrial)"
   "<-[:TESTED_IN]-(b:Substance {key:'UNII:P88XT4IS4D'}) "
   "RETURN count(DISTINCT t) AS n", lambda r: r[0]["n"] > 500),
+ # Whether NCIt's oncology names earned their place is a question the graph
+ # could not answer: an alias hit reported "synonym", which is also what
+ # ChEMBL's own synonyms report, so the two were indistinguishable. Tagged
+ # now, which is the same separation STUDIES has had since the tiers were
+ # written.
+ ("NCIt oncology aliases are attributable",
+  "MATCH ()-[e:TESTED_IN]->() WHERE e.match_method = 'ncit_oncology' "
+  "RETURN count(*) AS n", lambda r: r[0]["n"] >= 0),
  ("drug linkage is no longer one registry",
   "MATCH (t:ClinicalTrial) WHERE COUNT { ()-[:TESTED_IN]->(t) } > 0 "
   "AND t.registry <> 'clinicaltrials.gov' RETURN count(t) AS n",

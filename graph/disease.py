@@ -767,7 +767,7 @@ def load_antineoplastic_aliases(b):
         for x in names:
             if b.r.resolve(x).resolved:
                 continue
-            b.r.add_alias(x, hit)
+            b.r.add_alias(x, hit, method="ncit_oncology")
             n += 1
     b.stats["antineoplastic_aliases"] = n
     b._done("antineoplastic", t0, n)
