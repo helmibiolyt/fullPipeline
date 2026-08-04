@@ -26,21 +26,13 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import lake                                              # noqa: E402
+import neo                                               # noqa: E402
 import trials as T                                       # noqa: E402
 from normalise import fold                               # noqa: E402
 
 DRUGGY = ("drug:", "biological:")
 
 
-def driver():
-    from dotenv import load_dotenv
-    load_dotenv(pathlib.Path(__file__).resolve().parent.parent
-                / "testPipeline" / ".env")
-    from neo4j import GraphDatabase
-    return GraphDatabase.driver(
-        os.environ["NEO4J_URI"],
-        auth=(os.environ.get("NEO4J_USER", "neo4j"),
-              os.environ["NEO4J_PASSWORD"]))
 
 
 def main() -> None:
@@ -62,8 +54,8 @@ def main() -> None:
     # thousands of round trips.
     top = [t for t, _ in terms.most_common(4000)]
     known = set()
-    drv = driver()
-    with drv.session(database=os.getenv("NEO4J_DATABASE", "biolyt")) as s:
+    drv = neo.driver()
+    with drv.session(database=neo.config()[3]) as s:
         for i in range(0, len(top), 500):
             batch = [fold(t) for t in top[i:i + 500]]
             for r in s.run(

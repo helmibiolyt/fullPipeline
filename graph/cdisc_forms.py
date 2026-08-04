@@ -23,6 +23,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import lake                                              # noqa: E402
+import neo                                               # noqa: E402
 
 SDTM = "Ontologies_Standards/cdisc.org/CDISC/data/SDTM Terminology.csv"
 CODELIST = "Dosage Form"
@@ -52,15 +53,7 @@ def cdisc_forms() -> dict[str, str]:
 
 
 def graph_forms() -> list[tuple[str, int]]:
-    from dotenv import load_dotenv
-    load_dotenv(pathlib.Path(__file__).resolve().parent.parent
-                / "testPipeline" / ".env")
-    from neo4j import GraphDatabase
-    drv = GraphDatabase.driver(
-        os.environ["NEO4J_URI"],
-        auth=(os.environ.get("NEO4J_USER", "neo4j"),
-              os.environ["NEO4J_PASSWORD"]))
-    with drv.session(database=os.getenv("NEO4J_DATABASE", "biolyt")) as s:
+    with neo.session() as s:
         return [(r["v"], r["n"]) for r in s.run(
             "MATCH (p:Product) WHERE p.form <> '' "
             "RETURN p.form AS v, count(*) AS n ORDER BY n DESC")]

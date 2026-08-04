@@ -42,6 +42,8 @@ import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import neo                                               # noqa: E402
+
 API = "https://clinicaltrials.gov/api/v2/studies"
 
 # (what to ask ct.gov, the MeSH heading the graph files it under).
@@ -87,15 +89,6 @@ def ctgov_total(condition: str, retries: int = 3) -> int | None:
     return None
 
 
-def driver():
-    from dotenv import load_dotenv
-    load_dotenv(pathlib.Path(__file__).resolve().parent.parent
-                / "testPipeline" / ".env")
-    from neo4j import GraphDatabase
-    return GraphDatabase.driver(
-        os.environ["NEO4J_URI"],
-        auth=(os.environ.get("NEO4J_USER", "neo4j"),
-              os.environ["NEO4J_PASSWORD"]))
 
 
 # Restricted to trials this graph took FROM ct.gov, so the comparison is
@@ -118,12 +111,12 @@ def main() -> None:
     if a.conditions:
         pairs = [(c.strip(), c.strip()) for c in a.conditions.split(",")]
 
-    drv = driver()
+    drv = neo.driver()
     print(f"{'condition':<30}{'ct.gov':>9}{'graph':>9}{'recall':>9}")
     print("-" * 57)
     tot_reg = tot_graph = 0
     rows = []
-    with drv.session(database=os.getenv("NEO4J_DATABASE", "biolyt")) as s:
+    with drv.session(database=neo.config()[3]) as s:
         for cond, mesh in pairs:
             reg = ctgov_total(cond)
             if reg is None:
