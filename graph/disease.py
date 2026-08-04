@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import lake
 from normalise import (COND_TOO_GENERIC, condition_variants, fold,
-                       usable_name)
+                       squash, usable_name)
 
 L = {
     "mesh":        "Ontologies_Standards/meshb.nlm.nih.gov/mesh_data/mesh_descriptors.csv",
@@ -158,6 +158,7 @@ def load_mesh(b):
         if fold(name) in COND_TOO_GENERIC:
             b.generic_disease_keys.add(dkey)
         b.mesh_by_name.setdefault(fold(name), dkey)
+        _index_squashed(b, name, dkey)
         # The stored property is capped at 30 for readability; the MATCHER is
         # not. One number was deciding both, and 'renal cell carcinoma' is
         # entry term 40 of 'Carcinoma, Renal Cell' - so 313 ct.gov trials
@@ -167,6 +168,7 @@ def load_mesh(b):
             f = fold(syn)
             if len(f) >= 4:
                 b.mesh_by_name.setdefault(f, dkey)
+                _index_squashed(b, syn, dkey)
         for t in trees:
             tree_owner.setdefault(t, dkey)
             if "." in t:
@@ -637,6 +639,27 @@ def _vocab_concepts():
             out += [s.strip()
                     for s in (row.get("CDISC Synonym(s)") or "").split(";")]
             yield [x for x in out if x]
+
+
+def _index_squashed(b, name: str, dkey: str) -> None:
+    """Index a disease name with its separators removed.
+
+    Registries write "SARS-CoV 2" and "Sars-CoV2", "Covid19" and "COVID-19".
+    fold() turns punctuation into spaces, so those land on different keys and
+    a trial writing one never reaches a node named the other.
+
+    A squashed key that two DIFFERENT diseases would share is poisoned rather
+    than given to whichever arrived first - a separator is not always noise,
+    and a wrong disease link reads as a finding.
+    """
+    k = squash(name)
+    if len(k) < 6:                    # short squashes collide too easily
+        return
+    have = b.mesh_squashed.get(k)
+    if have is None:
+        b.mesh_squashed[k] = dkey
+    elif have != dkey:
+        b.mesh_squashed[k] = ""       # ambiguous: never usable
 
 
 def _may_alias(b, folded: str) -> bool:

@@ -498,6 +498,12 @@ TRAPS = [
   "MATCH (dd:Disease {name:'COVID-19', vocabulary:'MeSH'}) "
   "RETURN rollup, COUNT { (:ClinicalTrial)-[:STUDIES]->(dd) } AS direct",
   lambda r: r[0]["rollup"] >= r[0]["direct"]),
+ # Registries write the same name with separators in different places:
+ # "SARS-CoV 2" and "Sars-CoV2", "Covid19" and "COVID-19". fold() turns
+ # punctuation into spaces, so those landed on different keys and never met.
+ ("the separator-insensitive tier fires",
+  "MATCH ()-[e:STUDIES {match_method:'name_squashed'}]->() RETURN count(*) AS n",
+  lambda r: r[0]["n"] > 100),
  ("the vocabulary bridge fires",
   "MATCH ()-[e:STUDIES {match_method:'vocab_alias'}]->() RETURN count(e) AS n",
   lambda r: r[0]["n"] > 5_000),

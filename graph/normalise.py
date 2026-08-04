@@ -425,3 +425,18 @@ def condition_variants(term: str):
         c = _push(part)
         if c:
             yield c
+
+
+def squash(s: str) -> str:
+    """fold(), then remove the spaces too.
+
+    Registries write the same name with the separators in different places -
+    "SARS-CoV 2" and "Sars-CoV2", "Covid19" and "COVID-19", "Non Small Cell"
+    and "Non-Small-Cell". fold() turns punctuation into spaces, so those still
+    land on different keys and never meet.
+
+    This is a comparison key only. It is never stored and never displayed: it
+    is deliberately lossy, and "vitamin d" squashing to "vitamind" is fine for
+    matching and useless for reading.
+    """
+    return fold(s).replace(" ", "")

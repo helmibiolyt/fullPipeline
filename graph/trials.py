@@ -28,7 +28,7 @@ import re
 import countries
 import lake
 from normalise import (condition_variants, fold, is_placeholder,
-                       norm_company)
+                       norm_company, squash)
 
 # --------------------------------------------------------------------------
 # Nine registries describe the same three facts in their own words. Left raw,
@@ -563,6 +563,13 @@ def _trial(b, key, registry, source, sponsor="", conditions="", interventions=""
             dkey = b.alias_by_name.get(fv)
             if dkey:
                 mth = "vocab_alias"
+                break
+            # Same letters, different separators: "Sars-CoV2" for "SARS-CoV 2",
+            # "Covid19" for "COVID-19". A squashed key shared by two diseases
+            # is stored empty and refused here.
+            sq = b.mesh_squashed.get(squash(v))
+            if sq:
+                dkey, mth = sq, "name_squashed"
                 break
         if not dkey:
             dkey = b.icd_by_name.get(fold(c))
