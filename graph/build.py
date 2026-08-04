@@ -528,6 +528,9 @@ class Build:
         # mesh_by_name, which does not exist until load_mesh has run.
         for fn in disease.ALL:
             fn(self)
+        # Crosswalks that join on something the disease loaders build.
+        for fn in ontology.LATE:
+            fn(self)
         for fn in products.ALL:
             fn(self)
         for fn in trials.ALL:

@@ -174,7 +174,14 @@ def load_ncit_crosswalks(b):
     b._done("ncit_crosswalks", t0, n)
 
 
-ALL = ALL + [load_ncit_crosswalks]
+# NOT in ALL. It reads b.hgnc_target, which load_hgnc fills, and load_hgnc is
+# in disease.ALL - which runs AFTER ontology.ALL. Left in ALL it read an empty
+# map and attached 0 of 6,470 HGNC rows while logging a plausible line.
+#
+# build.py runs LATE after the disease loaders. A loader that depends on
+# another module's output belongs in a list that says so, rather than in the
+# same one and hoping the order holds.
+LATE = [load_ncit_crosswalks]
 
 
 SDTM_TERMS = "Ontologies_Standards/cdisc.org/CDISC/data/SDTM Terminology.csv"

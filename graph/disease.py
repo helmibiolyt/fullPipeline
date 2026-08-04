@@ -826,7 +826,18 @@ def load_cross_vocab(b):
     n = skipped = 0
     for dkey, title in b.foreign_disease.items():
         target = None
-        for v in condition_variants(title):
+        # ICD qualifies a heading after a comma - "COVID-19, virus
+        # identified", "Coronavirus infection, unspecified site". The head is
+        # the disease and the tail is the coding distinction, so the head is
+        # what should reach MeSH. condition_variants does not split on a
+        # comma, and must not: "Carcinoma, Renal Cell" is MeSH's own inverted
+        # heading, where the comma is part of the name.
+        heads = [title]
+        if "," in title:
+            head = title.split(",", 1)[0].strip()
+            if len(head) >= 5:
+                heads.append(head)
+        for v in (x for h in heads for x in condition_variants(h)):
             f = fold(v)
             hit = b.mesh_by_name.get(f) or b.alias_by_name.get(f)
             if hit and hit.startswith("MESH:"):
