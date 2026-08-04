@@ -31,9 +31,14 @@ run() {
 run graph/make_tech_doc.py
 run graph/make_data_doc.py
 
-# The deck needs python-pptx, which the graph host has no reason to carry.
-# Skipping is fine and saying so is the point; failing the whole script for a
-# missing optional dependency would train people to ignore its exit code.
+# The graph host carries none of the rendering dependencies - not python-pptx,
+# and not everything make_data_doc needs either. Running there prints SKIPPED
+# and STALE, which is correct and is what it did on the first automatic run.
+#
+# So this is a LAPTOP script that the rebuild also calls: on the host it
+# reports honestly that the docs need regenerating elsewhere, and here it
+# actually regenerates them. Installing a PDF toolchain on the graph VM to
+# make the message go away would be solving the wrong problem.
 if python -c "import pptx" 2>/dev/null; then
     run presentation/make_deck.py
 else
