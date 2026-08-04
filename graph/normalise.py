@@ -360,6 +360,21 @@ _COND_CANCER = re.compile(
 
 _COND_SPLIT = re.compile(r"[ ]+and[ ]+|[ ]*[/][ ]*", re.I)
 
+# A manifestation appended to a disease name: "COVID-19 Pneumonia", "COVID-19
+# Respiratory Infection", "COVID-19 Vaccines". The disease is the head and the
+# tail says what it did or what is being given for it - so the head is what
+# should reach the dictionary.
+#
+# Deliberately a short explicit list, NOT "strip the last word". This is the
+# suffix twin of _COND_QUALIFIER, and it carries the same risk in reverse:
+# a general prefix rule would take "Lung Cancer" to "Lung", and prefix
+# expansion was measured and rejected for exactly that reason.
+_COND_MANIFESTATION = re.compile(
+    r"[ ]+(?:pneumonia|respiratory[ ]+infection|acute[ ]+respiratory[ ]+"
+    r"distress[ ]+syndrome|ards|vaccines?|vaccination|immunisation|"
+    r"immunization|disease|infection|infections|pneumonitis|sequelae|"
+    r"complications?)$", re.I)
+
 # Category words that are real MeSH headings and useless as a link. Stripping
 # a qualifier off "Chronic Disease" leaves "Disease", which matched and put
 # 1,278 trials on a node that says nothing about any of them. Checked only on
@@ -410,6 +425,20 @@ def condition_variants(term: str):
     # Plural and singular. MeSH heads neoplasms plural, most diseases singular.
     for cand in ((base[:-1],) if base.endswith("s") else (base + "s",)):
         c = _push(cand)
+        if c:
+            yield c
+
+    # Strip an appended manifestation, repeatedly: "COVID-19 Vaccination
+    # Disease" needs two passes. The head must still be substantial - a
+    # two-letter remainder is not a disease name.
+    head = base
+    for _ in range(2):
+        nxt = _COND_MANIFESTATION.sub("", head)
+        if nxt == head:
+            break
+        head = nxt
+    if head != base and len(head) >= 5:
+        c = _push(head)
         if c:
             yield c
 

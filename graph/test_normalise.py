@@ -269,6 +269,16 @@ _rc = _v("Advanced Renal Cell Carcinoma")
 check("...and it is last",
       _rc.index("Renal Cell Carcinoma") < len(_rc) - 1, True)
 check("empty yields nothing", _v(""), [])
+# The suffix twin of the qualifier strip. "COVID-19 Pneumonia" is a COVID
+# trial; the tail says what the disease did.
+check("appended manifestation stripped", "COVID-19" in _v("COVID-19 Pneumonia"), True)
+check("...and vaccines too", "COVID-19" in _v("COVID-19 Vaccines"), True)
+# The guard that matters: a general "drop the last word" rule would take Lung
+# Cancer to Lung, which is why prefix expansion was measured and rejected.
+check("a real disease is not truncated to an organ",
+      "Lung" in _v("Lung Cancer"), False)
+check("...and Breast Cancer keeps its head",
+      "Breast" in _v("Breast Cancer"), False)
 check("no duplicates", len(_v("Solid Tumors")), len(set(_v("Solid Tumors"))))
 # Stripping the qualifier off "Chronic Disease" leaves "Disease", which is a
 # real MeSH heading and told you nothing - it put 1,278 trials on a node that
