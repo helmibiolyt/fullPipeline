@@ -244,6 +244,52 @@ _TRAILING_LIMIT = re.compile(r"\bLIMIT\s+\d+\s*;?\s*$", re.I)
 COUNT_CEILING = 200_000
 
 
+_FULLTEXT_TERM = re.compile(
+    r"queryNodes\(\s*'[^']+'\s*,\s*'([^']*)'", re.I)
+
+
+def _phrase_check(cypher: str) -> str:
+    """When a full-text search passes an UNQUOTED multi-word phrase, count
+    what the quoted phrase would have matched and hand both numbers over.
+
+    The index is Lucene, so an unquoted phrase is an OR of its words. Asked
+    what trials investigate gene therapy, the agent searched 'gene therapy',
+    got 57,443 and reported it. The phrase matches 583; the word "therapy"
+    alone matches 54,876. A 98x overcount, stated as a finding, and the
+    benchmark scored the answer OK because nothing about it looks wrong.
+
+    15 of the benchmark's full-text calls were written this way, so it is the
+    normal mistake rather than an unlucky one.
+
+    Computing the other number rather than warning, for the reason
+    _true_total exists: a warning is advice and gets weighed against the rows
+    in front of it; a number is evidence.
+    """
+    m = _FULLTEXT_TERM.search(cypher)
+    if not m:
+        return ""
+    term = m.group(1).strip()
+    bare = term.replace('\\"', '"').strip()
+    if len(bare.split()) < 2 or bare.startswith('"'):
+        return ""
+    quoted = cypher.replace(f"'{term}'", "'\\\"" + term + "\\\"'", 1)
+    body = _TRAILING_LIMIT.sub("", quoted.strip()).strip()
+    if not body:
+        return ""
+    try:
+        rows, _ = A.run_cypher(f"CALL () {{ {body} }} WITH 1 AS x "
+                               f"LIMIT {COUNT_CEILING} RETURN count(x) AS total")
+        n = rows[0]["total"] if rows else None
+    except Exception:                                        # noqa: BLE001
+        return ""
+    if n is None:
+        return ""
+    return (f"PHRASE NOT QUOTED - you searched {bare!r} unquoted, and this "
+            f"index is Lucene, so that is an OR of its words. The QUOTED "
+            f"phrase matches {n:,} rows. Use {n:,} if you meant the phrase, "
+            f"and re-run with '\\\"{bare}\\\"' to see them. ")
+
+
 def _true_total(cypher: str) -> int | None:
     """How many rows the query would have returned without its LIMIT.
 
@@ -427,7 +473,7 @@ def _run_graph(args: dict) -> tuple[str, dict]:
     # few distinct values fill the whole limit, the rows that did not fit are
     # the answer. Aggregating is the fix, not a bigger LIMIT - the model cannot
     # read 5,000 rows either.
-    warn = ""
+    warn = _phrase_check(cypher)
     if truncated:
         total = _true_total(cypher)
         rec["true_total"] = total
