@@ -101,6 +101,19 @@ WHERE x = d OR (x)-[:SUBTYPE_OF*1..3]->(d)
 RETURN count(DISTINCT t) AS n
 """
 
+# The same question with no registry filter. The recall column is deliberately
+# ct.gov-only so the comparison is like-for-like, and that makes it BLIND to
+# any improvement affecting the other 21 registries: the cross-vocabulary link
+# raised the COVID rollup by 783 trials and moved the recall column not at
+# all, because the trials it reached come from IRCT and DRKS. This column is
+# here so that work is visible rather than looking like it did nothing.
+GRAPH_ALL = """
+MATCH (d:Disease {name: $mesh})
+OPTIONAL MATCH (t:ClinicalTrial)-[:STUDIES]->(x)
+WHERE x = d OR (x)-[:SUBTYPE_OF*1..3]->(d)
+RETURN count(DISTINCT t) AS n
+"""
+
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -112,8 +125,8 @@ def main() -> None:
         pairs = [(c.strip(), c.strip()) for c in a.conditions.split(",")]
 
     drv = neo.driver()
-    print(f"{'condition':<30}{'ct.gov':>9}{'graph':>9}{'recall':>9}")
-    print("-" * 57)
+    print(f"{'condition':<30}{'ct.gov':>9}{'graph':>9}{'recall':>9}{'all reg':>9}")
+    print("-" * 66)
     tot_reg = tot_graph = 0
     rows = []
     with drv.session(database=neo.config()[3]) as s:
@@ -122,12 +135,13 @@ def main() -> None:
             if reg is None:
                 continue
             got = s.run(GRAPH_Q, mesh=mesh).single()["n"]
+            allr = s.run(GRAPH_ALL, mesh=mesh).single()["n"]
             tot_reg += reg
             tot_graph += got
             rows.append((cond, reg, got))
             pct = f"{got/reg:.0%}" if reg else "-"
-            print(f"{cond[:29]:<30}{reg:>9,}{got:>9,}{pct:>9}")
-    print("-" * 57)
+            print(f"{cond[:29]:<30}{reg:>9,}{got:>9,}{pct:>9}{allr:>9,}")
+    print("-" * 66)
     if tot_reg:
         print(f"{'WEIGHTED':<30}{tot_reg:>9,}{tot_graph:>9,}"
               f"{tot_graph/tot_reg:>9.0%}")
