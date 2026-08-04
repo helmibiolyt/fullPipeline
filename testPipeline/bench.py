@@ -139,10 +139,30 @@ _ABOUT_A_LOOKUP = (
 )
 
 
+# A sentence whose SUBJECT is the store. "The graph does not record why a
+# trial failed" is a scoped, true statement about the data model; "there are
+# no trials for X" is an unscoped claim about the world. Only the second can
+# be wrong, and only the second is the failure this looks for.
+#
+# Matching on subject rather than on vocabulary because the vocabulary list
+# was wrong three times running - it had "separate drug class" and missed
+# "drug class", "relationship type" and missed "tracking relationship". There
+# is no end to that list. There is an end to the ways of naming the store.
+_STORE_SUBJECT = (
+    "the graph", "this graph", "our graph", "the database", "the dataset",
+    "this dataset", "the corpus", "this corpus", "the data ", "our data",
+    "the documents", "these documents", "the available data",
+    "regulatoryevent.", "approval.", "clinicaltrial.", "substance.",
+    "product.", "disease.",
+)
+
+
 def _is_denial(sent: str) -> bool:
     """True only for a sentence asserting the ANSWER is absent."""
     low = sent.strip().lower()
     if not any(p in low for p in _DENIAL_PHRASE):
+        return False
+    if any(w in low for w in _STORE_SUBJECT):
         return False
     if any(w in low for w in _ABOUT_SCHEMA):
         return False
