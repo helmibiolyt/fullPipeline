@@ -41,5 +41,17 @@ if [ "${build_rc}" -ne 0 ]; then
 fi
 
 bash deploy/import-graph.sh
-echo "=== IMPORT RC $?"
+import_rc=$?
+echo "=== IMPORT RC ${import_rc}"
+
+# The documents describe the schema, and their tables are generated from it -
+# so a schema change updates them silently and the prose goes stale without
+# anything saying so. Regenerated here, after the import, because the deck
+# reads its counts from the live graph.
+#
+# Never fails the rebuild: a missing weasyprint or python-pptx on this host is
+# not a reason to report a good graph as broken. It says STALE and moves on.
+if [ "${import_rc}" -eq 0 ]; then
+    bash deploy/refresh-docs.sh || echo "=== DOCS STALE - regenerate and commit"
+fi
 echo "=== DONE $(date -u +%FT%TZ)"
