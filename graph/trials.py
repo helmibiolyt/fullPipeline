@@ -423,6 +423,14 @@ _NOT_A_DRUG = {
     "best supportive care", "observation", "no treatment", "conventional",
 }
 
+# The same non-drugs written with a form or a role attached: "Placebo Oral
+# Tablet", "Placebo oral capsule", "Matching Placebo", "Placebo Comparator".
+# Exact matching caught none of them - roughly 1,200 arm mentions in ct.gov
+# alone. "Chemotherapy" belongs here too: it names a class of treatment, and
+# a trial arm saying only that has not told us which drug.
+_NOT_A_DRUG_SUBSTR = ("placebo", "chemotherapy", "sham ", "vehicle control",
+                      "standard of care", "best supportive care")
+
 
 def _terms(raw: str, kind: str = "condition") -> list[str]:
     """Split a registry cell into terms the dictionaries can be asked about.
@@ -443,7 +451,9 @@ def _terms(raw: str, kind: str = "condition") -> list[str]:
                 if nxt == p:
                     break
                 p = nxt
-            if is_placeholder(p) or " ".join(p.lower().split()) in _NOT_A_DRUG:
+            low_p = " ".join(p.lower().split())
+            if (is_placeholder(p) or low_p in _NOT_A_DRUG
+                    or any(w in low_p for w in _NOT_A_DRUG_SUBSTR)):
                 continue
             # Split the combination and keep every component that survives the
             # same filters. One arm can legitimately contribute three drugs.
@@ -451,7 +461,9 @@ def _terms(raw: str, kind: str = "condition") -> list[str]:
                 c = c.strip(" -	")
                 if not c or is_placeholder(c):
                     continue
-                if " ".join(c.lower().split()) in _NOT_A_DRUG:
+                low_c = " ".join(c.lower().split())
+                if (low_c in _NOT_A_DRUG
+                        or any(w in low_c for w in _NOT_A_DRUG_SUBSTR)):
                     continue
                 if 3 <= len(c) <= 120:
                     out.append(c)

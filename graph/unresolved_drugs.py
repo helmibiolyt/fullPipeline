@@ -9,10 +9,25 @@ Substance. The other 36% - roughly 83,500 trials - are the largest measurable
 gap left in this graph, and nothing has looked at what they actually contain.
 
 This extracts the drug-typed arms, strips the label the way the loader does,
-and asks the LIVE GRAPH which of the resulting terms it knows. Anything the
-graph cannot name is either a compound it genuinely does not hold, or text
-that is not a drug name at all - and the two need different fixes, so the
-point is to see the split rather than guess it.
+and asks the LIVE GRAPH which of the resulting terms it knows.
+
+READ THE MISSES CAREFULLY - this OVERSTATES the gap, and by how much varies.
+It compares against `Substance.norm_name` by equality, while the loader uses
+the full resolver, which also tries the salt and stereo tiers and the alias
+table. "Azithromycin" appears here as a miss and resolves perfectly well in
+the build, because the graph holds "Azithromycin anhydrous" and the salt tier
+finds it - 543 trials are linked through exactly that path.
+
+So a term listed below is one of three things, and they need different fixes:
+
+    a false miss     the resolver's later tiers handle it   (Azithromycin)
+    a naming split   the graph knows it under another name  (Paracetamol,
+                     which this data calls Acetaminophen)
+    genuinely absent no node for that compound at all       (Apatinib)
+
+Checking which costs one query per term. Do it before acting on a count from
+here - and note that Lapatinib sits beside Apatinib in the index, so a looser
+matcher is not the answer.
 
 Reads the lake and the graph, prints, changes nothing.
 """
