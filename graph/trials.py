@@ -802,14 +802,44 @@ def euctr_phase(row: dict) -> str:
     return _EUCTR_COMBINED.get(on, f"PHASE{on[0]}")
 
 
-def load_euctr(b):
-    """EU CTR, loaded for four columns only.
+_EUCTR_COND = "E.1.1 Medical condition(s) being investigated"
+# EudraCT asks for the condition TWICE: once as free text, and once coded
+# against MedDRA. The free text is what a sponsor typed in their own language
+# - "Magas vercukor", "Cancer de l'ovaire", "Tratamiento del dolor agudo" -
+# and mesh_by_name is English, so most of it resolves to nothing. That is most
+# of why eu_ctr sits at 36% disease linkage.
+#
+# E.1.2 Term is the same condition as a MedDRA term, in English, drawn from a
+# controlled list: "Rheumatoid arthritis", "Non-small cell lung cancer",
+# "Multiple myeloma". 79% of rows carry one and nothing read it.
+#
+# Both are passed. The coded term is not a REPLACEMENT - free text is more
+# specific when it is usable, and _terms already handles several conditions in
+# one cell, so the tiers can take whichever lands.
+_EUCTR_TERM = "E.1.2 Term"
 
-    The file has 132 columns, but from the fifth onward the header row is
-    inclusion-criteria prose that leaked into the header during scraping -
-    column names like 'A.\\tAgenti anticolinesterasici (azione indiretta)'.
-    The first four columns are intact and are the only ones used; the rest are
-    unreadable without re-scraping, which is a scraper fix, not a loader fix.
+
+def _euctr_conditions(row: dict) -> str:
+    free = (row.get(_EUCTR_COND) or "").strip()
+    term = (row.get(_EUCTR_TERM) or "").strip()
+    if term and term.lower() != free.lower():
+        return f"{free}; {term}" if free else term
+    return free
+
+
+def load_euctr(b):
+    """EU CTR, and the columns the damaged header was hiding.
+
+    The file has 8,102 columns because every distinct inclusion-criteria line
+    across 44,511 trials leaked into the header during scraping. The real
+    EudraCT fields are still among them and are identifiable, because EudraCT
+    numbers its sections: a genuine column is "A.3 Full title of the trial" or
+    "E.1.2 Term", while the junk is "A. Adequate renal function defined as".
+
+    So this reads by section number rather than by position. Title, phase and
+    the MedDRA-coded condition are filled on most rows and were all being
+    discarded on the reasoning that the header was unreadable past column four.
+    The header is; the data is not.
     """
     t0 = b._step("eu_ctr")
     key = L["euctr"]
@@ -839,8 +869,7 @@ def load_euctr(b):
         # columns match the real pattern. Title and phase are filled on ~100%
         # of rows and were being discarded.
         _trial(b, k, "eu_ctr", key, status=row.get("Trial Status", ""),
-               conditions=row.get("E.1.1 Medical condition(s) being investigated",
-                                  ""),
+               conditions=_euctr_conditions(row),
                phase=euctr_phase(row),
                title=_euctr(row, "A.3 Full title of the trial"))
     b.stats["euctr_header_damaged_cols"] = 128

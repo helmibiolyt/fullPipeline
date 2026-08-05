@@ -364,6 +364,26 @@ check("an intervention is not scanned for codes",
       T._terms("Drug: C692- something", kind="intervention"),
       ["C692- something"])
 
+print("\n_euctr_conditions() - the coded term beside the free text")
+
+
+def _eu(free, term):
+    return T._euctr_conditions({T._EUCTR_COND: free, T._EUCTR_TERM: term})
+
+
+# The sponsor typed Hungarian; MedDRA supplies the English the dictionary can
+# actually match. Both are kept - the free text is more specific when usable.
+check("a foreign free text gains its English term",
+      T._terms(_eu("Magas vercukor", "Type II diabetes mellitus")),
+      ["Magas vercukor", "Type II diabetes mellitus"])
+check("the term alone carries an empty condition",
+      _eu("", "Rheumatoid arthritis"), "Rheumatoid arthritis")
+check("an agreeing term is not repeated", _eu("Asthma", "Asthma"), "Asthma")
+check("...regardless of case", _eu("Asthma", "asthma"), "Asthma")
+check("no term leaves the condition alone", _eu("Ovarian cancer", ""),
+      "Ovarian cancer")
+check("neither yields nothing", _eu("", ""), "")
+
 print()
 if FAILS:
     print(f"{len(FAILS)} FAILURES\n")
