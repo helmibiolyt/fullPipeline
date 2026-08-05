@@ -377,6 +377,13 @@ def load_icd10(b):
         b.w.identifier(dkey, "ICD10", code, source=L["icd10_codes"],
                        match_method="name" if hit else "structured")
         resolved[code] = dkey
+        # Reachable by code as well as by title. Both spellings are stored
+        # because the registries do not agree on one: WHO writes "C692-" and
+        # CTRI's own file writes "B972", while this reference writes "C69.2"
+        # and "B97.2". Normalising at lookup time instead would mean guessing
+        # where the dot goes on a string that may not have lost one.
+        b.icd_by_code.setdefault(code.upper(), dkey)
+        b.icd_by_code.setdefault(code.upper().replace(".", ""), dkey)
         # Parent first, block second: a code's immediate parent is another
         # code where there is one, and only the top of a subtree hangs off the
         # block. Writing both would make the tree wrong, not merely redundant.

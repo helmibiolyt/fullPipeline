@@ -52,6 +52,10 @@ MAX_DOCS = 4
 MAX_SECONDS = 90
 STEP_TOKENS = 4000
 
+# How many times to re-ask when the provider ignores tool_choice="required"
+# on the first step. One was measured as enough twice and not enough once.
+FIRST_RETRIES = 3
+
 #: Consecutive calls to one store before it is withheld for a single call.
 #:
 #: This was a mechanical fix for the gggg failure - four graph queries, no
@@ -687,7 +691,7 @@ def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
     usable_names = {t["function"]["name"] for t in usable}
 
     run_of = {"query_graph": 0, "search_documents": 0}
-    retried_first = False
+    retried_first = 0
 
     try:
         for step in range(MAX_STEPS):
@@ -745,17 +749,30 @@ def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
             calls = msg.get("tool_calls") or []
 
             # tool_choice="required" is sent on step 0 and this provider does
-            # not always honour it: two of 116 questions came back fluent,
-            # sourced in tone, with zero lookups recorded. Asking again is the
-            # only enforcement available from this side of the API, and one
-            # retry was enough for both.
-            if step == 0 and offered and not calls and not retried_first:
-                retried_first = True
-                messages.append({"role": "user", "content": (
-                    "You did not call a tool. Do not answer from memory - "
-                    "you have no knowledge of this data. Call query_graph or "
-                    "search_documents now, then answer only from what it "
-                    "returns.")})
+            # not always honour it: it returns a PLAN instead - "Let me start
+            # by querying the graph for antibody products with EMA approval" -
+            # fluent, sourced in tone, with zero lookups recorded. That is the
+            # one behaviour this pipeline exists to rule out. Asking again is
+            # the only enforcement available from this side of the API.
+            #
+            # One retry was measured as enough on two questions and NOT enough
+            # on a third, so it retries FIRST_RETRIES times. The later attempts
+            # quote the model's own plan back at it, because a refusal that
+            # already names the query it wants to run answers a pointed nudge
+            # where it ignored the generic one.
+            if step == 0 and offered and not calls and retried_first < FIRST_RETRIES:
+                retried_first += 1
+                plan = (msg.get("content") or "").strip()[:300]
+                nudge = ("You did not call a tool. Do not answer from memory - "
+                         "you have no knowledge of this data. Call query_graph "
+                         "or search_documents now, then answer only from what "
+                         "it returns.")
+                if retried_first > 1 and plan:
+                    nudge = (f"You wrote a plan instead of calling a tool: "
+                             f"{plan!r}\n\nDo that. Emit it as a tool call now. "
+                             f"Text is not a lookup and nothing you write from "
+                             f"memory can be used.")
+                messages.append({"role": "user", "content": nudge})
                 out["forced_retry"] = True
                 continue
 
@@ -763,6 +780,17 @@ def run(question: str, k: int = 6, allow: tuple[str, ...] | None = None,
                 text = (msg.get("content") or "").strip()
                 if not text:
                     text = (msg.get("reasoning_content") or "").strip()
+                # A step-0 refusal that survived every retry leaves a PLAN in
+                # hand, not an answer. Publishing it would be the worst of both
+                # - unsourced prose wearing an answer's clothes. Say what
+                # happened instead.
+                if step == 0 and offered:
+                    out["error"] = "no tool call after %d retries" % retried_first
+                    out["answer"] = (
+                        "I could not answer this - the model declined to query "
+                        "either store, so there is nothing sourced to report. "
+                        "(What it proposed instead: %s)" % (text[:200] or "nothing"))
+                    break
                 out["answer"] = _clean_answer(text, messages, out)
                 break
 

@@ -323,6 +323,47 @@ check("...but a real disease still narrows",
 check("...and an exact 'Disease' still matches on tier one",
       _v("Disease"), ["Disease"])
 
+print("\n_terms() and the ICD-10 code it used to throw away")
+import trials as T                                       # noqa: E402
+
+
+def _codes(raw):
+    src = T._ctri_conditions(raw) if raw.lstrip().startswith("[") else raw
+    return [t[len(T.ICD_TERM):] for t in T._terms(src)
+            if t.startswith(T.ICD_TERM)]
+
+
+def _names(raw):
+    src = T._ctri_conditions(raw) if raw.lstrip().startswith("[") else raw
+    return [t for t in T._terms(src) if not t.startswith(T.ICD_TERM)]
+
+
+WHO = "Health Condition 1: C692- Malignant neoplasm of retina"
+JSON = ('[{"health_type": "Patients", "condition": "(1) ICD-10 Condition: '
+        'O80||Encounter for full-term uncomplicated delivery,"}]')
+
+check("WHO's code is captured", _codes(WHO), ["C692"])
+check("...and the name still survives it",
+      _names(WHO), ["Malignant neoplasm of retina"])
+check("CTRI's JSON code is captured", _codes(JSON), ["O80"])
+check("...and its rubric too", len(_names(JSON)), 1)
+check("a dotted code keeps its dot",
+      _codes("Health Condition 1: C50.9- Breast cancer"), ["C50.9"])
+# "O00-O9A" is a RANGE. The first code names the diagnosis; taking the whole
+# string would resolve to nothing.
+check("a range yields its first code",
+      _codes('[{"condition": "(1) ICD-10 Condition: O00-O9A||Pregnancy"}]'),
+      ["O00"])
+check("a condition with no code is untouched",
+      T._terms("Health Condition 1: Type 2 Diabetes"), ["Type 2 Diabetes"])
+# The marker must never reach a dictionary as if it were a disease name.
+check("the marker is not a condition name",
+      any(t.startswith(T.ICD_TERM) for t in _names(WHO)), False)
+# Interventions must be unaffected - the ICD rules are condition-only.
+check("an intervention is not scanned for codes",
+      T._terms("Drug: C692- something", kind="intervention"),
+      ["C692- something"])
+
 print()
 if FAILS:
     print(f"{len(FAILS)} FAILURES\n")

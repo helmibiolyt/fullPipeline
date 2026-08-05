@@ -310,9 +310,37 @@ answer.
   boxed warning in 2019. It did not; metformin carries one for lactic
   acidosis. The graph arm said it could not establish the answer and was
   scored worse for it.
+  **The graph budget binds on half the bank, and raising it does not help.**
+  M2.7's lookup count per question is bimodal — `{0:1, 1:23, 2:19, 3:20, 4:6,
+  5:47}` — so 53 of 116 questions use every call they are given. That made
+  `MAX_GRAPH=4` look like the obvious thing to raise. It is not.
+  `sweep_budget.py` reran the capped questions at 4 and at 10:
+
+  | budget | OK | RECOVERED | TRUNCATED | NO_ANSWER | PROVIDER_ERROR |
+  |---|---|---|---|---|---|
+  | MAX_GRAPH=4  | **6** | 3 | 3 | 1 | 1 |
+  | MAX_GRAPH=10 | **3** | 3 | 5 | 2 | 1 |
+
+  Ten is *worse*: clean answers halve and truncations rise. The mechanism is
+  visible in the per-row lookup counts — given a bigger budget the model does
+  not investigate further, it spends the extra calls re-querying, fills the
+  context with rows, and then has no room left to write the answer. A question
+  that finished cleanly at 4 truncates at 10. The cap was never the binding
+  constraint; the context window is.
+
+  Fourteen questions is small and these verdicts are noisy, so the claim is
+  the weak one it supports: there is no evidence that raising the cap helps,
+  and some that it hurts. `MAX_GRAPH=4` stays. If lookup depth is ever the
+  problem, the lever is the prompt — telling the model what a second query is
+  *for* — not the constant. That is the same finding as the rimegepant case
+  above, arrived at from the other direction.
+
+  (One row per arm is a `PROVIDER_ERROR` from a network outage during the run.
+  It is reported rather than dropped, and it falls on both arms equally.)
 - 22 questions × 5 arms is enough to separate agentic from fixed-parallel, and
-  not enough to tune the constant in §4. Three consecutive calls is a
-  measured-plausible choice, not an optimum.
+  not enough to tune `RUN_BEFORE_SWITCH` in §4. Three consecutive calls is a
+  measured-plausible choice, not an optimum. `MAX_GRAPH` *has* now been swept —
+  see above.
 - Retrieval quality was never scored — only whether evidence was returned and
   whether an answer falsely claimed absence. Whether the *right* chunks come
   back is a separate question that needs relevance judgements.

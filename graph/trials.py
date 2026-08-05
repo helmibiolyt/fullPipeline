@@ -380,7 +380,20 @@ _SEP = re.compile(r"\s*(?:[;|]|<\s*br\s*/?\s*>)\s*", re.I)
 # ICD-10 code, then the disease. Every one of CTRI's WHO rows carries this,
 # which is why 0% of them resolved.
 _COND_LABEL = re.compile(r"^\s*health\s+condition\s*\d*\s*:\s*", re.I)
-_ICD_PREFIX = re.compile(r"^\s*[A-Z]\d{2,3}(?:\.\d+)?\s*[-:]\s*")
+_ICD_PREFIX = re.compile(r"^\s*([A-Z]\d{2,3}(?:\.\d+)?)\s*[-:]\s*")
+
+# Marks a term that is an ICD-10 CODE rather than a condition name, so the
+# matcher can hold it back and use it only when every name tier has missed.
+# A prefix rather than a separate return value: _terms already feeds several
+# call sites and a second channel would have to be threaded through all of
+# them. No real condition begins with this.
+ICD_TERM = "\x00icd10:"
+
+# CTRI's own file writes the code inside its JSON, before a || marker:
+# '(1) ICD-10 Condition: O80||Encounter for full-term uncomplicated delivery'.
+# Ranges appear too - "O00-O9A", "P84-P84" - and the first code is the one
+# that names the diagnosis.
+_CTRI_CODE = re.compile(r"ICD-?10\s*Condition:\s*([A-Z]\d{2,3}(?:\.\d+)?)", re.I)
 # NL-OMON appends a MedDRA id: "...Iliac Artery (FLIA);10047079". _SEP already
 # splits it off, but a bare number left alone would count as a term.
 _BARE_CODE = re.compile(r"^\d{4,}$")
@@ -456,6 +469,11 @@ def _terms(raw: str, kind: str = "condition") -> list[str]:
     """
     out = []
     for part in _SEP.split(raw or ""):
+        # A code the CTRI JSON reader already extracted. It is not prose and
+        # every rule below would only damage it.
+        if (part or "").startswith(ICD_TERM):
+            out.append(part)
+            continue
         p = _DOSE.sub("", _TYPE.sub("", part or ""))
         if kind == "intervention":
             # Repeatedly, because labels nest: "Intervention1: Nil: Nil" needs
@@ -488,7 +506,18 @@ def _terms(raw: str, kind: str = "condition") -> list[str]:
             continue
         # Strip the registry's own labelling before the dictionary sees it.
         # Order matters: the label wraps the code, so the label goes first.
-        p = _ICD_PREFIX.sub("", _COND_LABEL.sub("", p)).strip(" -\t")
+        p = _COND_LABEL.sub("", p)
+        # Keep the code before discarding it. The name that follows is an ICD
+        # RUBRIC - "Other specified acquired deformities", "Encounter for
+        # full-term uncomplicated delivery" - phrased for a coding manual and
+        # not for MeSH, so the name tiers miss it and the code was the only
+        # thing that would have resolved. Emitted as a marked term so the
+        # matcher can hold it back as a fallback rather than treating it as a
+        # second condition.
+        m = _ICD_PREFIX.match(p)
+        if m:
+            out.append(ICD_TERM + m.group(1).upper())
+        p = _ICD_PREFIX.sub("", p).strip(" -\t")
         if _BARE_CODE.match(p):
             continue
         if 3 <= len(p) <= 120:
@@ -553,7 +582,17 @@ def _trial(b, key, registry, source, sponsor="", conditions="", interventions=""
         b.w.node("Company", ckey, source=source, name=sponsor, raw_names=sponsor)
         b.w.edge("SPONSORED_BY", key, ckey, match_method="structured", source=source)
 
+    # Codes are collected here and spent at the end, only if nothing else
+    # landed. Linking on both would give a trial two diseases where the
+    # registry stated one - the code and the rubric are the SAME diagnosis
+    # written twice, not two conditions.
+    icd_codes: list[str] = []
+    linked = False
+
     for c in _terms(conditions):
+        if c.startswith(ICD_TERM):
+            icd_codes.append(c[len(ICD_TERM):])
+            continue
         # Tried in order, first hit wins, and the tier is recorded. Order is
         # the design: taking ANY hit rather than the first would link a
         # renal-cell trial to plain "Carcinoma" via the split variant.
@@ -600,6 +639,7 @@ def _trial(b, key, registry, source, sponsor="", conditions="", interventions=""
             dkey = None
         if dkey:
             b.w.edge("STUDIES", key, dkey, match_method=mth, source=source)
+            linked = True
 
         # A cell naming several conditions is several conditions. The loop
         # above stops at the first hit, so "Overweight and Obesity" linked to
@@ -617,6 +657,26 @@ def _trial(b, key, registry, source, sponsor="", conditions="", interventions=""
             if pk and pk != dkey and pk not in b.generic_disease_keys:
                 b.w.edge("STUDIES", key, pk, match_method="name_part",
                          source=source)
+                linked = True
+
+    # Last resort, and only for a trial that got nothing from its own words.
+    # Not guarded against generic_disease_keys the way the name tiers are:
+    # that guard exists because a generic TITLE matches unrelated prose by
+    # accident, and a code cannot - the registry typed it to mean this.
+    if not linked:
+        for raw in icd_codes:
+            # Exact first, then the three-character category. WHO's ICD-10
+            # reference does not carry every subdivision a registry cites -
+            # E11.9 is absent, E11 is there - and the category is a real level
+            # of the classification, not a truncation: E11 IS "Type 2 diabetes
+            # mellitus", which is what a trial citing E11.9 studies. Worth 87%
+            # resolution against 63% for exact alone.
+            dkey = b.icd_by_code.get(raw) or (
+                b.icd_by_code.get(raw[:3]) if len(raw) > 3 else None)
+            if dkey:
+                b.w.edge("STUDIES", key, dkey, match_method="icd_code",
+                         source=source)
+                break
 
     for i in _terms(interventions, kind="intervention"):
         m = b.r.resolve(i)
@@ -907,7 +967,13 @@ def _ctri_conditions(raw: str) -> str:
         c = str((it or {}).get("condition", "")).strip()
         if not c:
             continue
-        # "(1) ICD-10 Condition: O80||Encounter for..." -> "Encounter for..."
+        # "(1) ICD-10 Condition: O80||Encounter for..." -> "Encounter for...",
+        # and the O80 kept alongside it. 63% of this file's rows carry a code
+        # and the name after it is an ICD rubric, which is most of why CTRI
+        # sits at 27% disease linkage against ct.gov's 71%.
+        code = _CTRI_CODE.search(c)
+        if code:
+            out.append(ICD_TERM + code.group(1).upper())
         if "||" in c:
             c = c.split("||", 1)[1]
         c = re.sub(r"^\s*\(\d+\)\s*", "", c)

@@ -97,6 +97,14 @@ class Build:
         # ICD titles, kept apart from mesh_by_name so a MeSH hit always wins
         # and a match against the weaker dictionary is recorded as such.
         self.icd_by_name: dict[str, str] = {}
+        # ICD-10 CODES, which are a different kind of evidence from ICD titles.
+        # A title is prose and matches other prose by accident, which is why
+        # icd_by_name is guarded hard and ranked weakest. A code is an exact
+        # token the registry chose deliberately - "C692- Malignant neoplasm of
+        # retina" - so it needs no such guard. Registries that write one are
+        # stating the diagnosis in a controlled vocabulary, and the loader was
+        # throwing it away.
+        self.icd_by_code: dict[str, str] = {}
         # NCIt/CDISC synonyms that reach a MeSH node. Separate again, so the
         # edge can record that the match came from a curated crosswalk rather
         # than from the registry writing MeSH's own heading.
