@@ -513,6 +513,21 @@ TRAPS = [
  ("trial shorthand reaches the drug",
   "MATCH ()-[e:TESTED_IN]->() WHERE e.match_method IN ['abbrev','regimen'] "
   "RETURN count(*) AS n", lambda r: r[0]["n"] > 300),
+ # euctr's header is damaged, its data is not. 44,511 trials had no title and
+ # no phase because the loader stopped at column four; EudraCT's own section
+ # numbering separates the 556 real columns from the criteria prose.
+ ("euctr trials have titles now",
+  "MATCH (t:ClinicalTrial {registry:'eu_ctr'}) WHERE t.title <> '' "
+  "RETURN count(t) AS n", lambda r: r[0]["n"] > 30_000),
+ ("euctr trials have a real phase",
+  "MATCH (t:ClinicalTrial {registry:'eu_ctr'}) WHERE t.phase <> 'NA' "
+  "RETURN count(t) AS n", lambda r: r[0]["n"] > 20_000),
+ # The value bleeds into the next section's label in the source. A title
+ # ending in a section code means the trim stopped working.
+ ("no euctr title carries the next section label",
+  "MATCH (t:ClinicalTrial {registry:'eu_ctr'}) "
+  "WHERE t.title =~ '.*\s[A-Z]\.[0-9].*' RETURN count(t) AS n",
+  lambda r: r[0]["n"] == 0),
  ("a compound condition links to every part",
   "MATCH ()-[e:STUDIES {match_method:'name_part'}]->() RETURN count(*) AS n",
   lambda r: r[0]["n"] > 500),

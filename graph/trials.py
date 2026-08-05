@@ -696,6 +696,52 @@ def load_who(b):
     b._done("who_trials", t0, n)
 
 
+# EudraCT's own section numbering, which is what separates a real column from
+# the criteria prose that polluted this header. A value sometimes runs into
+# the NEXT section's label - "No E.8 Design of the trial" - because the
+# scraper split on the wrong boundary, so a value is cut at the first section
+# code it contains.
+_EUCTR_BLEED = re.compile(r"\s+[A-Z]\.[0-9](?:\.[0-9]+)*\s+[A-Z].*$")
+
+
+def _euctr(row: dict, col: str) -> str:
+    """One EudraCT field, with the next section's label trimmed off."""
+    v = (row.get(col) or "").strip()
+    return _EUCTR_BLEED.sub("", v).strip() if v else ""
+
+
+#: The four phase flags EudraCT publishes, each Yes or No. Better than the
+#: single phase string other registries give: a trial that is both phase 1 and
+#: phase 2 says Yes twice, which is exactly the combined phase norm_phase has
+#: to infer from prose everywhere else.
+_EUCTR_PHASE = [
+    ("E.7.1 Human pharmacology (Phase I)", 1),
+    ("E.7.2 Therapeutic exploratory (Phase II)", 2),
+    ("E.7.3 Therapeutic confirmatory (Phase III)", 3),
+    ("E.7.4 Therapeutic use (Phase IV)", 4),
+]
+
+_EUCTR_COMBINED = {
+    (1,): "PHASE1", (2,): "PHASE2", (3,): "PHASE3", (4,): "PHASE4",
+    (1, 2): "PHASE1_PHASE2", (2, 3): "PHASE2_PHASE3", (3, 4): "PHASE3_PHASE4",
+}
+
+
+def euctr_phase(row: dict) -> str:
+    """The four Yes/No flags -> one canonical phase.
+
+    A pair that EudraCT allows and this graph has no value for - phase 1 and
+    phase 3 with nothing between them, or three flags at once - falls back to
+    the LOWEST, because that is the phase the trial has actually reached.
+    Claiming the highest would overstate development stage on 44,511 trials.
+    """
+    on = tuple(n for col, n in _EUCTR_PHASE
+               if _euctr(row, col).lower().startswith("yes"))
+    if not on:
+        return PHASE_NA
+    return _EUCTR_COMBINED.get(on, f"PHASE{on[0]}")
+
+
 def load_euctr(b):
     """EU CTR, loaded for four columns only.
 
@@ -727,10 +773,16 @@ def load_euctr(b):
         # The 22 translated copies - (de), (fr), (it) ... - are skipped:
         # mesh_by_name is English, so they would resolve to nothing and cost
         # a dictionary lookup each.
+        # The header is damaged, the DATA is not. EudraCT numbers its sections,
+        # so a real column is "A.3 Full title of the trial" while the junk is
+        # "A. Adequate renal function defined as" - and 556 of the 8,102
+        # columns match the real pattern. Title and phase are filled on ~100%
+        # of rows and were being discarded.
         _trial(b, k, "eu_ctr", key, status=row.get("Trial Status", ""),
                conditions=row.get("E.1.1 Medical condition(s) being investigated",
                                   ""),
-               title="")
+               phase=euctr_phase(row),
+               title=_euctr(row, "A.3 Full title of the trial"))
     b.stats["euctr_header_damaged_cols"] = 128
     b._done("eu_ctr", t0, n)
 
