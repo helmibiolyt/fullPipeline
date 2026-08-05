@@ -188,6 +188,14 @@ REAL VALUES — use these exactly, never invent one.
   ClinicalTrial.status  COMPLETED RECRUITING NOT_YET_RECRUITING
                  ACTIVE_NOT_RECRUITING ENROLLING_BY_INVITATION TERMINATED
                  WITHDRAWN SUSPENDED
+  ClinicalTrial.key  the registry id, as NAMESPACE:VALUE - 'NCT:NCT01045135',
+                 'EUCTR:2012-005198-30', 'CTRI:CTRI/2019/01/017061'. THERE IS
+                 NO `.id` PROPERTY. Cypher returns null for a property that
+                 does not exist instead of failing, so `t.id` yields a column
+                 of nulls and an answer built on it names no trial at all.
+                 To report which trial, return t.key. The full property list
+                 is: key, registry, title, status, phase, study_type,
+                 study_type_raw, enrollment, start_date, source, run_id.
 
 QUERY RECIPES — follow these shapes.
 
