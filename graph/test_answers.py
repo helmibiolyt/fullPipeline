@@ -506,9 +506,20 @@ TRAPS = [
  # 610 drug-typed ct.gov arms name nab-paclitaxel across three spellings. It
  # is paclitaxel bound to albumin - the moiety is unchanged and only the
  # presentation differs, exactly like a salt.
+ # The threshold sits BETWEEN the two states it has to tell apart, not just
+ # under the working one. Measured: 3,874 trials with the strip working, and
+ # the 610 nab-paclitaxel arms named above are what it would lose without it,
+ # so a break lands near 3,264. 3,500 separates them. The first version
+ # asserted > 3,900 - above the true value - and failed while the feature was
+ # working perfectly, which is the same brittle-threshold mistake the CTRI and
+ # cross_vocab checks made.
+ #
+ # Not checked structurally by looking for a leftover "nab-..." Substance:
+ # NABIXIMOLS, NABILONE and Nabumetone all start with those letters and are
+ # unrelated drugs, so that check fails on correct data.
  ("a formulation prefix reaches the moiety",
   "MATCH (s:Substance {key:'UNII:P88XT4IS4D'})-[:TESTED_IN]->(t) "
-  "RETURN count(DISTINCT t) AS n", lambda r: r[0]["n"] > 3_900),
+  "RETURN count(DISTINCT t) AS n", lambda r: r[0]["n"] > 3_500),
  # Registry shorthand that names one compound. 5-FU alone is 238 arms.
  ("trial shorthand reaches the drug",
   "MATCH ()-[e:TESTED_IN]->() WHERE e.match_method IN ['abbrev','regimen'] "
@@ -523,10 +534,18 @@ TRAPS = [
   "MATCH (t:ClinicalTrial {registry:'eu_ctr'}) WHERE t.phase <> 'NA' "
   "RETURN count(t) AS n", lambda r: r[0]["n"] > 20_000),
  # The value bleeds into the next section's label in the source. A title
- # ending in a section code means the trim stopped working.
+ # carrying a section code means the trim stopped working.
+ #
+ # Matched by the section's NAME, not by the shape of a code. The first
+ # version looked for any letter-dot-digit and flagged three titles that were
+ # all legitimate: a protocol code (BBH V.04-2013), a compound (G.68.y/EtOH)
+ # and a genetic variant (C.2991+1655a>G ... P.Cys998x). Real leakage is a
+ # EudraCT heading, so the check now names the headings.
  ("no euctr title carries the next section label",
-  "MATCH (t:ClinicalTrial {registry:'eu_ctr'}) "
-  "WHERE t.title =~ '.*\s[A-Z]\.[0-9].*' RETURN count(t) AS n",
+  "MATCH (t:ClinicalTrial {registry:'eu_ctr'}) WHERE t.title =~ "
+  "'(?i).*[A-G]\\\\.[0-9]+(\\\\.[0-9]+)*\\\\s+(Full title|Name of|Medical "
+  "condition|Trade name|Product name|Sponsor|Therapeutic|Human pharmacology|"
+  "Controlled|Trials involving).*' RETURN count(t) AS n",
   lambda r: r[0]["n"] == 0),
  ("a compound condition links to every part",
   "MATCH ()-[e:STUDIES {match_method:'name_part'}]->() RETURN count(*) AS n",
