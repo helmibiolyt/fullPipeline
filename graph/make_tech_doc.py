@@ -102,13 +102,18 @@ EDGES: dict[str, tuple[str, str, str, str]] = {
         "ClinicalTrial", "Company", "structured",
         "Trial sponsor, normalised by norm_company()."),
     "STUDIES": (
-        "ClinicalTrial", "Disease", "name | name_variant | vocab_alias | icd_name",
+        "ClinicalTrial", "Disease",
+        "name | name_variant | vocab_alias | icd_name | icd_code",
         "Condition studied, matched from the registry's free-text condition "
-        "field. Four tiers, most reliable first: the condition as written is a "
+        "field. Tiers, most reliable first: the condition as written is a "
         "MeSH heading or entry term; a rewriting reached MeSH (a stage "
         "qualifier stripped, a plural, 'cancer' for 'neoplasms'); NCIt or "
         "CDISC lists it as a synonym of a concept that reaches MeSH; or only "
-        "an ICD title matched."),
+        "an ICD title matched. Last, and only when none of those landed, the "
+        "ICD-10 CODE the registry typed - 'C692- Malignant neoplasm of "
+        "retina'. That one is last in order but not in trust: it is the only "
+        "STUDIES tier where the source stated the diagnosis in a controlled "
+        "vocabulary instead of in prose."),
     "TESTED_IN": (
         "Substance", "ClinicalTrial", "resolver",
         "Intervention, matched from the registry's free-text intervention "
@@ -416,15 +421,20 @@ def main():
              "that reaches MeSH", "<b>weaker than name</b>"),
             ("icd_name", "no MeSH form matched, an ICD title did",
              "<b>weakest</b>"),
+            ("icd_code", "the words matched nothing, so the ICD-10 code the "
+             "registry typed was used &mdash; <code>C692- Malignant neoplasm "
+             "of retina</code>", "good"),
             ("provisional", "the name never resolved", "<b>weak</b>"),
         ]]))
-    p.append("<div class=note><code>CONDUCTED_IN</code>, <code>STUDIES</code> "
-             "and <code>ABOUT</code> rest entirely on matching text &mdash; "
-             "<b>not one trial-to-disease edge in this graph is structured</b>. "
-             "About 84% are exact <code>name</code> matches and the rest come "
-             "from the three weaker tiers. They are sound for aggregate "
+    p.append("<div class=note><code>CONDUCTED_IN</code>, <code>ABOUT</code> and "
+             "almost every <code>STUDIES</code> edge rest on matching text "
+             "&mdash; <b>the registry wrote prose and the loader recognised "
+             "it</b>. About 84% are exact <code>name</code> matches and the "
+             "rest come from the weaker tiers. They are sound for aggregate "
              "questions (<i>how many trials in the Gulf</i>) and should not be "
-             "cited as fact about one specific trial.<br><br>"
+             "cited as fact about one specific trial. The exception is "
+             "<code>icd_code</code>, where the registry typed the diagnosis as "
+             "an ICD-10 code rather than writing it out.<br><br>"
              "Measured against ClinicalTrials.gov itself, over 15 conditions "
              "and restricted to the trials taken from that registry, recall is "
              "<b>75%</b> &mdash; so a count from this graph is a floor, not a "

@@ -169,17 +169,25 @@ Every edge records how it was established.
 | `vocab_alias` | NCIt or CDISC lists the phrase as a synonym of a concept that reaches MeSH | weaker |
 | `name_squashed` | same letters, separators in different places — `Sars-CoV2` for `SARS-CoV 2` | weaker |
 | `icd_name` | no MeSH form matched, an ICD title did | **weakest** |
+| `icd_code` | nothing matched the words, so the ICD-10 **code** the registry typed was used - `C692- Malignant neoplasm of retina` | good |
 | `ncit_oncology` | on `TESTED_IN` — matched via an NCIt antineoplastic synonym | good |
 | `inn_usan` | on `TESTED_IN` — the international spelling of a US-named drug | good |
 | `provisional` | the name never resolved | **weak** |
 
-`CONDUCTED_IN` and `STUDIES` are entirely name-matched - **not one
-trial-to-disease edge in this graph is structured**. They are useful for
-aggregate questions and should not be cited as fact about one specific trial.
+`CONDUCTED_IN` and almost every `STUDIES` edge are **name-matched, not
+structured** - the registry wrote prose and the loader recognised it. They are
+useful for aggregate questions and should not be cited as fact about one
+specific trial.
 
-The four tiers above are how a `STUDIES` edge was made, most reliable first.
-If an answer rests on a handful of trials, check the tier; if it rests on
-thousands, the mix matters less. Roughly 84% are `name`, 16% the other three.
+The one exception is `icd_code`. There the registry typed an ICD-10 code
+itself, so the diagnosis is stated in a controlled vocabulary rather than
+inferred from wording - which is why it outranks `icd_name` despite both
+coming from ICD. It is a last resort only in ORDER, not in trust: it fires
+when the words failed, and the words failing says nothing about the code.
+
+The tiers above are how a `STUDIES` edge was made. If an answer rests on a
+handful of trials, check the tier; if it rests on thousands, the mix matters
+less. Roughly 84% are `name`.
 
 ### Drug linkage: 19% is the wrong denominator
 

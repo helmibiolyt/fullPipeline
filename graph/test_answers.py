@@ -575,6 +575,15 @@ TRAPS = [
   "MATCH ()-[e:STUDIES]->() WITH e.match_method AS m, count(*) AS n "
   "WHERE m IN ['name','icd_name'] RETURN m, n ORDER BY n DESC",
   lambda r: len(r) == 2 and r[0]["m"] == "name"),
+ # The code tier is a LAST resort, so it must fire - a registry that writes
+ # ICD-10 codes exists and CTRI is 61,738 trials of it - and it must stay
+ # below the tier that reads the words. Structural rather than numeric on
+ # purpose: guessing the threshold before measuring is how the CTRI and
+ # cross_vocab gates were first written wrong.
+ ("the ICD code tier fires and does not overtake the words",
+  "MATCH ()-[e:STUDIES]->() WITH e.match_method AS m, count(*) AS n "
+  "WHERE m IN ['name','icd_code'] RETURN m, n ORDER BY n DESC",
+  lambda r: len(r) == 2 and r[0]["m"] == "name"),
  # Every STUDIES edge must say which tier made it, or a weak link is
  # indistinguishable from an exact one.
  ("no STUDIES edge is missing its match_method",
