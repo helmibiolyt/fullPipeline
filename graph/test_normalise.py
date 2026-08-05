@@ -293,6 +293,14 @@ check("...and a severity scale too",
       "Heart Failure" in _v("Heart Failure NYHA Class III"), True)
 check("without-clause as well",
       "Cirrhosis" in _v("Cirrhosis Without Ascites"), True)
+# "Long Name (ABBREV)" is how a registry introduces an abbreviation, and
+# fold() strips bracket content - so the matchable half was being discarded.
+check("the abbreviation in brackets is tried",
+      "COVID-19" in _v("Coronavirus Disease (COVID-19)"), True)
+check("...and so is the half outside them",
+      "Heart Attack" in _v("Heart Attack (Myocardial Infarction)"), True)
+check("a population suffix is not part of the disease",
+      "COVID-19" in _v("COVID-19 Patients"), True)
 check("comma inversion is tried",
       "Non-Small Cell Lung Cancer" in _v("Lung Cancer, Non-Small Cell"), True)
 check("...and MeSH's own inverted form still yields itself first",

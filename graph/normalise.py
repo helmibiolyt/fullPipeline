@@ -387,6 +387,8 @@ _COND_SPECIFIER = re.compile(
     r"|[ ]+(?:nyha|child[ -]pugh|gold|kdigo)[ ]+(?:class|stage)[ ]*"
     r"[0-9ivx]*$", re.I)
 
+_PAREN = re.compile(r"[(\[]([^)\]]{2,60})[)\]]")
+
 _COND_SPLIT = re.compile(
     r"[ ]+and[ ]+|[ ]*&(?:amp;?)?[ ]*|[ ]*[/][ ]*|[ ]+,[ ]+", re.I)
 
@@ -403,7 +405,7 @@ _COND_MANIFESTATION = re.compile(
     r"[ ]+(?:pneumonia|respiratory[ ]+infection|acute[ ]+respiratory[ ]+"
     r"distress[ ]+syndrome|ards|vaccines?|vaccination|immunisation|"
     r"immunization|disease|infection|infections|pneumonitis|sequelae|"
-    r"complications?)$", re.I)
+    r"complications?|patients?|subjects?|participants?)$", re.I)
 
 # Category words that are real MeSH headings and useless as a link. Stripping
 # a qualifier off "Chronic Disease" leaves "Disease", which matched and put
@@ -499,6 +501,25 @@ def condition_variants(term: str):
             c = _push(_COND_CANCER.sub(repl, base))
             if c:
                 yield c
+
+    # "Long Name (ABBREV)" is how registries introduce an abbreviation, and
+    # fold() strips bracket content - so the one part that would have matched
+    # is discarded before the dictionary sees it. "Coronavirus Disease
+    # (COVID-19)" is 23 ct.gov trials whose bracket holds the MeSH heading.
+    #
+    # Both halves are tried: the abbreviation is usually the matchable one,
+    # but "Heart Attack (Myocardial Infarction)" is the other way round.
+    for m in _PAREN.finditer(base):
+        inner = m.group(1).strip()
+        if len(inner) >= 4:
+            c = _push(inner)
+            if c:
+                yield c
+    outer = _PAREN.sub(" ", base)
+    if outer != base:
+        c = _push(outer)
+        if c:
+            yield c
 
     # MeSH inverts its own headings - "Carcinoma, Renal Cell" for renal cell
     # carcinoma - and registries copy the style with their own wording:
