@@ -323,6 +323,30 @@ check("...but a real disease still narrows",
 check("...and an exact 'Disease' still matches on tier one",
       _v("Disease"), ["Disease"])
 
+print("\nthe population suffix, and inversion in the direction MeSH needs")
+# The list had patients/subjects/participants but not WHO those patients were,
+# so "Breast Cancer Female" never produced "Breast Cancer" at all.
+check("a population suffix is dropped",
+      "Breast Cancer" in _v("Breast Cancer Female"), True)
+check("...and so is a plural one",
+      "Prostate Cancer" in _v("Prostate Cancer Males"), True)
+check("...and an age group",
+      "Asthma" in _v("Asthma Children"), True)
+# Registries write natural order; MeSH heads the inverted form. The existing
+# rule only crossed from MeSH's comma form to natural order - the useful
+# direction was missing.
+check("a leading modifier inverts to MeSH's form",
+      "Urinary Incontinence, Stress" in _v("Stress Urinary Incontinence"), True)
+check("a head noun inverts to the front",
+      "Carcinoma, Non-Small-Cell Lung" in _v("Non-Small-Cell Lung Carcinoma"),
+      True)
+# Two words invert to themselves with a comma wedged in, which reaches nothing.
+check("a two-word phrase is not inverted",
+      any("," in v for v in _v("Lung Cancer")), False)
+# The category guard still wins over every new rewriting.
+check("inversion cannot land on a category word",
+      _v("Chronic Disease"), ["Chronic Disease"])
+
 print("\n_terms() and the ICD-10 code it used to throw away")
 import trials as T                                       # noqa: E402
 

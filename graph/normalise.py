@@ -434,7 +434,13 @@ _COND_MANIFESTATION = re.compile(
     r"[ ]+(?:pneumonia|respiratory[ ]+infection|acute[ ]+respiratory[ ]+"
     r"distress[ ]+syndrome|ards|vaccines?|vaccination|immunisation|"
     r"immunization|disease|infection|infections|pneumonitis|sequelae|"
-    r"complications?|patients?|subjects?|participants?)$", re.I)
+    r"complications?|patients?|subjects?|participants?|"
+    # The population the trial enrolled, which is not part of the disease.
+    # "Breast Cancer Female" produced four variants and never plain "Breast
+    # Cancer", so 405 ct.gov trials naming it reached nothing - the list had
+    # patients/subjects/participants but not who those patients were.
+    r"males?|females?|men|women|boys|girls|children|adults?|adolescents?|"
+    r"infants?|neonates?|newborns?|elderly)$", re.I)
 
 # Category words that are real MeSH headings and useless as a link. Stripping
 # a qualifier off "Chronic Disease" leaves "Disease", which matched and put
@@ -563,6 +569,33 @@ def condition_variants(term: str):
             c = _push(f"{right} {left}")
             if c:
                 yield c
+
+    # ...and the same swap in the other direction, which was missing.
+    #
+    # The rule above turns MeSH's comma form into natural order. Registries
+    # write natural order and MeSH heads the inverted form, so the crossing
+    # that actually needs making is the reverse: "Stress Urinary Incontinence"
+    # against MeSH's "Urinary Incontinence, Stress". That produced only a
+    # plural before, and 374 ct.gov trials sat at 21% linked because of it.
+    #
+    # MeSH inverts two ways and both are tried:
+    #
+    #   leading modifier to the end   Stress Urinary Incontinence
+    #                                 -> Urinary Incontinence, Stress
+    #   head noun to the front        Non-Small-Cell Lung Carcinoma
+    #                                 -> Carcinoma, Non-Small-Cell Lung
+    #
+    # Three words minimum, because a two-word phrase inverts to itself with a
+    # comma in it and reaches nothing. These are candidates, not claims: a
+    # wrong one simply fails to match, and only an exact MeSH heading lands.
+    if "," not in base:
+        w = base.split()
+        if 3 <= len(w) <= 8:
+            for cand in (f"{' '.join(w[1:])}, {w[0]}",
+                         f"{w[-1]}, {' '.join(w[:-1])}"):
+                c = _push(cand)
+                if c:
+                    yield c
 
     # "Overweight and Obesity" is two headings in one cell. Last, because a
     # part is always a weaker claim than the whole.
