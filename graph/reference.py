@@ -263,3 +263,88 @@ def load_inn_usan(b):
 
 
 ALL = ALL + [load_inn_usan]
+
+
+# Oncology and antiviral shorthand that trial registries use as a drug name.
+# Each maps to ONE compound and is unambiguous in context - "5-FU" is
+# fluorouracil everywhere, "TDF" is tenofovir disoproxil fumarate everywhere.
+#
+# Deliberately excluded: G-CSF and GM-CSF, which name a protein CLASS rather
+# than a molecule - filgrastim, lenograstim and pegfilgrastim are all G-CSF,
+# and picking one would assert something the trial did not say.
+DRUG_ABBREV = {
+    "5-fu": "fluorouracil",
+    "5fu": "fluorouracil",
+    "ara-c": "cytarabine",
+    "6-mp": "mercaptopurine",
+    "mtx": "methotrexate",
+    "atra": "tretinoin",
+    "tdf": "tenofovir disoproxil fumarate",
+    "taf": "tenofovir alafenamide",
+    "ftc": "emtricitabine",
+    "3tc": "lamivudine",
+    "azt": "zidovudine",
+    "sof": "sofosbuvir",
+    "rbv": "ribavirin",
+    "dcv": "daclatasvir",
+    "ldv": "ledipasvir",
+    "cpa": "cyproterone acetate",
+    "hctz": "hydrochlorothiazide",
+    "asa": "acetylsalicylic acid",
+}
+
+# A regimen is several drugs under one acronym. Splitting it is the same
+# argument as splitting "Carboplatin + Paclitaxel": the trial gave all of
+# them, so all of them belong on the trial.
+DRUG_REGIMEN = {
+    "folfiri": ("folinic acid", "fluorouracil", "irinotecan"),
+    "folfox": ("folinic acid", "fluorouracil", "oxaliplatin"),
+    "folfirinox": ("folinic acid", "fluorouracil", "irinotecan", "oxaliplatin"),
+    "xelox": ("capecitabine", "oxaliplatin"),
+    "capox": ("capecitabine", "oxaliplatin"),
+    "chop": ("cyclophosphamide", "doxorubicin", "vincristine", "prednisone"),
+    "r-chop": ("rituximab", "cyclophosphamide", "doxorubicin", "vincristine",
+               "prednisone"),
+    "abvd": ("doxorubicin", "bleomycin", "vinblastine", "dacarbazine"),
+    "fec": ("fluorouracil", "epirubicin", "cyclophosphamide"),
+}
+
+
+def load_drug_abbrev(b):
+    """Trial shorthand that names one drug, and regimens that name several.
+
+    Measured on the drug-typed ct.gov arms: of the 600 most common terms, 94%
+    already resolve and only 3% name a compound the graph has no node for.
+    Most of that 3% is this - "5-FU" 238 arms, "TDF" 145, "TAF" 132, "SOF"
+    131, "FTC" 112, "FOLFIRI" 132.
+
+    Written out rather than derived, for the reason INN_USAN is: there is no
+    rule taking "5-FU" to fluorouracil, and a heuristic loose enough to try
+    would also take "Apatinib" to "Lapatinib" - which is what a substring
+    search actually did when this gap was first measured, and they are
+    different drugs.
+
+    A regimen registers each component, so a FOLFIRI arm contributes three
+    drugs. Nothing is created: an abbreviation whose target does not resolve
+    contributes nothing.
+    """
+    t0 = b._step("drug_abbrev")
+    n = 0
+    for abbrev, target in DRUG_ABBREV.items():
+        m = b.r.resolve(target)
+        if m.key and m.resolved and not b.r.resolve(abbrev).resolved:
+            b.r.add_alias(abbrev, m.key, method="abbrev")
+            n += 1
+    for abbrev, parts in DRUG_REGIMEN.items():
+        # Only the first component can be an alias - a name maps to one key.
+        # The rest are reached by trials.py splitting the regimen.
+        first = next((b.r.resolve(p) for p in parts
+                      if b.r.resolve(p).resolved), None)
+        if first and not b.r.resolve(abbrev).resolved:
+            b.r.add_alias(abbrev, first.key, method="regimen")
+            n += 1
+    b.stats["drug_abbrev_aliases"] = n
+    b._done("drug_abbrev", t0, n)
+
+
+ALL = ALL + [load_drug_abbrev]

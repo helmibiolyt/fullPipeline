@@ -503,6 +503,16 @@ TRAPS = [
  # punctuation into spaces, so those landed on different keys and never met.
  # "Overweight and Obesity" is two diseases. The first-hit loop stopped at
  # Overweight, so 670 ct.gov trials were linked to half of what they said.
+ # 610 drug-typed ct.gov arms name nab-paclitaxel across three spellings. It
+ # is paclitaxel bound to albumin - the moiety is unchanged and only the
+ # presentation differs, exactly like a salt.
+ ("a formulation prefix reaches the moiety",
+  "MATCH (s:Substance {key:'UNII:P88XT4IS4D'})-[:TESTED_IN]->(t) "
+  "RETURN count(DISTINCT t) AS n", lambda r: r[0]["n"] > 3_900),
+ # Registry shorthand that names one compound. 5-FU alone is 238 arms.
+ ("trial shorthand reaches the drug",
+  "MATCH ()-[e:TESTED_IN]->() WHERE e.match_method IN ['abbrev','regimen'] "
+  "RETURN count(*) AS n", lambda r: r[0]["n"] > 300),
  ("a compound condition links to every part",
   "MATCH ()-[e:STUDIES {match_method:'name_part'}]->() RETURN count(*) AS n",
   lambda r: r[0]["n"] > 500),

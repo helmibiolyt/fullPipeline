@@ -417,6 +417,9 @@ _ARM_LABEL = re.compile(r"^[A-Za-z][A-Za-z0-9 /()-]{0,38}?\s*:\s*(?=\S)")
 _COMBO = re.compile(r"\s*[+]\s*|\s+and\s+|\s*/\s*", re.I)
 
 _NOT_A_DRUG = {
+    # Not drugs at all, however they arrive in a drug-typed arm.
+    "blood sample", "blood samples", "saline solution", "water",
+    "normal diet", "diet", "exercise", "surgery", "radiotherapy",
     "placebo", "placebos", "control", "controls", "no intervention",
     "standard care", "standard of care", "usual care", "routine care",
     "normal saline", "saline", "sham", "sham procedure", "blank", "vehicle",
@@ -428,6 +431,18 @@ _NOT_A_DRUG = {
 # Exact matching caught none of them - roughly 1,200 arm mentions in ct.gov
 # alone. "Chemotherapy" belongs here too: it names a class of treatment, and
 # a trial arm saying only that has not told us which drug.
+# A formulation prefix. "Nab-paclitaxel" is paclitaxel bound to albumin -
+# 610 drug-typed ct.gov arms across three spellings - and the prefix is the
+# only thing between it and the substance. Same shape as a salt: the moiety
+# is unchanged, the presentation is not.
+#
+# Tried as a FALLBACK, after the whole term. If the graph holds the
+# formulation as its own substance, that node wins.
+_FORMULATION = re.compile(
+    r"^(?:nab[ -]?|pegylated[ -]|peg[ -]|liposomal[ -]|lipo[ -]|"
+    r"micronized[ -]|micronised[ -]|nano[ -]?|recombinant[ -]|"
+    r"human[ -]recombinant[ -]|inhaled[ -]|oral[ -]|topical[ -])", re.I)
+
 _NOT_A_DRUG_SUBSTR = ("placebo", "chemotherapy", "sham ", "vehicle control",
                       "standard of care", "best supportive care")
 
@@ -467,6 +482,9 @@ def _terms(raw: str, kind: str = "condition") -> list[str]:
                     continue
                 if 3 <= len(c) <= 120:
                     out.append(c)
+                    bare = _FORMULATION.sub("", c).strip()
+                    if bare != c and 4 <= len(bare) <= 120:
+                        out.append(bare)
             continue
         # Strip the registry's own labelling before the dictionary sees it.
         # Order matters: the label wraps the code, so the label goes first.
