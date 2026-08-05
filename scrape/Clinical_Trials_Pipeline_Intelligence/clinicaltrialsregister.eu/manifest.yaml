@@ -6,4 +6,8 @@ size_class: medium
 # 0 = no time limit: never kill it while it's still making progress.
 timeout_min: 0
 mirror: true
-enabled: false
+enabled: true                 # TEMPORARY: the header damage destroyed the B
+                              # (sponsor) and D (product) sections outright -
+                              # those columns are not in the file at all, so no
+                              # loader change can recover them. Set back to
+                              # false once the run has published.

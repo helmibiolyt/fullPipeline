@@ -4,5 +4,6 @@ output_subdirs: [anzctr_trials]
 size_class: small
 timeout_min: 60
 mirror: true
-enabled: false
+enabled: true                 # TEMPORARY: re-scrape for the 254 blocked docs.
+                              # Set back to false once the run has published.
 xvfb: true                    # headful browser -> run under xvfb-run
