@@ -441,6 +441,12 @@ _COND_MANIFESTATION = re.compile(
     # patients/subjects/participants but not who those patients were.
     r"males?|females?|men|women|boys|girls|children|adults?|adolescents?|"
     r"infants?|neonates?|newborns?|elderly)$", re.I)
+# Measured after the rebuild: "breast cancer female" went 35% -> 100% linked
+# and "stress urinary incontinence" 21% -> 100%. The control was "healthy",
+# 11,071 trials, which MUST NOT gain from this - and does not: no "Healthy X"
+# form yields a bare "Healthy", and COND_TOO_GENERIC refuses it as a rewriting
+# even if one did. Its 11% -> 13% is co-occurring real conditions in the same
+# trials, not this rule reaching somewhere it should not.
 
 # Category words that are real MeSH headings and useless as a link. Stripping
 # a qualifier off "Chronic Disease" leaves "Disease", which matched and put
