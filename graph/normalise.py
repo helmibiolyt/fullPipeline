@@ -381,6 +381,18 @@ _COND_QUALIFIER = re.compile(
     r"unresectable|newly diagnosed|previously treated|untreated|early|late|"
     r"acute|chronic|severe|mild|moderate|unspecified|adult|adults|"
     r"paediatric|pediatric|childhood|primary|secondary|"
+    # "Solid Tumor" is 3,424 ct.gov mentions and reached nothing: the ladder
+    # rewrote tumor -> neoplasms and produced "Solid Neoplasms", which MeSH
+    # does not head. Stripping it lands on Neoplasms, which is what a solid
+    # tumour is. Deliberately a BROAD link and accepted as one - a phase 1
+    # basket trial studies neoplasms in general, and that is the honest thing
+    # to say about it rather than leaving it attached to nothing.
+    # "malignant" comes with it: "Malignant Solid Tumor" is the same phrase
+    # with one more word, and stripping it is right everywhere it was checked
+    # - Malignant Melanoma -> Melanoma, Malignant Pleural Mesothelioma ->
+    # Pleural Mesothelioma. Tier one still wins wherever the full phrase is
+    # itself a heading, so nothing that already matched is affected.
+    r"solid|malignant|"
     r"extensive[ -]stage|limited[ -]stage|"
     r"stage [0-9ivx]+)[ ]+", re.I)
 

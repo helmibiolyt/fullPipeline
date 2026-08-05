@@ -260,7 +260,15 @@ check("original is always first", _v("Metastatic Breast Cancer")[0],
       "Metastatic Breast Cancer")
 check("stage qualifier stripped", "Breast Cancer" in _v("Metastatic Breast Cancer"), True)
 check("cancer reaches neoplasms", "Breast Neoplasms" in _v("Metastatic Breast Cancer"), True)
-check("plural handled", "Solid Tumor" in _v("Solid Tumors"), True)
+# The example used to be "Solid Tumors" -> "Solid Tumor". That stopped being
+# a valid test of pluralisation when "solid" became a leading qualifier: the
+# singular of the FULL phrase is not produced for ANY qualifier - "Metastatic
+# Breast Cancers" never yielded "Metastatic Breast Cancer" either - because
+# the strip runs before the plural. Same assertion, on a phrase that is only
+# a plural.
+check("plural handled", "Lung Cancer" in _v("Lung Cancers"), True)
+check("...and the qualifier case still narrows past the plural",
+      "Breast Cancer" in _v("Metastatic Breast Cancers"), True)
 check("two headings in one cell", "Obesity" in _v("Overweight and Obesity"), True)
 # The split variant is the loosest claim, so it must come after every other
 # form. Taking any hit rather than the first would link a renal-cell trial to
@@ -346,6 +354,26 @@ check("a two-word phrase is not inverted",
 # The category guard still wins over every new rewriting.
 check("inversion cannot land on a category word",
       _v("Chronic Disease"), ["Chronic Disease"])
+
+print("\n'solid' and 'malignant' as leading qualifiers")
+# 3,424 ct.gov mentions reached nothing: the ladder rewrote tumor->neoplasms
+# and produced "Solid Neoplasms", which MeSH does not head.
+check("a solid tumour is a neoplasm",
+      "Neoplasms" in _v("Solid Tumor"), True)
+check("...with a stage qualifier in front of it too",
+      "Neoplasms" in _v("Advanced Solid Tumors"), True)
+check("...and spelled the British way",
+      "Neoplasms" in _v("Solid Tumour"), True)
+check("...and with malignant in front",
+      "Neoplasms" in _v("Malignant Solid Tumor"), True)
+# Stripping "malignant" must not damage the phrases that already worked.
+check("malignant melanoma still narrows to melanoma",
+      "Melanoma" in _v("Malignant Melanoma"), True)
+check("...and keeps the site when there is one",
+      "Pleural Mesothelioma" in _v("Malignant Pleural Mesothelioma"), True)
+# "solid" is not only an oncology word, and the non-cancer case must survive.
+check("a solid organ transplant is not a tumour",
+      "Organ Transplantation" in _v("Solid Organ Transplantation"), True)
 
 print("\n_terms() and the ICD-10 code it used to throw away")
 import trials as T                                       # noqa: E402
