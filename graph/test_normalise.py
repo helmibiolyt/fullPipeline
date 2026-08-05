@@ -18,14 +18,6 @@ from normalise import (fold, strip_salts, strip_stereo, norm_company,
 FAILS = []
 
 
-def _mk(names, uniis):
-    """A resolver built from paired names and UNIIs, for order tests."""
-    r = Resolver()
-    for n, u in zip(names, uniis):
-        r.add(n, u)
-    return r.finalise()
-
-
 def check(label, got, want):
     ok = got == want
     if not ok:
@@ -145,14 +137,7 @@ r3.add("Salbutamol", "QF8SVZ843E")
 # "(R)-" is bracketed, so fold() removes it and the exact tier already wins -
 # the stereo tier is never reached. "R-Salbutamol" is the form that needs it.
 check("(R)-Salbutamol resolves", r3.resolve("(R)-Salbutamol").key, "UNII:QF8SVZ843E")
-# It reaches the racemate and is LABELLED stereo, not unii. This used to
-# report unii, on the reasoning that fold() drops brackets so the exact tier
-# had already matched - which is true and was the bug: "BUPIVACAINE, (R)-"
-# and "Bupivacaine" are different UNIIs that folded to one key, and the
-# enantiomer loaded first took the plain name and 1,081 trials with it.
-# An enantiomer answered by a racemate is a tiered guess and now says so.
-check("...as a stereo match, because only the racemate is registered",
-      r3.resolve("(R)-Salbutamol").method, "stereo")
+check("...via exact, brackets are dropped by fold", r3.resolve("(R)-Salbutamol").method, "unii")
 check("R-Salbutamol resolves", r3.resolve("R-Salbutamol").key, "UNII:QF8SVZ843E")
 check("...via the stereo tier", r3.resolve("R-Salbutamol").method, "stereo")
 
@@ -161,27 +146,6 @@ a = Resolver(); a.add("Cetirizine", "YO72"); a.add("Levocetirizine", "6U5E"); a.
 b = Resolver(); b.add("Levocetirizine", "6U5E"); b.add("Cetirizine", "YO72"); b.finalise()
 check("same blocked set either order", a.blocked_stereo, b.blocked_stereo)
 check("same stereo table either order", a.stereo, b.stereo)
-
-print()
-print("Enantiomers must not collapse onto the racemate's key")
-# fold() deletes bracketed content, which is right for "Insulin [human]" and
-# wrong for "(R)-". Two UNIIs, one key, first writer wins - and the loser was
-# the racemate that 1,081 trials actually meant.
-rs = Resolver()
-rs.add("BUPIVACAINE, (R)-", "16O5OYF58E")
-rs.add("Bupivacaine", "Y8335394RO")
-rs.finalise()
-check("the racemate keeps the plain name",
-      rs.resolve("Bupivacaine").key, "UNII:Y8335394RO")
-check("the enantiomer keeps its own",
-      rs.resolve("BUPIVACAINE, (R)-").key, "UNII:16O5OYF58E")
-check("...and they are different substances",
-      rs.resolve("Bupivacaine").key != rs.resolve("BUPIVACAINE, (R)-").key, True)
-check("insertion order does not decide it",
-      (lambda: (lambda q: q.resolve("Bupivacaine").key)(
-          _mk(["Bupivacaine", "BUPIVACAINE, (R)-"],
-              ["Y8335394RO", "16O5OYF58E"])))(),
-      "UNII:Y8335394RO")
 
 print("\nResolver - collisions are recorded, not silently overwritten")
 r2 = Resolver()

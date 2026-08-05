@@ -65,28 +65,33 @@ _STEREO_LOOSE = re.compile(r"^\(?(?:levo|dextro|racemic|rac|es|ar)\)?[-\s]*",
                            re.IGNORECASE)
 
 
-# A stereochemical descriptor written in brackets, which fold() deletes along
-# with every other bracketed qualifier. That is right for "Insulin [human]"
-# and wrong here: "BUPIVACAINE, (R)-" and "Bupivacaine" are different UNIIs
-# and folded to the same key, so the enantiomer loaded first took the plain
-# name and 1,081 trials with it.
+# MEASURED AND REVERTED: keeping a bracketed stereo descriptor out of the
+# plain name's key.
 #
-# The prefix guard below never sees these, because fold() has already removed
-# the marker by the time the stereo tier runs.
-_STEREO_BRACKET = re.compile(
-    r"[(\[]\s*(?:[RSrs]|RS|SR|\+|-|\+/-|±|E|Z|D|L|DL)\s*[)\]]\s*-?", re.I)
-
-
-def stereo_tag(name: str) -> str:
-    """The stereo descriptor in a name, folded, or "" if it has none.
-
-    Used to keep an enantiomer from claiming the racemate's key. It is not a
-    match tier: nothing looks a substance up by this.
-    """
-    m = _STEREO_BRACKET.search(name or "")
-    if not m:
-        return ""
-    return re.sub(r"[^a-z0-9+-]+", "", m.group(0).lower())
+# The observation was real. fold() deletes bracketed content, so
+# "BUPIVACAINE, (R)-" (UNII:16O5OYF58E) and "Bupivacaine" (UNII:Y8335394RO)
+# fold to one key and the first writer wins - 3,861 keys across the graph,
+# 37,509 trials, two distinct UNIIs each.
+#
+# Splitting them made it worse. GSRS holds a FULL record and a sparse stub for
+# the same drug, and the descriptor is usually on the full one:
+#
+#     BUPIVACAINE, (R)-   1,614 edges  11 ids  5 classes  36 products
+#     Bupivacaine            24 edges   4 ids  0 classes   0 products
+#     Methotrexate, (±)-  4,935 edges  53 ids 14 classes 300 products
+#     Methotrexate           99 edges   5 ids  0 classes   0 products
+#
+# So the merge is right and the winner is already right: 37,509 trials reach a
+# substance with mechanisms, classes and products instead of a stub. Splitting
+# them would have moved every one to the stub.
+#
+# This is NOT the levocetirizine case the stereo tier guards. There the two
+# names are different DRUGS with different clinical identities. Here they are
+# one drug with two registry records, and one of them is nearly empty.
+#
+# If this is revisited, the deciding number is node degree, not correctness in
+# principle - and it cannot be known at resolver-build time, which is why the
+# load order doing it by accident is left alone.
 
 
 def _loose_strip(s: str) -> str:
@@ -223,22 +228,13 @@ class Resolver:
         # and registering it would match everything.
         if not e or not usable_name(e):
             return
-        # An enantiomer must not occupy the plain name's slot. fold() deletes
-        # "(R)-" with the brackets, so "BUPIVACAINE, (R)-" folded to
-        # "bupivacaine", was loaded first, and took 1,081 trials that mean the
-        # racemate - a silent merge of two UNIIs, which is the failure this
-        # module exists to prevent.
-        tag = stereo_tag(name)
-        if tag:
-            e = f"{e} {tag}"
         if e in self.exact and self.exact[e] != unii:
             # Two substances share a name. Real and not rare - keep the first
             # (most authoritative source) and record it rather than overwrite.
             self.collisions.append((e, self.exact[e], unii))
         else:
             self.exact.setdefault(e, unii)
-        salt_key = strip_salts(name)
-        self.salt.setdefault(f"{salt_key} {tag}" if tag else salt_key, unii)
+        self.salt.setdefault(strip_salts(name), unii)
         self._pending.append((name, unii))
         self._final = False
 
@@ -294,30 +290,13 @@ class Resolver:
         if not name or not fold(name):
             return Match(key="", method="provisional")
         e = fold(name)
-        # An enantiomer is registered under its own key, so look there first.
-        # Falling back to the plain name afterwards is deliberate and is
-        # recorded as `stereo`, not `unii`: a query for "(R)-X" answered by
-        # the racemate is a tiered guess, and labelling it authoritative is
-        # how "BUPIVACAINE, (R)-" came to own 1,081 racemate trials.
-        tag = stereo_tag(name)
-        if tag:
-            u = self.exact.get(f"{e} {tag}")
-            if u:
-                return Match(f"UNII:{u}", "unii", f"{e} {tag}")
-            u = self.exact.get(e)
-            if u:
-                return Match(f"UNII:{u}", "stereo", e)
         u = self.exact.get(e)
         if u:
             return Match(f"UNII:{u}", "unii", e)
-        sk = strip_salts(name)
-        if tag:
-            u = self.salt.get(f"{sk} {tag}")
-            if u:
-                return Match(f"UNII:{u}", "salt", f"{sk} {tag}")
-        u = self.salt.get(sk)
+        s = strip_salts(name)
+        u = self.salt.get(s)
         if u:
-            return Match(f"UNII:{u}", "salt", sk)
+            return Match(f"UNII:{u}", "salt", s)
         t = strip_stereo(name)
         u = self.stereo.get(t)
         if u:
