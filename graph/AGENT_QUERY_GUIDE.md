@@ -189,9 +189,9 @@ The tiers above are how a `STUDIES` edge was made. If an answer rests on a
 handful of trials, check the tier; if it rests on thousands, the mix matters
 less. Roughly 84% are `name`.
 
-### Drug linkage: 19% is the wrong denominator
+### Drug linkage: 22% is the wrong denominator
 
-19.1% of trials have a `TESTED_IN` edge. That number counts every behavioural,
+22.0% of trials have a `TESTED_IN` edge. That number counts every behavioural,
 device and surgical trial as a drug-linkage failure, and they are not - those
 trials name no drug and should resolve to nothing.
 
@@ -206,6 +206,12 @@ split:
 
 Of the 232,988 that name a drug, **149,468 resolve — 64%**. That is the figure
 to improve and the figure to quote.
+
+Re-measured independently on 2026-08-05 after the disease work, on a 4,000-trial
+reservoir sample checked against the live graph: 39.0% drug-typed, **64.2% of
+those linked**, and 3.0% of non-drug trials linked (a device trial with a drug
+comparator, which is correct). The split has not moved, which is the point of
+re-running it - the disease tiers added 30,384 links without disturbing this.
 
 So: "how many trials tested drug X" is answerable. "What fraction of trials
 test a drug" is not a question this graph should be asked, because more than

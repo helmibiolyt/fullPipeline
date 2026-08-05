@@ -338,9 +338,12 @@ answer.
   (One row per arm is a `PROVIDER_ERROR` from a network outage during the run.
   It is reported rather than dropped, and it falls on both arms equally.)
 - 22 questions × 5 arms is enough to separate agentic from fixed-parallel, and
-  not enough to tune `RUN_BEFORE_SWITCH` in §4. Three consecutive calls is a
-  measured-plausible choice, not an optimum. `MAX_GRAPH` *has* now been swept —
-  see above.
+  was never enough to tune `RUN_BEFORE_SWITCH` in §4 — but that constant is
+  **dormant**, not untuned: `switch_on_miss` defaults to False, so the rule
+  does not fire in production. It was measured twice, helped once and hurt
+  once, and the failure it existed to prevent was fixed in the prompt instead.
+  Sweeping it would measure a code path nothing takes. `MAX_GRAPH` is the
+  constant that binds, and it *has* now been swept — see above.
 - Retrieval quality was never scored — only whether evidence was returned and
   whether an answer falsely claimed absence. Whether the *right* chunks come
   back is a separate question that needs relevance judgements.
