@@ -735,6 +735,64 @@ def load_vocab_aliases(b):
     b._done("vocab_aliases", t0, n)
 
 
+# A registry's word for a disease that MeSH spells as something else, where
+# BOTH alias guards refuse it and both are right to in general.
+#
+# "HIV" is MeSH D006678 - the VIRUS, an organism in tree B. Only trees C and
+# F03 become Disease nodes, so the virus is not a node, and _may_alias then
+# refuses to let NCIt bridge the string to HIV Infections. MIN_ALIAS refuses it
+# a second time for being three characters. Both rules exist because "Anxiety"
+# once put 5,027 trials on Anxiety Disorders: MeSH has anxiety the SYMPTOM in
+# F01, a trial reducing pre-operative anxiety is not an anxiety-disorder trial,
+# and a short string is exactly where that goes wrong.
+#
+# HIV is not that case, and the data says so rather than me:
+#
+#     3,275 ct.gov trials name a bare HIV string; 1,540 name nothing else.
+#     Alongside it they write "hiv infections" (163), "aids" (104) and
+#     "acquired immunodeficiency syndrome" (41) - the registry equates them
+#     itself. Every HIV-only title is about the infection: antiretroviral
+#     regimens, PrEP, "HIV-1 Infected Patients", HIV care, HIV screening.
+#     None is virology of the organism.
+#
+# The Anxiety case has a large population that genuinely means the symptom.
+# This one has none. So the exception is stated HERE, against a named heading,
+# rather than by loosening two rules that are protecting everything else.
+#
+# Hand-written, and deliberately so - this is the same layer as INN_USAN. It
+# does not grow with the data; it grows only when a case like this is measured.
+CURATED_ALIAS = {
+    "hiv": "HIV Infections",
+    "hiv 1": "HIV Infections",
+    "hiv 2": "HIV Infections",
+    "hiv 1 infection": "HIV Infections",
+    "hiv 2 infection": "HIV Infections",
+    "human immunodeficiency virus": "HIV Infections",
+    "human immunodeficiency virus infection": "HIV Infections",
+}
+
+
+def load_curated_aliases(b):
+    """The measured exceptions, resolved against a NAMED heading.
+
+    Assigned rather than setdefault: the whole point is that the general rules
+    already declined these, so there is nothing to lose a race against. A
+    heading that does not resolve is counted and skipped, never guessed at.
+    """
+    t0 = b._step("curated_aliases")
+    n = missing = 0
+    for phrase, heading in CURATED_ALIAS.items():
+        key = b.mesh_by_name.get(fold(heading))
+        if not key:
+            missing += 1
+            continue
+        b.alias_by_name[fold(phrase)] = key
+        n += 1
+    b.stats["curated_aliases"] = n
+    b.stats["curated_aliases_unresolved"] = missing
+    b._done("curated_aliases", t0, n)
+
+
 MESH_SCR = ("Ontologies_Standards/meshb.nlm.nih.gov/mesh_data/"
             "mesh_supplemental_concepts.csv")
 ANTINEO = ("Ontologies_Standards/evs.nci.nih.gov/nci_thesaurus_data/"
@@ -820,7 +878,10 @@ def load_antineoplastic_aliases(b):
     b._done("antineoplastic", t0, n)
 
 
-ALL = ALL + [load_vocab_aliases, load_mesh_scr, load_antineoplastic_aliases]
+ALL = ALL + [load_vocab_aliases, load_mesh_scr, load_antineoplastic_aliases,
+             # Last of the alias writers, because it is the one that is
+             # allowed to overrule them.
+             load_curated_aliases]
 
 
 def load_cross_vocab(b):

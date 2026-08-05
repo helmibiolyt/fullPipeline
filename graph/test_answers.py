@@ -547,6 +547,15 @@ TRAPS = [
   "condition|Trade name|Product name|Sponsor|Therapeutic|Human pharmacology|"
   "Controlled|Trials involving).*' RETURN count(t) AS n",
   lambda r: r[0]["n"] == 0),
+ # A registry writing bare "HIV" means the infection. MeSH spells that string
+ # as the VIRUS, so both alias guards refuse it and CURATED_ALIAS overrules
+ # them against a named heading. Structural: the tier must reach that node at
+ # all. A count threshold here would be a guess, which is how the paclitaxel
+ # check came to fail while its feature worked.
+ ("the curated HIV alias reaches HIV Infections",
+  "MATCH ()-[e:STUDIES]->(d:Disease {key:'MESH:D015658'}) "
+  "WHERE e.match_method = 'vocab_alias' RETURN count(*) AS n",
+  lambda r: r[0]["n"] > 0),
  ("a compound condition links to every part",
   "MATCH ()-[e:STUDIES {match_method:'name_part'}]->() RETURN count(*) AS n",
   lambda r: r[0]["n"] > 500),
