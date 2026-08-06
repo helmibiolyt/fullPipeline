@@ -16,4 +16,15 @@ timeout_min: 360
 hydrate: [jrct_trials/]
 mirror: false
 # Verified reachable without a proxy (the old 403 was datacenter-IP only).
-enabled: false
+#
+# Re-verified from the Airflow host on 2026-08-06 before enabling, because the
+# comment above and the GATED note above THAT contradict each other:
+#     search page                  HTTP 200, 126,353 bytes
+#     en-latest-detail/jRCT1020260019  HTTP 200,  21,263 bytes
+#     en-latest-detail/jRCT1042260071  HTTP 200,  25,452 bytes
+# So the WAF no longer blocks this IP and no proxy is needed.
+#
+# TEMPORARY: jrct_list.csv holds 478 trials, which is why the graph shows 478
+# with a phase of NA on every one - that file has no phase column at all. Set
+# back to false once the run has published.
+enabled: true
