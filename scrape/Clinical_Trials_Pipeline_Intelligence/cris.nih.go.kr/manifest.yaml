@@ -1,0 +1,12 @@
+entrypoint: cris_downloader.py
+in_place: true
+output_subdirs: [cris_trials]
+size_class: small
+timeout_min: 90
+mirror: true
+# CRIS serves XML from one POST endpoint - no browser, no proxy, no WAF.
+# 12,391 trials at 100 per page is ~124 requests with a 1s delay.
+#
+# Korea reached the graph as ONE trial before this source existed: the WHO
+# ICTRP export carries only 3 KCT rows in total, so there was nothing to load.
+enabled: false

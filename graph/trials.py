@@ -281,6 +281,7 @@ L = {
     "ctis":   "Clinical_Trials_Pipeline_Intelligence/euclinicaltrials.eu/ctis_data/CTIS_trials_20260622.csv",
     "ctri":   "Clinical_Trials_Pipeline_Intelligence/ctri.nic.in/ctri_trials/ctri_trials.csv",
     "jrct":   "Clinical_Trials_Pipeline_Intelligence/jrct.mhlw.go.jp/jrct_trials/jrct_list.csv",
+    "cris":   "Clinical_Trials_Pipeline_Intelligence/cris.nih.go.kr/cris_trials/cris_trials.csv",
 }
 
 # Registry prefixes, longest first so ISRCTN is tested before any shorter
@@ -1169,6 +1170,79 @@ def load_jrct(b):
     b._done("jrct", t0, n)
 
 
+#: cp_contents packs several conditions into one cell as
+#:     English name(한국어),English name(한국어)
+#: and the separator is a comma - but so is the punctuation INSIDE a name:
+#: "Hyperlipidemia, unspecified(...)". Splitting on commas gives "Hyperlipidemia"
+#: and "unspecified"; not splitting at all gives one 120-character string that
+#: matches nothing. Both were measured, both are wrong.
+#:
+#: The Korean gloss is the reliable delimiter: every entry ends with one, so a
+#: closing bracket followed by a comma separates entries and a comma inside a
+#: name never does.
+_CRIS_SPLIT = re.compile(r"\)\s*,")
+
+
+def _cris_conditions(row: dict) -> str:
+    """cp_contents -> the separator _terms already splits on.
+
+    The Korean gloss and any inline ICD code are left attached: fold() drops
+    bracketed text, so "Diabetes mellitus(E10-E14)(당뇨병)" folds to
+    "diabetes mellitus" without either being special-cased here.
+    """
+    raw = (row.get("cp_contents") or "").strip()
+    if not raw:
+        return ""
+    out = []
+    for part in _CRIS_SPLIT.split(raw):
+        part = part.strip()
+        if not part:
+            continue
+        if not part.endswith(")"):
+            part += ")"            # the bracket the split consumed
+        out.append(part)
+    return "; ".join(out)
+
+
+def load_cris(b):
+    """Korea, which reached this graph as ONE trial before the source existed.
+
+    Not a loader bug and never was: the WHO ICTRP export carries 3 KCT rows in
+    total, so there was nothing to read. CRIS is a WHO primary registry with
+    12,391 studies and now has its own scraper.
+
+    The id is `system_number` (KCT0000001), NOT `research_number` - that is the
+    sponsor's own protocol code and is not unique across trials.
+
+    Values that carry Korean and English in one string - "중재연구
+    (Interventional Study)" - are passed through unchanged. norm_study_type and
+    norm_status read the English out of prose already, and study_type_raw is
+    supposed to hold the registry's own wording.
+    """
+    t0 = b._step("cris")
+    key = L["cris"]
+    n = 0
+    for row in lake.stream_csv(key, limit=b.limit):
+        tid = (row.get("system_number") or "").strip()
+        if not tid:
+            continue
+        if not b.wanted_trial("", row.get("research_title_en", "")):
+            continue
+        n += 1
+        # cp_contents is "English name(한국어),English name(한국어)". fold()
+        # drops bracketed text, so the Korean removes itself and the English
+        # names are what reach the resolver.
+        _trial(b, trial_key(tid), "cris", key,
+               conditions=_cris_conditions(row),
+               sponsor=row.get("resrc_spp_en", ""),
+               title=row.get("research_title_en", ""),
+               phase=row.get("clinical_step", ""),
+               status=row.get("research_step", ""),
+               study_type=row.get("research_kind", ""),
+               start_date=row.get("study_start_date", ""))
+    b._done("cris", t0, n)
+
+
 # WHO last: native registries win on properties, WHO supplies the links.
 ALL = [load_ctgov, load_euctr, load_chictr, load_anzctr, load_isrctn,
-       load_ctis, load_ctri, load_jrct, load_who]
+       load_ctis, load_ctri, load_jrct, load_cris, load_who]

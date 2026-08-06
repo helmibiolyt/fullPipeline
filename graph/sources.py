@@ -318,7 +318,13 @@ INCLUDED: list[dict] = [
          note="Clinical Trials Registry - India."),
     dict(file="Clinical_Trials_Pipeline_Intelligence/jrct.mhlw.go.jp/jrct_trials/jrct_list.csv",
          rows=476, builds=["node:ClinicalTrial"],
-         note="Japan Registry of Clinical Trials. IP-blocked, so frozen."),
+         note="Japan Registry of Clinical Trials. The old IP block is gone - "
+              "re-verified 2026-08-06 - and the file is being re-scraped."),
+    dict(file="Clinical_Trials_Pipeline_Intelligence/cris.nih.go.kr/cris_trials/cris_trials.csv",
+         rows=12_391, builds=["node:ClinicalTrial"],
+         note="CRIS, Korea's WHO primary registry. Added 2026-08-06 because "
+              "Korea reached the graph as ONE trial: the WHO ICTRP export "
+              "carries 3 KCT rows, so no loader could have found the rest."),
 
     # ---- Target/Disease associations --------------------------------------
     *[dict(file=f"Targets_Genomics_Biomarkers/platform.opentargets.org/Disease_Associations/{d}_targets.csv",

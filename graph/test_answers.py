@@ -572,6 +572,18 @@ TRAPS = [
  #   Product "N/A" - these are REAL, keyed by BLA number, and needed a name
  #     rather than deleting: purplebook writes N/A for a biologic licensed
  #     without a trade name, and `prop or proper` let the truthy "N/A" win.
+ # Korea was ONE trial until CRIS got a scraper - the WHO export carries 3 KCT
+ # rows, so no loader could have found the rest. The threshold sits between the
+ # two states rather than just under the new one: 1 before, ~12,391 after.
+ ("Korea is a registry, not a single trial",
+  "MATCH (t:ClinicalTrial {registry:'cris'}) RETURN count(t) AS n",
+  lambda r: r[0]["n"] > 9_000),
+ ("...and its trials carry a real phase",
+  "MATCH (t:ClinicalTrial {registry:'cris'}) WHERE t.phase <> 'NA' "
+  "RETURN count(t) AS n", lambda r: r[0]["n"] > 1_000),
+ ("...and reach a disease through the English name",
+  "MATCH (t:ClinicalTrial {registry:'cris'})-[:STUDIES]->(:Disease) "
+  "RETURN count(DISTINCT t) AS n", lambda r: r[0]["n"] > 3_000),
  ("no product states a missing value as its strength",
   "MATCH (p:Product) WHERE toLower(trim(coalesce(p.strength,''))) IN "
   "['none','n/a','na','nil','null','not applicable','unknown','not available',"
