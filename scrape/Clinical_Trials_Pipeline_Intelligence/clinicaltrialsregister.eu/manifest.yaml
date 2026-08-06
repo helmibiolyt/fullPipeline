@@ -6,8 +6,11 @@ size_class: medium
 # 0 = no time limit: never kill it while it's still making progress.
 timeout_min: 0
 mirror: true
-enabled: true                 # TEMPORARY: the header damage destroyed the B
-                              # (sponsor) and D (product) sections outright -
-                              # those columns are not in the file at all, so no
-                              # loader change can recover them. Set back to
-                              # false once the run has published.
+enabled: false                # Re-scraped 2026-08-06 and disabled again the
+                              # same day. Note for anyone tempted to repeat it:
+                              # the sponsor and product columns were NOT missing
+                              # from the old file. They are namespaced
+                              # "Sponsor 1 - B.1.1 ..." / "IMP 1 - D.3.1 ...",
+                              # so a check for columns starting "B." or "D."
+                              # missed them. That was a loader gap, not a
+                              # scraping one - see graph/trials.py.
