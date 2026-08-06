@@ -331,6 +331,31 @@ check("...but a real disease still narrows",
 check("...and an exact 'Disease' still matches on tier one",
       _v("Disease"), ["Disease"])
 
+print("\nclean_text() - markup and mojibake that arrived from a scrape")
+from normalise import clean_text                          # noqa: E402
+# TCTR's WHO rows carry these verbatim. They matter because fold() strips
+# punctuation LAST, so "&#45;" survives as the token "45".
+check("an HTML entity is decoded",
+      clean_text("IM injections with VGX&#45;3100"), "IM injections with VGX-3100")
+check("a named entity too", clean_text("Factor &alpha; inhibitor"),
+      "Factor α inhibitor")
+check("an ampersand is not left as &amp;",
+      clean_text("Bristol &amp; Myers"), "Bristol & Myers")
+check("a tag becomes a space, not a word",
+      clean_text("dose<br>daily"), "dose daily")
+# cp1252 before latin-1: latin-1 cannot represent the "..." inside "a...TM",
+# so it throws and the repair silently does nothing.
+check("mojibake is repaired", clean_text("CELLECTRAâ„¢ device"),
+      "CELLECTRA™ device")
+check("...including an accented one",
+      clean_text("PenÃ­cilina"), "Penícilina")
+# The controls. A genuine accent must NOT be mangled by the repair, and a
+# plain name must be returned untouched rather than merely unchanged by luck.
+check("a real accent survives", clean_text("Café au lait"),
+      "Café au lait")
+check("a plain name is untouched",
+      clean_text("Amlodipine besylate"), "Amlodipine besylate")
+
 print("\nthe population suffix, and inversion in the direction MeSH needs")
 # The list had patients/subjects/participants but not WHO those patients were,
 # so "Breast Cancer Female" never produced "Breast Cancer" at all.

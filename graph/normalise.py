@@ -27,6 +27,7 @@ candidates; identifiers decide.
 """
 from __future__ import annotations
 
+import html
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -112,6 +113,51 @@ COMPANY_SUFFIXES = {
 _PUNCT = re.compile(r"[^\w\s]+", re.UNICODE)
 _WS = re.compile(r"\s+")
 
+# Markup and entities that arrived unescaped from a scrape. TCTR's WHO rows
+# are the worst of it - "IL SSB is usually given x1 / week x 4 w<br>If lesion
+# does not heal" and "IM injections with VGX&#45;3100" - but ISRCTN and CTRI
+# carry them too.
+#
+# They matter because fold() strips punctuation LAST: "&#45;" survives as the
+# token "45" and "<br>" as "br", so a drug name arrives with a number glued to
+# it and matches nothing. Undoing the markup first is what makes those rows
+# resolvable at all.
+_TAG = re.compile(r"<[^>]{1,40}>")
+_ENTITY = re.compile(r"&(?:[a-zA-Z]{2,10}|#\d{2,5}|#[xX][0-9a-fA-F]{2,4});")
+# Cheap pre-test: the repair below is not free and almost no string needs it.
+_NEEDS_CLEAN = re.compile(r"[<&]|[ÃÂâ€™]")
+
+
+def clean_text(s: str) -> str:
+    """Undo markup, HTML entities and mojibake in scraped free text.
+
+    Mojibake is repaired only when the round trip SUCCEEDS and actually
+    changes something - "â„¢" is the UTF-8 bytes of a trademark sign read as
+    latin-1, and re-reading them correctly restores it. A string that is
+    genuinely latin-1 fails the decode and is returned untouched, so a real
+    accented name is never mangled by this.
+    """
+    if not s or not _NEEDS_CLEAN.search(s):
+        return s
+    if any(c in s for c in "ÃÂâ"):
+        # cp1252 BEFORE latin-1, and that order is the whole trick. "â„¢" is
+        # the UTF-8 bytes of a trademark sign (E2 84 A2) shown through cp1252;
+        # latin-1 cannot even represent the "„" in the middle, so encoding
+        # throws and the repair silently does nothing. cp1252 round-trips it.
+        for codec in ("cp1252", "latin-1"):
+            try:
+                fixed = s.encode(codec).decode("utf-8")
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                continue          # not this codec's mojibake - try the next
+            if fixed != s:
+                s = fixed
+            break
+    if "<" in s:
+        s = _TAG.sub(" ", s)
+    if "&" in s:
+        s = html.unescape(s)
+    return s
+
 
 def fold(s: str) -> str:
     """Unicode-fold, lowercase, strip punctuation, collapse whitespace.
@@ -121,6 +167,7 @@ def fold(s: str) -> str:
     """
     if not s:
         return ""
+    s = clean_text(s)
     s = unicodedata.normalize("NFKD", s)
     s = s.encode("ascii", "ignore").decode()          # drops accents
     s = s.lower().replace("﻿", "")               # SFDA headers carry a BOM
