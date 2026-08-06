@@ -292,8 +292,15 @@ def _product(b, key, agency, source, contains, **props):
     # storing that verbatim makes a product read as though its strength were
     # literally "N/A". 66 products carried one. Emptied in the funnel rather
     # than per loader, for the same reason form is normalised here.
+    #
+    # Bare "NA" is included HERE and deliberately not in _PLACEHOLDER, which is
+    # global: "Na" is the symbol for sodium, and is_placeholder also guards
+    # ingredient and drug names, where dropping it would lose a real substance.
+    # In a strength or a product name it can only mean "not applicable" - SFDA
+    # writes it for "STERILE WATER FOR INJ 500 ML", which has no strength.
     for f in ("strength", "name"):
-        if f in props and is_placeholder(props[f]):
+        v = (props.get(f) or "").strip()
+        if v and (is_placeholder(v) or v.lower() == "na"):
             props[f] = ""
     # Set unconditionally, like the trial enums: an absent status and a status
     # the agency declined to give are the same fact and get the same value.
