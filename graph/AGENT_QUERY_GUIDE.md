@@ -236,6 +236,43 @@ Two things are deliberately never linked and should not be chased:
 `Healthy` (9,333 trials - healthy-volunteer studies have no disease), and any
 term MeSH files outside its disease trees.
 
+#### Why there is no similarity or embedding tier
+
+The obvious next move on the remaining tail is to resolve a condition by
+meaning when the string tiers fail - fuzzy matching, or nearest-neighbour
+against embedded MeSH names. It was measured on 2026-08-06 before being built,
+using difflib as a cheap stand-in, and the answer was **do not build it**.
+
+Ceiling: 18% of the unresolved mentions in ct.gov's 400 most frequent terms.
+Not the problem. The problem is WHAT it matches:
+
+| it would link | to | |
+|---|---|---|
+| ulcerative colitis | Ulcerative **pan**colitis | wrong, different extent |
+| acute lymphoblastic leukemia | **T-cell** ALL | wrong, invents a subtype |
+| pulmonary hypertension | **Porto**pulmonary hypertension | wrong, rare form |
+| chronic kidney diseases | CKD **stage 5** | wrong, invents severity |
+| post traumatic stress disorder | **Complex** PTSD | wrong |
+| alcohol use disorder | Alcoholism disorder **(TM2)** | traditional-medicine chapter |
+
+About half are wrong, and they fail in ONE direction: a general condition
+attached to a narrower subtype. A trial enrolling any ALL patient becomes a
+T-cell ALL trial. That is the same failure the `_may_alias` guard and
+`COND_TOO_GENERIC` exist to prevent, reintroduced at scale and harder to audit
+because no single rule produced it.
+
+An embedding tier would behave the same way for the same reason - "Type 1
+Diabetes" is the nearest neighbour of "Type 2 Diabetes" - while also adding a
+model dependency to the build. The genuinely correct matches in that sample
+(COVID-19, Parkinson Disease, plural and possessive forms) are spelling
+variants, which is what the existing variant ladder is for and where any
+further work should go.
+
+One caveat on that measurement: "unresolved" there meant "not an exact Disease
+node name", which over-counts - `breast cancer` appears in the list and is
+resolved through the cancer -> neoplasms rewriting. The wrongness of the
+matches is the finding; the 18% is an upper bound on an inflated denominator.
+
 ### A broad condition needs the rollup, and it now crosses vocabularies
 
 ```cypher
