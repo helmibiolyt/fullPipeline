@@ -552,6 +552,19 @@ TRAPS = [
  # them against a named heading. Structural: the tier must reach that node at
  # all. A count threshold here would be a guess, which is how the paclitaxel
  # check came to fail while its feature worked.
+ # eu_ctr's sponsor and IMP columns were called destroyed by the header damage
+ # and never were - they are namespaced "Sponsor 1 - B.1.1 ..." and "IMP 1 -
+ # D.3.1 ...", so a check for columns starting "B." or "D." missed them. They
+ # are filled on 99.8% and 97.3% of rows.
+ #
+ # Thresholds sit BETWEEN the two states: 28,285 sponsored when the value came
+ # from the WHO file, ~44,400 when it comes from eu_ctr itself.
+ ("eu_ctr carries its own sponsor, not the WHO file's",
+  "MATCH (t:ClinicalTrial {registry:'eu_ctr'}) WHERE EXISTS { (t)-[:SPONSORED_BY]->() } "
+  "RETURN count(t) AS n", lambda r: r[0]["n"] > 35_000),
+ ("eu_ctr names its own investigational products",
+  "MATCH (t:ClinicalTrial {registry:'eu_ctr'}) WHERE EXISTS { (:Substance)-[:TESTED_IN]->(t) } "
+  "RETURN count(t) AS n", lambda r: r[0]["n"] > 30_000),
  ("the curated HIV alias reaches HIV Infections",
   "MATCH ()-[e:STUDIES]->(d:Disease {key:'MESH:D015658'}) "
   "WHERE e.match_method = 'vocab_alias' RETURN count(*) AS n",

@@ -802,6 +802,55 @@ def euctr_phase(row: dict) -> str:
     return _EUCTR_COMBINED.get(on, f"PHASE{on[0]}")
 
 
+#: EudraCT repeats a section per sponsor and per investigational product, and
+#: the scrape namespaces each repeat: "Sponsor 1 - B.1.1 Name of Sponsor",
+#: "IMP 1 - D.3.1 Product name", ... up to IMP 30-odd.
+#:
+#: These were called destroyed by the header damage and they never were. The
+#: check that "proved" it looked for columns STARTING with "B." and "D." -
+#: these start with "Sponsor" and "IMP", so it found only the inclusion-criteria
+#: junk that happens to begin with those letters. The sponsor column is filled
+#: on 299 of 300 sampled rows and has been the whole time.
+_EUCTR_SPONSOR = re.compile(r"^Sponsor\s+\d+\s*-\s*B\.1\.1\s+Name of Sponsor$", re.I)
+#: Trade name, product name and INN for each IMP. All three are taken: a trial
+#: naming only a trade name resolves through a different tier than one naming
+#: an INN, and taking whichever exists costs one more column read.
+_EUCTR_IMP = re.compile(
+    r"^IMP\s+\d+\s*-\s*D\.(?:3\.1\s+Product name|3\.8\s+INN|2\.1\.1\.1\s+Trade name)",
+    re.I)
+
+
+def _euctr_sponsor(row: dict) -> str:
+    """The first named sponsor. Later ones are co-sponsors, not the owner."""
+    for col in row:
+        if _EUCTR_SPONSOR.match(col.strip()):
+            v = _euctr(row, col)
+            if v:
+                return v
+    return ""
+
+
+def _euctr_interventions(row: dict) -> str:
+    """Every IMP name on the trial, in the separator _terms already splits on.
+
+    Deduplicated case-insensitively: the same compound is routinely written
+    into the trade-name, product-name and INN columns of one IMP, and three
+    copies would be three identical resolver lookups.
+    """
+    out, seen = [], set()
+    for col in row:
+        if not _EUCTR_IMP.match(col.strip()):
+            continue
+        v = _euctr(row, col)
+        if not v:
+            continue
+        f = v.casefold()
+        if f not in seen:
+            seen.add(f)
+            out.append(v)
+    return "; ".join(out)
+
+
 _EUCTR_COND = "E.1.1 Medical condition(s) being investigated"
 # EudraCT asks for the condition TWICE: once as free text, and once coded
 # against MedDRA. The free text is what a sponsor typed in their own language
@@ -871,6 +920,8 @@ def load_euctr(b):
         _trial(b, k, "eu_ctr", key, status=row.get("Trial Status", ""),
                conditions=_euctr_conditions(row),
                phase=euctr_phase(row),
+               sponsor=_euctr_sponsor(row),
+               interventions=_euctr_interventions(row),
                title=_euctr(row, "A.3 Full title of the trial"))
     b.stats["euctr_header_damaged_cols"] = 128
     b._done("eu_ctr", t0, n)
