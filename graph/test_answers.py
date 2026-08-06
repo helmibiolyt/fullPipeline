@@ -559,6 +559,15 @@ TRAPS = [
  #
  # Thresholds sit BETWEEN the two states: 28,285 sponsored when the value came
  # from the WHO file, ~44,400 when it comes from eu_ctr itself.
+ # 4,066 trials were SPONSORED_BY a placeholder - nil 1,728, N/A 1,286, None
+ # 839, not applicable 209, Not available 4 - because the sponsor guard was a
+ # length test and never consulted _PLACEHOLDER. Structural: no Company may be
+ # a string that means "we do not know".
+ ("no trial is sponsored by a placeholder",
+  "MATCH (c:Company) WHERE toLower(c.name) IN "
+  "['none','n/a','na','nil','null','not applicable','unknown','not available',"
+  "'not specified','not stated','unspecified','tbd','no data','unassigned'] "
+  "RETURN count(c) AS n", lambda r: r[0]["n"] == 0),
  ("eu_ctr carries its own sponsor, not the WHO file's",
   "MATCH (t:ClinicalTrial {registry:'eu_ctr'}) WHERE EXISTS { (t)-[:SPONSORED_BY]->() } "
   "RETURN count(t) AS n", lambda r: r[0]["n"] > 35_000),

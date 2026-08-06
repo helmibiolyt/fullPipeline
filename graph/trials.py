@@ -577,7 +577,13 @@ def _trial(b, key, registry, source, sponsor="", conditions="", interventions=""
     b.w.node("ClinicalTrial", key, source=source,
              registry=norm_registry(registry), **props)
 
-    if sponsor and len(sponsor) > 2:
+    # is_placeholder, not just a length test. The length test alone let "nil",
+    # "None", "N/A", "not applicable" and "Not available" through as COMPANY
+    # nodes, and 4,066 trials were SPONSORED_BY one of them. That is worse than
+    # an absent sponsor: "who sponsors this trial" answered "nil" in a
+    # full sentence. Every one of these strings was already in _PLACEHOLDER -
+    # the set was just never consulted here, only for titles.
+    if sponsor and len(sponsor) > 2 and not is_placeholder(sponsor):
         ckey = f"COMPANY:{norm_company(sponsor)}"
         b.w.node("Company", ckey, source=source, name=sponsor, raw_names=sponsor)
         b.w.edge("SPONSORED_BY", key, ckey, match_method="structured", source=source)
@@ -1150,6 +1156,10 @@ def load_jrct(b):
         n += 1
         _trial(b, trial_key(tid), "jrct", key,
                interventions=row.get("Intervention(s)", ""),
+               # Present in the file and unread until now, which is why jrct
+               # sat at 12.1% sponsored while every other native registry is
+               # above 91%.
+               sponsor=row.get("Primary Sponsor", ""),
                conditions=row.get("Health Condition(s) or Problem(s) Studied", ""),
                title=row.get("Public Title", ""),
                status=row.get("Recruitment status", ""),
