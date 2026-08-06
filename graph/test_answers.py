@@ -563,6 +563,30 @@ TRAPS = [
  # 839, not applicable 209, Not available 4 - because the sponsor guard was a
  # length test and never consulted _PLACEHOLDER. Structural: no Company may be
  # a string that means "we do not know".
+ # The same class of defect on three more node types, all found by asking the
+ # graph for any node whose NAME means "we do not know":
+ #   Substance "N/A" (59 CONTAINS) and "NOT APPLICABLE" (13) - drugs that do
+ #     not exist, created from a product's ingredient column.
+ #   Mechanism "Unknown" (269 HAS_MECHANISM) - a hub that made unrelated drugs
+ #     look like they shared a mechanism.
+ #   Product "N/A" - these are REAL, keyed by BLA number, and needed a name
+ #     rather than deleting: purplebook writes N/A for a biologic licensed
+ #     without a trade name, and `prop or proper` let the truthy "N/A" win.
+ ("no substance is named after a missing value",
+  "MATCH (s:Substance) WHERE toLower(trim(s.name)) IN "
+  "['none','n/a','na','nil','null','not applicable','unknown','not available'] "
+  "RETURN count(s) AS n", lambda r: r[0]["n"] == 0),
+ ("no mechanism is named after a missing value",
+  "MATCH (m:Mechanism) WHERE toLower(trim(m.name)) IN "
+  "['none','n/a','na','nil','null','not applicable','unknown','unspecified'] "
+  "RETURN count(m) AS n", lambda r: r[0]["n"] == 0),
+ ("a biologic with no trade name keeps its proper name",
+  "MATCH (p:Product) WHERE toLower(trim(p.name)) IN "
+  "['none','n/a','na','nil','null','not applicable','unknown'] "
+  "RETURN count(p) AS n", lambda r: r[0]["n"] == 0),
+ ("...and that name is the real one",
+  "MATCH (p:Product {key:'FDA:BLA101062'}) RETURN p.name AS n",
+  lambda r: "ANTIVENIN" in (r[0]["n"] or "").upper()),
  ("no trial is sponsored by a placeholder",
   "MATCH (c:Company) WHERE toLower(c.name) IN "
   "['none','n/a','na','nil','null','not applicable','unknown','not available',"

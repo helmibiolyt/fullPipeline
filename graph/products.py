@@ -301,6 +301,14 @@ def _product(b, key, agency, source, contains, **props):
         b.w.edge("APPROVED_IN", key, f"REGION:{fold(region)}",
                  match_method="derived", source=source)
     for ing in contains:
+        # A product whose ingredient column says "N/A" is stating that it has
+        # no ingredient listed, not that it contains a substance called N/A.
+        # Without this the graph held Substance "N/A" with 59 CONTAINS edges
+        # and "NOT APPLICABLE" with 13 - drugs that do not exist, reachable by
+        # name search. Trial interventions were already filtered this way; the
+        # product loaders were not.
+        if is_placeholder(ing):
+            continue
         m = b.r.resolve(ing)
         if not m.key:
             continue
@@ -604,8 +612,17 @@ def load_purplebook(b):
         n += 1
         key = f"FDA:BLA{bla}"
         bla_key[bla] = key
+        # `prop or proper` looks right and is not: purplebook writes "N/A" in
+        # proprietary_name for a biologic licensed WITHOUT a trade name -
+        # antivenins, allergenic extracts - and "N/A" is a truthy string, so it
+        # beat the proper name every time. 59 products were called N/A while
+        # carrying a perfectly good proper name like "BLACK WIDOW SPIDER
+        # (LATRODECTUS MACTANS) IMMUNE GLOBULIN ANTIVENIN (EQUINE)".
+        #
+        # Unlike the Substance and Mechanism placeholders, these nodes are real
+        # and keyed by a real BLA number. They needed a NAME, not deleting.
         _product(b, key, "FDA", L["pb"], split_ingredients(proper),
-                 name=prop or proper,
+                 name=(prop if prop and not is_placeholder(prop) else proper),
                  strength=row.get("strength", ""),
                  form=row.get("dosage_form", ""),
                  status=row.get("marketing_status", ""))

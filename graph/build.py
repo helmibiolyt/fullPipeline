@@ -478,7 +478,12 @@ class Build:
             n += 1
             moa = (row.get("mechanism_of_action") or "").strip()
             action = (row.get("action_type") or "").strip()
-            if moa:
+            # "Unknown" is ChEMBL saying it has not recorded a mechanism, not
+            # a mechanism named Unknown. As a node it became a hub with 269
+            # HAS_MECHANISM edges, so "what is this drug's mechanism" answered
+            # "Unknown" as though that were a finding, and drugs with nothing
+            # in common appeared to share one.
+            if moa and not is_placeholder(moa):
                 mkey = f"MECH:{fold(moa)}"
                 self.w.node("Mechanism", mkey, source=key, name=moa,
                             action_type=action)
