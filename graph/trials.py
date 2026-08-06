@@ -1121,6 +1121,23 @@ def load_ctri(b):
 
 
 def load_jrct(b):
+    """Japan, and why it is small - which is the source, not this loader.
+
+    jrct holds 478 trials with a phase of NA on every one, and jprn 1,173. Both
+    look like parsing failures and neither is:
+
+      * jrct_list.csv has 478 ROWS and 72 columns, and not one of them is a
+        phase. There is nothing here to read. Japan's real jRCT is far larger,
+        so the gap is in the scrape.
+      * The WHO export carries 12,470 JPRN rows and only 1,232 DISTINCT trial
+        ids - it repeats each study about ten times. 1,232 is what the graph
+        holds, so nothing is being dropped. Counting rows rather than ids is
+        what made this look like an 11,000-trial bug.
+      * Korea is absent for the same kind of reason: the WHO export has 3 KCT
+        rows in total, which is why cris has 1 trial.
+
+    Primary Sponsor is present in this file and not read yet.
+    """
     t0 = b._step("jrct")
     key = L["jrct"]
     n = 0
