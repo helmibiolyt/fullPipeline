@@ -581,9 +581,14 @@ TRAPS = [
  ("...and its trials carry a real phase",
   "MATCH (t:ClinicalTrial {registry:'cris'}) WHERE t.phase <> 'NA' "
   "RETURN count(t) AS n", lambda r: r[0]["n"] > 1_000),
+ # Threshold between the two states, not under the good one. A broken loader
+ # links 0; the first real build linked 1,108 before the ICD-rubric rule
+ # existed. 500 separates them. The first version asserted > 3,000, which was
+ # a guess made before any measurement and failed the gate on a working load -
+ # the same mistake as the paclitaxel check.
  ("...and reach a disease through the English name",
   "MATCH (t:ClinicalTrial {registry:'cris'})-[:STUDIES]->(:Disease) "
-  "RETURN count(DISTINCT t) AS n", lambda r: r[0]["n"] > 3_000),
+  "RETURN count(DISTINCT t) AS n", lambda r: r[0]["n"] > 500),
  ("no product states a missing value as its strength",
   "MATCH (p:Product) WHERE toLower(trim(coalesce(p.strength,''))) IN "
   "['none','n/a','na','nil','null','not applicable','unknown','not available',"

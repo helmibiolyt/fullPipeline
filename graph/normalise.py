@@ -456,6 +456,26 @@ _COND_QUALIFIER_TAIL = re.compile(
     r"newly diagnosed|previously treated|untreated|"
     r"extensive[ -]stage|limited[ -]stage|stage [0-9ivx]+)$", re.I)
 
+# ICD-10 rubric wording, which is a different dialect from how a registry
+# writes a condition and from how MeSH heads one. A rubric names the residual
+# category as well as the disease:
+#
+#     Hyperlipidemia, unspecified        Other rheumatoid arthritis
+#     Generalized osteoarthritis NOS     Other specified diabetes mellitus
+#
+# None of those reached anything. The ladder produced "unspecified
+# Hyperlipidemia" and "rheumatoid arthritis, Other" - inversions of a phrase
+# whose modifier is bookkeeping, not clinical. Stripping it leaves the disease,
+# and "Hyperlipidemia" then reaches MeSH's "Hyperlipidemias" on the plural rule
+# that already exists.
+#
+# This is not only CRIS: the icd_name tier carries 39,639 edges of the same
+# dialect, and CTRI writes ICD rubrics too.
+_ICD_RUBRIC_TAIL = re.compile(r"[ ]*,?[ ]+(?:unspecified|nos|not elsewhere "
+                              r"classified|nec|without complications?)$", re.I)
+_ICD_RUBRIC_HEAD = re.compile(r"^(?:other specified|other|unspecified)[ ]+",
+                              re.I)
+
 # The single biggest vocabulary difference between protocols and MeSH.
 _COND_CANCER = re.compile(
     r"(?<![a-z])(cancers?|tumou?rs?|malignanc(?:y|ies))(?![a-z])", re.I)
@@ -579,6 +599,21 @@ def condition_variants(term: str):
         tail = nxt
     if tail != base and len(tail) >= 5:
         c = _push(tail)
+        if c:
+            yield c
+
+    # ICD-10 rubric wording. Both ends, and repeatedly, because a rubric
+    # routinely carries one at each: "Other specified diabetes mellitus,
+    # unspecified". Yielded BEFORE the manifestation strip so the plain disease
+    # is offered while it still has its own head word.
+    rub = base
+    for _ in range(2):
+        nxt = _ICD_RUBRIC_HEAD.sub("", _ICD_RUBRIC_TAIL.sub("", rub)).strip()
+        if nxt == rub:
+            break
+        rub = nxt
+    if rub != base and len(rub) >= 5:
+        c = _push(rub)
         if c:
             yield c
 

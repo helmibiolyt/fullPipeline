@@ -380,6 +380,28 @@ check("a two-word phrase is not inverted",
 check("inversion cannot land on a category word",
       _v("Chronic Disease"), ["Chronic Disease"])
 
+print("\nICD-10 rubric wording - a residual category is not the disease")
+# CRIS writes its conditions as ICD rubrics, and so does CTRI; the icd_name
+# tier carries 39,639 edges of the same dialect. None of these reached
+# anything - the ladder offered "unspecified Hyperlipidemia" and "rheumatoid
+# arthritis, Other", inversions of a phrase whose modifier is bookkeeping.
+check("a trailing 'unspecified' is dropped",
+      "Hyperlipidemia" in _v("Hyperlipidemia, unspecified"), True)
+check("...and a leading 'Other'",
+      "rheumatoid arthritis" in _v("Other rheumatoid arthritis"), True)
+check("...and NOS",
+      "Generalized osteoarthritis" in _v("Generalized osteoarthritis NOS"), True)
+check("...and 'Other specified'",
+      "diabetes mellitus" in _v("Other specified diabetes mellitus"), True)
+check("...and a leading 'Unspecified'",
+      "asthma" in _v("Unspecified asthma"), True)
+# Controls: an ordinary condition must be untouched by any of this, and the
+# category guard still outranks every rewriting.
+check("an ordinary condition is unaffected",
+      "Breast Neoplasms" in _v("Breast Cancer"), True)
+check("a rubric strip cannot land on a category word",
+      _v("Chronic Disease"), ["Chronic Disease"])
+
 print("\n'solid' and 'malignant' as leading qualifiers")
 # 3,424 ct.gov mentions reached nothing: the ladder rewrote tumor->neoplasms
 # and produced "Solid Neoplasms", which MeSH does not head.
