@@ -288,6 +288,13 @@ def _product(b, key, agency, source, contains, **props):
         # is punctuation-insensitive, so this renames without regrouping:
         # anything that merged under norm_form still merges.
         props["form"] = b.form_std.get(form_key(f), f) if f else f
+    # An agency writing "N/A" in a free-text field is declining to answer, and
+    # storing that verbatim makes a product read as though its strength were
+    # literally "N/A". 66 products carried one. Emptied in the funnel rather
+    # than per loader, for the same reason form is normalised here.
+    for f in ("strength", "name"):
+        if f in props and is_placeholder(props[f]):
+            props[f] = ""
     # Set unconditionally, like the trial enums: an absent status and a status
     # the agency declined to give are the same fact and get the same value.
     raw_status = (props.get("status") or "").strip()

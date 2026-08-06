@@ -572,6 +572,11 @@ TRAPS = [
  #   Product "N/A" - these are REAL, keyed by BLA number, and needed a name
  #     rather than deleting: purplebook writes N/A for a biologic licensed
  #     without a trade name, and `prop or proper` let the truthy "N/A" win.
+ ("no product states a missing value as its strength",
+  "MATCH (p:Product) WHERE toLower(trim(coalesce(p.strength,''))) IN "
+  "['none','n/a','na','nil','null','not applicable','unknown','not available',"
+  "'not specified','unspecified','tbd','-'] RETURN count(p) AS n",
+  lambda r: r[0]["n"] == 0),
  ("no substance is named after a missing value",
   "MATCH (s:Substance) WHERE toLower(trim(s.name)) IN "
   "['none','n/a','na','nil','null','not applicable','unknown','not available'] "
