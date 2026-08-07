@@ -1,0 +1,87 @@
+# The in-corpus half of biolytai_question_catalog_expanded.xlsx,
+# with every placeholder instantiated. Generated - edit
+# make_catalog_bank.py, not this file.
+#
+# 134 questions in the catalog. 63 ask about the sponsor's own EDC,
+# CTMS and safety case database and are dropped: no routing rule
+# reaches data that is in neither store. See catalog_route.py.
+#
+# Categories are the ROUTING VERDICT, so bench.py's BY CATEGORY
+# reports how each route performs rather than how each persona does.
+
+# Graph - counts, filters, aggregations over structured records
+Show all serious adverse events for pembrolizumab in the last 30 days
+List cases matching preferred term pneumonitis filed this quarter
+List all fatal case reports for pembrolizumab year to date
+Show cases received from Germany this week
+Show case volume trend by geography and reporting source for pembrolizumab
+Break down adverse events by System Organ Class for pembrolizumab
+Identify events most frequently co-reported with pneumonitis
+Detect disproportionality signals for pembrolizumab and rank by strength of association
+Compare the safety profile of pembrolizumab against nivolumab
+List active competitor trials for non-small cell lung cancer
+Pull the latest efficacy data for pembrolizumab in elderly patients
+What is the approved dosing for pembrolizumab in non-small cell lung cancer?
+Compare pembrolizumab vs nivolumab across efficacy and safety endpoints
+Map the competitive trial landscape for non-small cell lung cancer by phase, mechanism, sponsor
+Show all studies contributing to the non-small cell lung cancer submission
+Summarize the safety data package status across contributing studies
+Compare pembrolizumab labeling against nivolumab labeling
+Model the regulatory impact of immune-mediated pneumonitis on active and planned submissions
+Analyze approval precedents for non-small cell lung cancer and recommend a regulatory strategy
+List all active competitor trials for non-small cell lung cancer
+Which competitors have products approved for non-small cell lung cancer?
+Show recent competitor trial readouts for PD-1 checkpoint inhibitors
+What is the phase and status of nivolumab?
+Map the competitive pipeline for non-small cell lung cancer by phase, mechanism, and sponsor
+Compare efficacy and safety endpoints for pembrolizumab vs nivolumab
+Track competitor development timelines and projected readouts for non-small cell lung cancer
+Compare labeling and indications across pembrolizumab and key competitors
+Show competitor enrollment footprint overlapping the pembrolizumab NSCLC programme sites
+Analyze how competitors achieved approval for non-small cell lung cancer and extract implications
+Build a BD and licensing landscape scan for oncology with gap and threat analysis
+
+# Documents - wording, findings, narrative
+Assess whether the AE pattern for pembrolizumab warrants a label update, with supporting cases
+Generate the safety section narrative for the PSUR/PBRER for pembrolizumab
+Build a benefit-risk summary for pembrolizumab integrating efficacy and safety evidence
+Find the most recent real-world evidence study on pembrolizumab
+Summarize the evidence base for an MSL response to how does pembrolizumab compare to nivolumab on overall survival in NSCLC
+Track how evidence for improved overall survival versus chemotherapy has evolved over the last three years
+Synthesize a publication gap analysis and recommend priority topics
+Build a payer-ready value narrative integrating clinical, RWE, and comparative evidence
+Analyze where competitor evidence is strongest and recommend a defensive data strategy
+Find the source study for the overall survival benefit in NSCLC
+Run a cross-study consistency check for the overall survival benefit in NSCLC
+Identify evidence gaps for submission module 2.7.4 (Summary of Clinical Safety)
+Summarize how the FDA 2024 guidance on dose optimisation in oncology affects the current submission
+Map each labeling claim to its supporting evidence and flag weak links
+Draft the clinical overview narrative integrating efficacy and safety, with source traceability
+Draft responses to health authority questions using evidence from the corpus
+Generate a positioning brief integrating clinical, safety, and regulatory comparison
+Recommend evidence-generation priorities to counter competitor strengths
+
+# Both - the graph fixes the set, the documents say what it found
+Pull all cases involving metformin
+Summarize the AE profile for pembrolizumab by seriousness and causality
+Are there emerging signals across these PTs vs baseline in the last 90 days?
+Summarize case outcomes for pneumonitis over the last year
+Monitor class-wide safety signals for PD-1 checkpoint inhibitors across products
+Draft a signal evaluation summary for pneumonitis: narratives, temporal pattern, confounders
+Find published evidence supporting improved overall survival versus chemotherapy for non-small cell lung cancer
+Show recent congress abstracts mentioning pembrolizumab
+List key opinion leaders publishing on non-small cell lung cancer
+Summarize mechanism-of-action differences between pembrolizumab and nivolumab
+Summarize congress coverage for non-small cell lung cancer from the last major meeting
+Draft an evidence-backed scientific response to what is the evidence for pembrolizumab in PD-L1 low NSCLC, with citations and gap flags
+Generate a competitive positioning brief for pembrolizumab vs the non-small cell lung cancer landscape
+Build an evidence dossier for non-small cell lung cancer structured for advisory board discussion
+List evidence supporting improved overall survival versus chemotherapy for submission module 2.7.4 (Summary of Clinical Safety)
+Pull the current labeling claims for pembrolizumab
+What are the open regulatory commitments for pembrolizumab?
+Assess submission readiness for non-small cell lung cancer and flag gaps, inconsistencies, missing datasets
+Find the latest label changes for nivolumab
+List competitor congress presentations on non-small cell lung cancer this year
+Summarize the competitive evidence landscape for improved overall survival versus chemotherapy
+Build a competitive threat assessment for pembrolizumab across the non-small cell lung cancer landscape
+Model competitive timing scenarios and quantify first vs second-mover exposure

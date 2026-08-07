@@ -46,10 +46,30 @@ from schema_prompt import graph_schema, live_counts
 # When a tool's budget is spent it is REMOVED from the list offered, so the
 # model cannot call it and be refused - it simply sees one tool, or none, and
 # writes the answer.
-MAX_STEPS = 8
-MAX_GRAPH = 4
-MAX_DOCS = 4
-MAX_SECONDS = 90
+#: Budgets. Raised from 8/4/4 for the persona catalog, which is a different
+#: shape of question from the bank these were tuned on.
+#:
+#: The old sweep found MAX_GRAPH=4 optimal and raising it to 10 changed
+#: nothing. That was measured on 116 questions that were mostly ONE lookup -
+#: "how many trials in the Gulf" - where a bigger budget has nothing to spend
+#: itself on. The catalog is a third synthesis work: map a pipeline by phase,
+#: mechanism and sponsor; draft a clinical overview with source traceability;
+#: compare two products across efficacy and safety. Those need the graph to fix
+#: a set and the documents to say what it found, several times over.
+#:
+#: So the old measurement does not transfer, and it would have been wrong to
+#: cite it as if it did.
+#:
+#: MAX_DOCS is the larger of the two on purpose: the document half of the
+#: catalog skews complex - 10 of its 18 questions - because prose is where
+#: synthesis comes from.
+MAX_STEPS = 20
+MAX_GRAPH = 10
+MAX_DOCS = 12
+#: Raised with the budget. A 90s ceiling would have cut off any question that
+#: actually used the new headroom, and reported it as a timeout rather than as
+#: the deeper answer it was in the middle of building.
+MAX_SECONDS = 300
 STEP_TOKENS = 4000
 
 # How many times to re-ask when the provider ignores tool_choice="required"
@@ -190,20 +210,33 @@ interactions, what an assessment concluded, how a risk is worded. It cannot
 count, and it has no notion of "all" - it returns the passages closest to your
 search text.
 
-So: a number, a list or a relationship is a graph question. What a document
-SAYS about something is a document question. Many questions are both.
+So the graph is where a number, a list or a relationship lives, and the
+documents are where the wording lives. That is a difference in what they hold.
+It is NOT an instruction to pick one.
 
 HOW TO WORK
 
-Think about which store would hold the answer before calling anything.
+Use both stores. That is the default, not the exception.
 
-* Only the graph - "how many trials in the Gulf". Searching documents as well
-  wastes a call.
-* Only the documents - "what does the sertraline label say about pregnancy".
-* BOTH, independently - "what are the side effects of X" wants the reported
-  counts from the graph and the label wording from the documents.
-* IN ORDER - when the second lookup needs a name the first produces. Ask the
+Almost every real question is better answered with a count AND the prose around
+it: how many trials, and what the label actually warns about. The graph gives
+you the shape of the answer; the documents give you the substance, the caveats
+and the wording a person can quote.
+
+* Start wherever the answer most obviously lives, then check the other one.
+* A passage does not have to answer the question to be worth having. Documents
+  are prose - a chunk that is only partly on topic still tells you how a
+  regulator words a risk, what a study concluded, what the surrounding context
+  is. Take it as context and say what it is. Only an exact match counts as an
+  exact answer, but partial relevance is still information.
+* IN ORDER when the second lookup needs a name the first produces: ask the
   graph which drugs target EGFR, then search the documents using those names.
+  This is the most valuable pattern here and it is worth several calls.
+* Coming back with only structured rows, on a question where a document could
+  have added the reasoning, is a thin answer even when the rows are right.
+
+You have a generous budget. Use it. Spending calls to be more complete is the
+behaviour that is wanted; stopping early with a bare number is not.
 
 Call one tool at a time and look at what comes back.
 
@@ -225,7 +258,9 @@ thing you can do here.
 The same applies the other way: if two document searches return nothing useful,
 the answer may be a structural fact the graph can give you directly.
 
-Stop as soon as you can answer. You have at most 8 tool calls.
+Stop when you have enough to answer WELL - not at the first row that is
+technically responsive. If a document could add the wording, the caveat or the
+reasoning behind a number you already have, go and get it.
 
 WRITING THE ANSWER
 
@@ -632,6 +667,48 @@ _LEAKED_CALL = re.compile(
     r"<\s*(minimax:)?tool_call|<\s*invoke\s+name=|<\s*parameter\s+name=", re.I)
 
 
+#: The model narrating its own plan before the answer - "Now I have enough for
+#: a comprehensive comparison. Let me compile the answer." Harmless with a
+#: 4-call budget because there was rarely anything to narrate; conspicuous with
+#: twenty, where it thinks out loud about how much it has gathered.
+#:
+#: Only leading lines, and only ones that are plainly narration. A sentence in
+#: the middle of an answer is prose, and a first line that merely starts with
+#: "Now" may well be the answer itself.
+#: Tight on purpose. The first version used "i have" and "based on the
+#: results", and deleted "I have reviewed the label: it warns about
+#: pneumonitis" - a real answer - down to an empty string. A cleaner that
+#: silently eats answers is far worse than one that leaves a stray sentence,
+#: so this matches only phrasings that cannot be part of an answer.
+_PREAMBLE = re.compile(
+    r"^\s*(?:now\s+)?(?:"
+    r"i\s+(?:now\s+)?have\s+(?:enough|all\s+the|everything|what\s+i\s+need)|"
+    r"let\s+me\s+(?:compile|write|summari[sz]e|put|assemble|now)|"
+    r"here\s+is\s+the\s+(?:answer|comparison|summary)|"
+    r"with\s+(?:this|these)\s+(?:results?|data)\s+i\s+can"
+    r")\b[^\n]*(?:\n|$)", re.I)
+#: A horizontal rule the model writes between its narration and the answer.
+_RULE = re.compile(r"^\s*(?:-{3,}|\*{3,}|_{3,})\s*(?:\n|$)")
+
+
+def _strip_preamble(text: str) -> str:
+    """Drop the model's leading commentary about its own process.
+
+    Returns the ORIGINAL if stripping would leave nothing. That guard is not
+    theoretical - the first version hit it on a one-line answer.
+    """
+    if not text:
+        return text
+    out, prev = text, None
+    while prev != out:
+        prev = out
+        out = _PREAMBLE.sub("", out, count=1)
+        out = _RULE.sub("", out, count=1)
+        out = out.lstrip("\n")
+    out = out.strip()
+    return out if out else text.strip()
+
+
 def _clean_answer(text: str, messages: list, out: dict) -> str:
     """Re-ask for prose when the model wrote a tool call instead of an answer.
 
@@ -640,6 +717,7 @@ def _clean_answer(text: str, messages: list, out: dict) -> str:
     markup the original is returned rather than an empty string - a visible
     wrong answer can be diagnosed, a blank one cannot.
     """
+    text = _strip_preamble(text)
     if not text or not _LEAKED_CALL.search(text):
         return text
     try:
