@@ -1238,14 +1238,21 @@ def _cris_conditions(row: dict) -> str:
         part = part.strip()
         if not part:
             continue
-        if not part.endswith(")"):
-            part += ")"            # the bracket the split consumed
+        # Restore the bracket the split consumed - but ONLY when one is
+        # actually missing. Appending it unconditionally put a stray ")" on
+        # every entry that never had a gloss, so "Healthy Volunteers" became
+        # "Healthy Volunteers)" and matched nothing.
+        if part.count("(") > part.count(")"):
+            part += ")"
         # Peel trailing bracket groups until none is left: the Korean gloss,
         # and an inline ICD code sitting in front of it.
         prev = None
         while prev != part:
             prev = part
             part = _CRIS_GLOSS.sub("", part).strip()
+        # Anything still unbalanced is punctuation, not meaning.
+        while part.endswith(")") and part.count(")") > part.count("("):
+            part = part[:-1].strip()
         if part:
             out.append(part)
     return "; ".join(out)

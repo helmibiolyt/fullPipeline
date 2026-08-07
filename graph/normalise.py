@@ -485,6 +485,12 @@ _ICD_NEOPLASM = re.compile(
     r"^(?:malignant|benign|in situ|secondary|primary)?[ ]*"
     r"neoplasms?[ ]+of[ ]+(?:the[ ]+)?(.+)$", re.I)
 
+#: ICD writes the organ in full where MeSH heads the bare one: "thyroid gland"
+#: against "Thyroid Neoplasms". Deliberately three words, not a general
+#: last-word strip - "of colon" needed nothing, because "colon neoplasms" is
+#: already an entry term of MeSH's "Colonic Neoplasms".
+_ANAT_SUFFIX = re.compile(r"[ ]+(?:gland|region|structure)$", re.I)
+
 # The single biggest vocabulary difference between protocols and MeSH.
 _COND_CANCER = re.compile(
     r"(?<![a-z])(cancers?|tumou?rs?|malignanc(?:y|ies))(?![a-z])", re.I)
@@ -646,6 +652,16 @@ def condition_variants(term: str):
             c = _push(f"{site} Neoplasms")
             if c:
                 yield c
+            # ICD names the organ in full - "thyroid gland", "prostate gland" -
+            # where MeSH heads the bare organ, "Thyroid Neoplasms". Everything
+            # else here MeSH already covers by entry term: "colon neoplasms"
+            # IS an entry term of "Colonic Neoplasms", which is why that pair
+            # needed no rule and no hand-written synonym.
+            bare = _ANAT_SUFFIX.sub("", site).strip()
+            if bare != site and len(bare) >= 3:
+                c = _push(f"{bare} Neoplasms")
+                if c:
+                    yield c
 
     # Strip an appended manifestation, repeatedly: "COVID-19 Vaccination
     # Disease" needs two passes. The head must still be substantial - a
