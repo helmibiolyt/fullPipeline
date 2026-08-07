@@ -476,6 +476,15 @@ _ICD_RUBRIC_TAIL = re.compile(r"[ ]*,?[ ]+(?:unspecified|nos|not elsewhere "
 _ICD_RUBRIC_HEAD = re.compile(r"^(?:other specified|other|unspecified)[ ]+",
                               re.I)
 
+# The other half of the ICD dialect, and the bigger half by volume: chapter C
+# names every cancer as "Malignant neoplasm of SITE" while MeSH heads it
+# "SITE Neoplasms". No amount of stripping crosses that - the words have to be
+# reordered - so "Malignant neoplasm of breast" reached nothing while "Breast
+# Neoplasms" sat in the graph with thousands of trials on it.
+_ICD_NEOPLASM = re.compile(
+    r"^(?:malignant|benign|in situ|secondary|primary)?[ ]*"
+    r"neoplasms?[ ]+of[ ]+(?:the[ ]+)?(.+)$", re.I)
+
 # The single biggest vocabulary difference between protocols and MeSH.
 _COND_CANCER = re.compile(
     r"(?<![a-z])(cancers?|tumou?rs?|malignanc(?:y|ies))(?![a-z])", re.I)
@@ -616,6 +625,27 @@ def condition_variants(term: str):
         c = _push(rub)
         if c:
             yield c
+        # ...and its plural. The plural rule above only ever sees the ORIGINAL
+        # string, so it produced "Hyperlipidemia, unspecifieds" - a plural of
+        # the rubric - and never "Hyperlipidemias", which is how MeSH heads it.
+        # Stripping the rubric without this reached "Hyperlipidemia" and
+        # stopped one letter short of the node.
+        c = _push(rub[:-1] if rub.endswith("s") else rub + "s")
+        if c:
+            yield c
+
+    # "Malignant neoplasm of breast" -> "Breast Neoplasms". Tried on the
+    # rubric-stripped form as well as the original, so "Malignant neoplasm of
+    # colon, unspecified" reaches it too.
+    for src in dict.fromkeys((base, rub)):
+        m = _ICD_NEOPLASM.match(src)
+        if not m:
+            continue
+        site = m.group(1).strip(" ,")
+        if len(site) >= 3:
+            c = _push(f"{site} Neoplasms")
+            if c:
+                yield c
 
     # Strip an appended manifestation, repeatedly: "COVID-19 Vaccination
     # Disease" needs two passes. The head must still be substantial - a
@@ -685,12 +715,25 @@ def condition_variants(term: str):
     #   head noun to the front        Non-Small-Cell Lung Carcinoma
     #                                 -> Carcinoma, Non-Small-Cell Lung
     #
-    # Three words minimum, because a two-word phrase inverts to itself with a
-    # comma in it and reaches nothing. These are candidates, not claims: a
-    # wrong one simply fails to match, and only an exact MeSH heading lands.
-    if "," not in base:
-        w = base.split()
-        if 3 <= len(w) <= 8:
+    # TWO words minimum, not three. The first version said three, reasoning
+    # that a two-word phrase "inverts to itself with a comma in it". That is
+    # simply false - "rheumatoid arthritis" inverts to "arthritis, rheumatoid",
+    # which is exactly how MeSH heads it, and the same holds for a whole family
+    # of headings. The rule was excluding its best cases.
+    #
+    # These are candidates, not claims: a wrong one fails to match, and only an
+    # exact heading lands. Both inversions collapse to one string at two words,
+    # which _push dedupes.
+    # Applied to the rubric-stripped form as well as the original. The ladder
+    # is a flat list of transforms on `base`, so a derived form gets none of
+    # the transforms below it: "Other rheumatoid arthritis" stripped to
+    # "rheumatoid arthritis" and stopped there, never reaching MeSH's
+    # "Arthritis, Rheumatoid". The plural above needed the same treatment.
+    for src in dict.fromkeys((base, rub)):
+        if "," in src:
+            continue
+        w = src.split()
+        if 2 <= len(w) <= 8:
             for cand in (f"{' '.join(w[1:])}, {w[0]}",
                          f"{w[-1]}, {' '.join(w[:-1])}"):
                 c = _push(cand)

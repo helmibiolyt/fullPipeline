@@ -1183,12 +1183,24 @@ def load_jrct(b):
 _CRIS_SPLIT = re.compile(r"\)\s*,")
 
 
-def _cris_conditions(row: dict) -> str:
-    """cp_contents -> the separator _terms already splits on.
+#: Trailing bracket groups - the Korean gloss, and an inline ICD code before
+#: it: "Malignant neoplasm of breast(C50)(유방의 악성신생물)".
+_CRIS_GLOSS = re.compile(r"\s*\([^()]*\)\s*$")
 
-    The Korean gloss and any inline ICD code are left attached: fold() drops
-    bracketed text, so "Diabetes mellitus(E10-E14)(당뇨병)" folds to
-    "diabetes mellitus" without either being special-cased here.
+
+def _cris_conditions(row: dict) -> str:
+    """cp_contents -> the separator _terms already splits on, gloss removed.
+
+    The first version left the brackets attached, reasoning that fold() drops
+    bracketed text anyway. That is true of fold and irrelevant here: the
+    variant ladder runs on the UNFOLDED string, and its ICD-rubric rule anchors
+    "unspecified" at the end. With the gloss still there the string ends in
+    "(상세불명의 고지혈증)", the rule never fires, and CRIS resolved 1,109 of
+    12,391 trials.
+
+    It passed its unit test because the test fed it "Hyperlipidemia,
+    unspecified" - what the rubric looks like in ICD, not what this registry
+    actually writes.
     """
     raw = (row.get("cp_contents") or "").strip()
     if not raw:
@@ -1200,7 +1212,14 @@ def _cris_conditions(row: dict) -> str:
             continue
         if not part.endswith(")"):
             part += ")"            # the bracket the split consumed
-        out.append(part)
+        # Peel trailing bracket groups until none is left: the Korean gloss,
+        # and an inline ICD code sitting in front of it.
+        prev = None
+        while prev != part:
+            prev = part
+            part = _CRIS_GLOSS.sub("", part).strip()
+        if part:
+            out.append(part)
     return "; ".join(out)
 
 

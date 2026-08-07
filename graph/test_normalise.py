@@ -373,9 +373,24 @@ check("a leading modifier inverts to MeSH's form",
 check("a head noun inverts to the front",
       "Carcinoma, Non-Small-Cell Lung" in _v("Non-Small-Cell Lung Carcinoma"),
       True)
-# Two words invert to themselves with a comma wedged in, which reaches nothing.
-check("a two-word phrase is not inverted",
-      any("," in v for v in _v("Lung Cancer")), False)
+# This test used to assert that a two-word phrase is NOT inverted, on the
+# reasoning that it "inverts to itself with a comma in it". That is false, and
+# it was excluding the rule's best cases: MeSH heads a whole family this way.
+check("a two-word phrase inverts to MeSH's form",
+      "arthritis, rheumatoid" in [v.lower() for v in _v("Rheumatoid Arthritis")],
+      True)
+# The rubric strip and the inversion have to COMPOSE. The ladder applies each
+# transform to the original string, so a derived form used to get none of the
+# transforms below it and stopped one step short of the node.
+check("a stripped rubric is then inverted",
+      "arthritis, rheumatoid" in
+      [v.lower() for v in _v("Other rheumatoid arthritis")], True)
+check("...and pluralised",
+      "Hyperlipidemias" in _v("Hyperlipidemia, unspecified"), True)
+# ICD chapter C names every cancer "Malignant neoplasm of SITE"; MeSH heads it
+# "SITE Neoplasms". No amount of stripping crosses that - it needs reordering.
+check("an ICD cancer rubric reaches the MeSH form",
+      "breast Neoplasms" in _v("Malignant neoplasm of breast"), True)
 # The category guard still wins over every new rewriting.
 check("inversion cannot land on a category word",
       _v("Chronic Disease"), ["Chronic Disease"])
