@@ -24,7 +24,10 @@ mirror: false
 #     en-latest-detail/jRCT1042260071  HTTP 200,  25,452 bytes
 # So the WAF no longer blocks this IP and no proxy is needed.
 #
-# TEMPORARY: jrct_list.csv holds 478 trials, which is why the graph shows 478
-# with a phase of NA on every one - that file has no phase column at all. Set
-# back to false once the run has published.
-enabled: true
+# Re-scraped 2026-08-07: 478 -> 2,492 trials, published and disabled again.
+#
+# Note for next time: jRCT publishes NO phase field - not badly, at all, in any
+# of its 80 columns. The graph reads it out of the title instead, where jRCT
+# states it in the standard trial-title form ("A phase I open-label study..."),
+# which covers 30.9% of them. See _jrct_phase in graph/trials.py.
+enabled: false

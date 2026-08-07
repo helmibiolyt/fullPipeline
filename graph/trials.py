@@ -1127,6 +1127,33 @@ def load_ctri(b):
     b._done("ctri", t0, n)
 
 
+#: jRCT publishes no phase field. Not "publishes it badly" - there is no such
+#: column among the 80 it does publish, which is why all 2,492 jrct trials
+#: carried a phase of NA and why zero of them could be filtered on.
+#:
+#: It states the phase in the TITLE instead, in the standard trial-title form:
+#: "A phase I open-label, multi-center study to evaluate...". Reading it there
+#: is reading, not inferring - the alternative is 0% coverage on a registry
+#: that runs real phased trials.
+#:
+#: Strict on purpose: the literal word "phase" followed by a numeral or a roman
+#: numeral. A title that merely contains the word does not qualify.
+_JRCT_PHASE = re.compile(r"\bphase\s*(?:i{1,3}v?|[0-4])\b", re.I)
+#: Enough of the title after the match for norm_phase to see a combined phase.
+#: Matching the token alone read "Phase 2/3" as PHASE2 - 91 of 770 extractions,
+#: 12%, silently recorded as a lower phase than the trial actually is.
+_JRCT_PHASE_WINDOW = 24
+
+
+def _jrct_phase(row: dict) -> str:
+    for col in ("Scientific Title", "Public Title"):
+        t = row.get(col) or ""
+        m = _JRCT_PHASE.search(t)
+        if m:
+            return norm_phase(t[m.start():m.start() + _JRCT_PHASE_WINDOW])
+    return PHASE_NA
+
+
 def load_jrct(b):
     """Japan, and why it is small - which is the source, not this loader.
 
@@ -1156,6 +1183,7 @@ def load_jrct(b):
             continue
         n += 1
         _trial(b, trial_key(tid), "jrct", key,
+               phase=_jrct_phase(row),
                interventions=row.get("Intervention(s)", ""),
                # Present in the file and unread until now, which is why jrct
                # sat at 12.1% sponsored while every other native registry is
