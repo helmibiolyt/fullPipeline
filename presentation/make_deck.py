@@ -521,7 +521,7 @@ def build():
               "MeSH spine and the MeSH/EFO crosswalk — must precede any "
               "disease text matching"),
              ("11–12", "Products + trials",
-              "Ten agencies, then nine registries with WHO last"),
+              "Ten agencies, then ten registries with WHO last"),
              ("13–15", "Safety, variants, literature",
               "Aggregated FAERS, filtered ClinVar, title-matched publications")]
     shapes = []

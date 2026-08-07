@@ -1,6 +1,6 @@
-"""ClinicalTrial, across nine registries.
+"""ClinicalTrial, across ten registries.
 
-The hard problem here is not loading nine files, it is that the same study is
+The hard problem here is not loading ten files, it is that the same study is
 registered in several of them. WHO ICTRP alone is 1.01M rows and is itself an
 aggregation of the other registries, so a naive load produces roughly two
 million trial nodes for a world that has around half that many trials.
@@ -31,7 +31,7 @@ from normalise import (condition_parts, condition_variants, fold,
                        is_placeholder, norm_company, squash)
 
 # --------------------------------------------------------------------------
-# Nine registries describe the same three facts in their own words. Left raw,
+# Ten registries describe the same three facts in their own words. Left raw,
 # `phase` held 112 distinct values for what are really six, `status` held 46
 # for about ten, and `registry` spelled itself two ways in four cases. Every
 # one of those splits a GROUP BY and makes an equality filter silently miss:
@@ -550,7 +550,7 @@ def _same_study(b, key, other, source):
 
 def _trial(b, key, registry, source, sponsor="", conditions="", interventions="",
            iso=(), **props):
-    """One trial node plus its edges. Shared by all nine registries."""
+    """One trial node plus its edges. Shared by all ten registries."""
     # Normalise here rather than in each loader: this is the one funnel every
     # registry passes through, so a tenth registry gets the same treatment
     # without anyone remembering to add it.

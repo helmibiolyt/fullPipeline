@@ -52,7 +52,7 @@ CATEGORY_WHY = {
         "What a substance IS. This category is why every other source's drug "
         "names can be resolved at all.",
     "Clinical_Trials_Pipeline_Intelligence":
-        "Nine registries, deliberately overlapping - the second registration "
+        "Ten registries, deliberately overlapping - the second registration "
         "of a study often carries the field the first one omitted.",
     "Regulatory_Approvals":
         "Agency registers, and the origin of nearly every document in the "

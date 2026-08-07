@@ -191,7 +191,7 @@ ORDER = [
     ("11", "products.ALL", "Products",
      "Ten agencies. Also creates all 189 Country and 9 Region nodes."),
     ("12", "trials.ALL", "Trials",
-     "Nine registries, WHO last so native records win on properties."),
+     "Ten registries, WHO last so native records win on properties."),
     ("13", "safety.ALL", "Safety",
      "Regulatory events, FAERS aggregation, VigiAccess organ classes."),
     ("14", "variants.ALL", "Variants",
