@@ -350,6 +350,8 @@ def report(rows: list[dict]) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--bank", default="",
+                    help="question bank to run (default: questions.txt)")
     ap.add_argument("--sample", type=int, default=0,
                     help="take only N questions per category")
     ap.add_argument("--category", default="")
@@ -375,7 +377,7 @@ def main() -> None:
         report(rows)
         return
 
-    bank = load_bank(BANK)
+    bank = load_bank(pathlib.Path(a.bank) if a.bank else BANK)
     if a.category:
         bank = [(c, q) for c, q in bank if a.category.lower() in c.lower()]
     if a.sample:

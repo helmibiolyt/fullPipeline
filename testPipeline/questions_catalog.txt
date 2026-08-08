@@ -1,14 +1,3 @@
-# The in-corpus half of biolytai_question_catalog_expanded.xlsx,
-# with every placeholder instantiated. Generated - edit
-# make_catalog_bank.py, not this file.
-#
-# 134 questions in the catalog. 63 ask about the sponsor's own EDC,
-# CTMS and safety case database and are dropped: no routing rule
-# reaches data that is in neither store. See catalog_route.py.
-#
-# Categories are the ROUTING VERDICT, so bench.py's BY CATEGORY
-# reports how each route performs rather than how each persona does.
-
 # Graph - counts, filters, aggregations over structured records
 Show all serious adverse events for pembrolizumab in the last 30 days
 List cases matching preferred term pneumonitis filed this quarter

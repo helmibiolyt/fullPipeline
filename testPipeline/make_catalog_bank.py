@@ -92,19 +92,12 @@ def main() -> None:
             if x["verdict"] != "ABSENT"]
     tmp.unlink(missing_ok=True)
 
-    out = [
-        "# The in-corpus half of biolytai_question_catalog_expanded.xlsx,",
-        "# with every placeholder instantiated. Generated - edit",
-        "# make_catalog_bank.py, not this file.",
-        "#",
-        "# 134 questions in the catalog. 63 ask about the sponsor's own EDC,",
-        "# CTMS and safety case database and are dropped: no routing rule",
-        "# reaches data that is in neither store. See catalog_route.py.",
-        "#",
-        "# Categories are the ROUTING VERDICT, so bench.py's BY CATEGORY",
-        "# reports how each route performs rather than how each persona does.",
-        "",
-    ]
+    # Only the three ROUTE lines may start with "#": bench.py opens a new
+    # category on every comment line, so a nine-line preamble made the last
+    # header line the category and the report came out labelled
+    # "make_catalog_bank.py, not this file." The explanation lives in this
+    # module's docstring, where it cannot corrupt the parse.
+    out = []
     unresolved: list[str] = []
     for verdict, label in HEADERS:
         out.append(f"# {label}")

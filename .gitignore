@@ -70,3 +70,6 @@ testPipeline/.env
 displayData/node_modules/
 displayData/.next/
 displayData/.env.local
+
+# Office lock files - present while a doc is open, never ours to commit
+~$*
