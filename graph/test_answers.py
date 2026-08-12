@@ -43,7 +43,12 @@ try:
 except ImportError:
     pass
 
-URI = os.getenv("NEO4J_URI", "bolt://4.233.210.24:7687")
+# Was a hardcoded "bolt://4.233.210.24:7687". A host address baked in as
+# a DEFAULT is the worst kind: replace the VM and this keeps pointing at
+# the dead one, connects to nothing, and reports it as an empty graph
+# rather than as a misconfiguration. localhost is the honest default -
+# on the graph host it is correct, and anywhere else it fails loudly.
+URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 USER = os.getenv("NEO4J_USER", "neo4j")
 PWD = os.getenv("NEO4J_PASSWORD", "")
 DB = os.getenv("NEO4J_DATABASE", "biolyt")

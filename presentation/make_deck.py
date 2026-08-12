@@ -143,7 +143,7 @@ def build():
                "One connected view of\nglobal drug development",
                size=52, color=T.TEXT, bold=True, line=1.08)
     c = T.text(s, T.MARGIN, Inches(4.5), Inches(9.6), Inches(0.9),
-               f"49 data sources, reconciled into a "
+               f"50 data sources, reconciled into a "
                f"{C.millions(C.live_counts()['_nodes'])}-node knowledge graph "
                "and a 3.2M-chunk document store — kept current automatically.",
                size=15.5, color=T.MUTED, line=1.4)
@@ -165,7 +165,7 @@ def build():
     s, y = new(prs, "the short version", "What we built")
     cards = [
         T.card(s, T.MARGIN, y, Inches(3.83), Inches(2.0), "Collect",
-               "49 scrapers pull from registries, agencies, ontologies and "
+               "50 scrapers pull from registries, agencies, ontologies and "
                "literature into one S3 lake. Each publishes a full snapshot "
                "on a schedule.", T.CYAN),
         T.card(s, T.MARGIN + Inches(4.03), y, Inches(3.83), Inches(2.0),
@@ -952,10 +952,10 @@ def _architecture(s, y):
            color=T.CYAN, bold=True)
     T.text(s, T.MARGIN + Inches(0.3), y + Inches(0.46), Inches(9),
            Inches(0.3),
-           "432 CSV files  ·  93,505 documents  ·  49 sources, full "
+           "432 CSV files  ·  93,505 documents  ·  50 sources, full "
            "snapshots overwritten each run", size=11.5, color=T.MUTED)
     T.text(s, T.MARGIN + Inches(9.6), y + Inches(0.28), Inches(2.2),
-           Inches(0.4), "49 scrapers →", size=12, color=T.DIM,
+           Inches(0.4), "50 scrapers →", size=12, color=T.DIM,
            align=PP_ALIGN.RIGHT)
 
     y2 = y + Inches(1.25)

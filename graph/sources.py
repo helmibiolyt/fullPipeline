@@ -1,6 +1,6 @@
 """Which CSVs feed the graph, and why the rest do not.
 
-The lake holds 436 CSVs across 49 sources, ~344M rows, 52.5 GB. Most of that
+The lake holds 436 CSVs across 50 sources, ~344M rows, 52.5 GB. Most of that
 volume is irrelevant to a graph: two PubChem files alone are ~254M rows of
 two-column lookups. This module is the explicit decision about what is loaded.
 

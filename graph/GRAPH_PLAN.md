@@ -2,7 +2,7 @@
 
 Target schema: 15 entity types, 19 relationship types (see `SCHEMA.md`; `Drug`
 is split into `Substance` + `Product`).
-Built from the 433 CSVs in `s3://moine-data`, 49 sources, 8 categories.
+Built from the 433 CSVs in `s3://moine-data`, 50 sources, 8 categories.
 Derived from an actual column-level profile of every CSV (`graph/csv_profile.txt`),
 not from source names.
 

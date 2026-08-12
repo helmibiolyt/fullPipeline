@@ -119,7 +119,7 @@ def main():
 
     t(ax, 0.030, 0.960, "Biolyt — platform architecture", size=19, w="bold")
     t(ax, 0.030, 0.928,
-      "49 scrapers  →  one S3 lake  →  a knowledge graph and a document "
+      "50 scrapers  →  one S3 lake  →  a knowledge graph and a document "
       "store, kept current without anyone touching them",
       size=11, color=MUTED)
     t(ax, 0.970, 0.960, f"figures: {g['note']}", size=9, color=DIM, ha="right")
@@ -143,7 +143,7 @@ def main():
 
     # ---------------------------------------------------------- 1 COLLECT
     box(ax, C[0], 0.600, W, 0.255, CYAN)
-    t(ax, C[0] + PAD, 0.828, "49 scrapers", size=13, w="bold")
+    t(ax, C[0] + PAD, 0.828, "50 scrapers", size=13, w="bold")
     t(ax, C[0] + PAD, 0.803, "one folder and a manifest each", size=8.6,
       color=DIM)
     rows(ax, C[0] + PAD, 0.773, C[0] + W - PAD,

@@ -219,14 +219,33 @@ half of all trials are not drug trials at all.
 
 ### How complete is the disease linkage, really
 
-60% of trials carry a disease link. Measured against ClinicalTrials.gov
-itself, for the trials this graph took from that registry:
+65.5% of trials carry a disease link. Measured against ClinicalTrials.gov
+itself, for the trials this graph took from that registry (re-measured
+2026-08-07):
 
 | condition | ClinicalTrials.gov | this graph | recall |
 |---|---|---|---|
-| Eczema | 1,726 | 1,409 | 82% |
-| Non-small cell lung cancer | 7,969 | 5,741 | 72% |
-| Type 2 diabetes | 11,302 | 8,890 | 79% |
+| Eczema — rolled up from `Skin Diseases, Eczematous` | 1,726 | 1,703 | 99% |
+| Non-small cell lung cancer | 7,969 | 6,279 | 79% |
+| Type 2 diabetes | 11,302 | 9,550 | 84% |
+
+**Eczema is a rollup trap, and it is the reason that row moved from 82% to
+99%.** Rolling up from `Eczema` (MESH:D004485) returns 211 trials and looks
+like a collapse. It is not: eczema trials correctly land on `Dermatitis,
+Atopic` (MESH:D003876, 2,380 trials), and MeSH files those two as SIBLINGS
+under `Skin Diseases, Eczematous` — not parent and child. A rollup from
+`Eczema` therefore cannot reach atopic dermatitis, however deep it walks.
+
+Check what a disease's parents actually are before trusting a rollup:
+
+```cypher
+MATCH (d:Disease {key:'MESH:D003876'})-[:SUBTYPE_OF]->(p:Disease)
+RETURN p.name
+```
+
+MeSH is a polyhierarchy, so that returns six parents for atopic dermatitis,
+including `Dermatitis`, `Hypersensitivity, Immediate` and the ICD-10 block.
+Rolling up from the wrong one of them silently answers a different question.
 
 So a count from this graph is a **floor, not a total**. Say so. ct.gov's own
 search also matches title and description text while the graph links only on

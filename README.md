@@ -1,6 +1,6 @@
 # fullPipeline
 
-A biomedical intelligence pipeline: 49 scrapers publish to S3, and two stores
+A biomedical intelligence pipeline: 50 scrapers publish to S3, and two stores
 are built from what lands there — a **Neo4j knowledge graph** (13.7M nodes) and
 a **Qdrant vector store** (3.24M document chunks). Airflow keeps both current.
 
@@ -13,7 +13,7 @@ This README is the map. Each component documents itself in more depth:
 ## What is where
 
 ```
-scrape/         49 source scrapers, one folder each, each with a manifest.yaml
+scrape/         50 source scrapers, one folder each, each with a manifest.yaml
 automation/     Airflow: the scraper DAG and the two sync DAGs
 graph/          builds the Neo4j graph from the lake's CSVs
 vector_store/   embeds the lake's documents into Qdrant
@@ -24,7 +24,7 @@ deploy/         provisioning and operations scripts for both hosts
 
 ```
                    ┌──────────────────────────────────┐
-   49 scrapers ───►│  S3  moine-data                  │
+   50 scrapers ───►│  S3  moine-data                  │
    (@weekly)       │  ~436 CSVs + 93,435 documents    │
                    └───────┬──────────────────┬───────┘
                            │                  │
@@ -160,6 +160,13 @@ not — regenerating them means re-embedding 93k documents.
    ```
 4. Add the firewall rule for 7474/7687, **scoped to your address**.
 5. Update Airflow's `graph_host` connection to the new IP.
+6. Update `NEO4J_URI` wherever the agent runs — `testPipeline/.env` locally,
+   and the backend's own environment. Nothing else in the repo names the host:
+   `audit_quality.py`, `test_answers.py` and `ask.py` used to carry the old IP
+   as a *default*, which is the failure that hides — a replaced VM leaves them
+   connecting to a dead box and reporting an empty graph rather than a
+   misconfiguration. They now default to `localhost`, which is right on the
+   graph host and fails loudly anywhere else.
 
 **Faster:** if the old box still lives, `scp` its newest `~/graph-runs/<ts>/`
 across and skip to `import-graph.sh` — five minutes instead of twenty-five. Or

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render GRAPH_TECHNICAL.pdf - how 49 independent sources become one graph.
+"""Render GRAPH_TECHNICAL.pdf - how 50 independent sources become one graph.
 
     python graph/make_tech_doc.py
 
