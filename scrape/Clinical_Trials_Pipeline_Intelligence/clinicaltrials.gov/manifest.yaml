@@ -6,4 +6,7 @@ output_subdirs: [clinicaltrials_data]
 size_class: heavy
 timeout_min: 360
 mirror: true
-enabled: false
+# TEMPORARY: refresh run. Set back to false once it has published.
+# 596,751 trials at 1,000 studies per request is ~600 sequential cursor
+# pages, and size_class is heavy with a 6-hour ceiling.
+enabled: true
