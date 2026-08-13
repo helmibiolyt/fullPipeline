@@ -6,7 +6,7 @@ output_subdirs: [clinicaltrials_data]
 size_class: heavy
 timeout_min: 360
 mirror: true
-# TEMPORARY: refresh run. Set back to false once it has published.
-# 596,751 trials at 1,000 studies per request is ~600 sequential cursor
-# pages, and size_class is heavy with a 6-hour ceiling.
-enabled: true
+# Refreshed 2026-08-13 and disabled again the same day. The run took ~14
+# minutes against a 360-minute ceiling: the API returns 1,000 full studies per
+# request, so the whole registry is ~600 sequential pages, not a long crawl.
+enabled: false
