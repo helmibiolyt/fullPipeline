@@ -108,7 +108,31 @@ COMPANY_SUFFIXES = {
     "biosciences", "bioscience", "biotech", "sciences", "science", "srl",
     "spa", "s.p.a", "oy", "ab", "as", "a/s", "aps", "kk", "k.k", "pty",
     "pvt", "private", "usa", "us", "uk", "europe", "eu",
+    # The national arm is the same sponsor. Without these, AstraZeneca was 47
+    # Company nodes and Pfizer 171 - "AstraZeneca Korea", "Pfizer Japan inc",
+    # "ASTRAZENECA - PERU," each becoming a separate company - so every
+    # sponsor-level count was split across a company's own subsidiaries and
+    # every large sponsor was undercounted, unevenly.
+    "korea", "japan", "china", "india", "peru", "brazil", "mexico", "canada",
+    "france", "germany", "spain", "italy", "sweden", "denmark", "norway",
+    "finland", "netherlands", "belgium", "austria", "switzerland", "poland",
+    "portugal", "greece", "turkey", "russia", "australia", "zealand",
+    "taiwan", "singapore", "malaysia", "thailand", "philippines", "indonesia",
+    "vietnam", "israel", "egypt", "argentina", "colombia", "chile", "ireland",
+    "hungary", "romania", "czech", "slovakia", "bulgaria", "croatia",
+    "america", "american", "asia", "pacific", "nordic", "benelux", "iberia",
+    "gmbh&co", "do", "brasil", "espana", "deutschland", "italia", "france.",
 }
+
+#: A legal form that fold() shattered into single letters - "K.K." becomes
+#: "k k", "S.A." becomes "s a", "N.V." becomes "n v". The suffix set cannot
+#: catch those because it matches whole tokens, so they survived and split
+#: "AstraZeneca K.K." away from "AstraZeneca AB".
+#:
+#: Only stripped from the END, and only single letters. A leading initial is
+#: part of the name - "E R Squibb" is not "Squibb" - and a company whose name
+#: genuinely ends in a lone letter is rare enough to be worth the trade.
+_TRAILING_INITIALS = re.compile(r"(?:[ ]+[a-z])+$")
 
 _PUNCT = re.compile(r"[^\w\s]+", re.UNICODE)
 _WS = re.compile(r"\s+")
@@ -205,7 +229,22 @@ def norm_company(s: str) -> str:
     from substance normalisation because the rules have nothing in common.
     """
     toks = [t for t in fold(s).split() if t not in COMPANY_SUFFIXES]
-    return " ".join(toks) if toks else fold(s)
+    out = " ".join(toks)
+    # Repeatedly, because a name can carry both: "Pfizer S.A" -> "pfizer s a"
+    # -> "pfizer".
+    #
+    # The strip only applies while a real word survives it. Without that guard
+    # "A&G Pharmaceutical Inc." folds to "a g pharmaceutical inc", loses its
+    # suffixes to "a g", and then loses its initials to "a" - and thirteen
+    # unrelated companies whose names begin with initials all became the same
+    # node. A company named from initials keeps them.
+    prev = None
+    while prev != out:
+        prev = out
+        stripped = _TRAILING_INITIALS.sub("", out).strip()
+        if stripped and any(len(t) > 1 for t in stripped.split()):
+            out = stripped
+    return out if out else fold(s)
 
 
 @dataclass

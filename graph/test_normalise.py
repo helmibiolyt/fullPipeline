@@ -395,6 +395,30 @@ check("an ICD cancer rubric reaches the MeSH form",
 check("inversion cannot land on a category word",
       _v("Chronic Disease"), ["Chronic Disease"])
 
+print("\nnorm_company - a national arm is the same sponsor")
+from normalise import norm_company as _nc                  # noqa: E402
+# AstraZeneca was 47 Company nodes and Pfizer 171, so every sponsor-level
+# count was split across a company's own subsidiaries.
+check("a country arm folds into the parent",
+      _nc("AstraZeneca Korea"), _nc("AstraZeneca AB"))
+check("...including the Japanese legal form",
+      _nc("AstraZeneca K.K."), _nc("AstraZeneca AB"))
+check("...and a punctuated one fold() shattered",
+      _nc("Pfizer S.A"), _nc("Pfizer Limited"))
+check("...and Brasil", _nc("GlaxoSmithKline Brasil"), _nc("GLAXOSMITHKLINE INC"))
+# Controls. Two different companies must not become one node.
+check("different companies stay apart",
+      _nc("Novartis") == _nc("Novo Nordisk"), False)
+check("...even sharing a first word",
+      _nc("Merck KGaA") == _nc("Merck Sharp & Dohme"), False)
+check("...and a subsidiary with its own name is not the parent",
+      _nc("Roche Diagnostics") == _nc("Roche"), False)
+# A company NAMED from initials keeps them. Without this guard "A&G
+# Pharmaceutical Inc." reduced to "a" and took twelve unrelated companies
+# with it.
+check("initials are not stripped to nothing", _nc("A&G Pharmaceutical Inc."), "a g")
+check("...and a leading initial survives", _nc("E R Squibb"), "e r squibb")
+
 print("\nICD-10 rubric wording - a residual category is not the disease")
 # CRIS writes its conditions as ICD rubrics, and so does CTRI; the icd_name
 # tier carries 39,639 edges of the same dialect. None of these reached
