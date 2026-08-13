@@ -60,9 +60,20 @@ NODE_COLUMNS: dict[str, list[str]] = {
     "RegulatoryAgency": ["key", "code", "name", "country", "region"],
     "Company":         ["key", "name", "raw_names"],
     "Approval":        ["key", "date", "type", "status", "agency"],
+    # The nine fields after start_date were added because a trial node could
+    # not answer "what changed recently". The agent asked for AstraZeneca
+    # trials updated in the last week, found no last_update_date, and correctly
+    # fell back to the live registry - but every registry publishes that field
+    # and this graph was throwing it away.
+    #
+    # Dates are stored as each registry writes them, deliberately. They are not
+    # comparable across registries and normalising them is a decision that has
+    # not been taken; see the guide's "dates do not compare".
     "ClinicalTrial":   ["key", "registry", "title", "status", "phase",
                         "study_type", "study_type_raw", "enrollment",
-                        "start_date"],
+                        "start_date", "last_update_date", "completion_date",
+                        "registration_date", "has_results", "url",
+                        "brief_summary", "sex", "min_age", "max_age"],
     "Patent":          ["key", "patent_no", "expire_date", "use_code",
                         "use_definition", "drug_substance_flag",
                         "drug_product_flag"],

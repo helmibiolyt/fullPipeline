@@ -580,6 +580,21 @@ TRAPS = [
  # Korea was ONE trial until CRIS got a scraper - the WHO export carries 3 KCT
  # rows, so no loader could have found the rest. The threshold sits between the
  # two states rather than just under the new one: 1 before, ~12,391 after.
+ # The graph could not answer "what changed recently" - a trial node carried no
+ # last_update_date, so the agent correctly fell back to the live registry for
+ # a field every registry publishes and this build was discarding.
+ ("a trial says when it was last updated",
+  "MATCH (t:ClinicalTrial) WHERE t.last_update_date <> '' "
+  "RETURN count(t) AS n", lambda r: r[0]["n"] > 400_000),
+ ("...and when it completes",
+  "MATCH (t:ClinicalTrial) WHERE t.completion_date <> '' "
+  "RETURN count(t) AS n", lambda r: r[0]["n"] > 300_000),
+ # ChiCTR writes 1900-01-01 as a completion date on 399 of 400 rows. Stored
+ # verbatim it sorts first and reads as a real date.
+ ("no epoch sentinel survives as a date",
+  "MATCH (t:ClinicalTrial) WHERE t.completion_date IN "
+  "['1900-01-01','0000-00-00','1970-01-01','9999-12-31'] "
+  "RETURN count(t) AS n", lambda r: r[0]["n"] == 0),
  ("Korea is a registry, not a single trial",
   "MATCH (t:ClinicalTrial {registry:'cris'}) RETURN count(t) AS n",
   lambda r: r[0]["n"] > 9_000),

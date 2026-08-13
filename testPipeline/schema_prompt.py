@@ -188,6 +188,18 @@ REAL VALUES — use these exactly, never invent one.
   ClinicalTrial.status  COMPLETED RECRUITING NOT_YET_RECRUITING
                  ACTIVE_NOT_RECRUITING ENROLLING_BY_INVITATION TERMINATED
                  WITHDRAWN SUSPENDED
+  ClinicalTrial dates and detail - each as the REGISTRY wrote it, so they do
+                 not compare across registries and must not be sorted or
+                 subtracted. Empty string means the registry did not state it.
+    last_update_date   when the record last changed (ct.gov, ISRCTN, CTIS,
+                       CRIS publish this; the other registries do not)
+    completion_date    actual where given, else anticipated
+    registration_date  when the trial was first registered
+    has_results        the registry's own flag, its own wording
+    url                the registry's record page, where it publishes one
+    brief_summary      ct.gov, ANZCTR, jRCT
+    sex, min_age, max_age   eligibility, in the registry's units
+                       ("18 Years", "18.00 Year(s)", "0.0")
   ClinicalTrial.key  the registry id, as NAMESPACE:VALUE - 'NCT:NCT01045135',
                  'EUCTR:2012-005198-30', 'CTRI:CTRI/2019/01/017061'. THERE IS
                  NO `.id` PROPERTY. Cypher returns null for a property that

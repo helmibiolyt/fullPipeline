@@ -77,6 +77,14 @@ _PHASE_PAT = [
 #: Filter with `t.phase <> 'NA'` for trials that carry a real phase.
 PHASE_NA = "NA"
 
+#: Epoch-ish placeholders registries write for "no date". ChiCTR puts
+#: 1900-01-01 in results_date_completed on 399 of 400 rows; stored verbatim it
+#: sorts first and reads as a real completion.
+_DATE_SENTINELS = {
+    "1900-01-01", "1900-01-01 00:00:00", "0000-00-00", "1970-01-01",
+    "01/01/1900", "1900-1-1", "9999-12-31",
+}
+
 # Values meaning "no phase applies". Mapped to NA, not dropped.
 _PHASE_NONE = {
     "na", "n/a", "n.a.", "not applicable", "not specified", "none",
@@ -565,6 +573,24 @@ def _trial(b, key, registry, source, sponsor="", conditions="", interventions=""
     raw_st = (props.get("study_type") or "").strip()
     props["study_type"] = norm_study_type(raw_st)
     props["study_type_raw"] = raw_st
+
+    # The fields added so the graph can answer "what changed recently". Each
+    # registry writes its own placeholder for "not stated", and stored verbatim
+    # they are worse than an empty property: a completion_date of "1900-01-01"
+    # sorts first and reads as a real date. ChiCTR writes that sentinel on 399
+    # of 400 rows and CTIS writes "N/A" as an End date on all 400.
+    #
+    # Dates are otherwise left exactly as the registry wrote them - they are
+    # not comparable across registries, and normalising them is a decision
+    # that has not been taken.
+    for f in ("last_update_date", "completion_date", "registration_date",
+              "url", "brief_summary", "sex", "min_age", "max_age",
+              "has_results"):
+        v = (props.get(f) or "").strip()
+        if not v or is_placeholder(v) or v in _DATE_SENTINELS:
+            props[f] = ""
+        else:
+            props[f] = v
     # A registry writing "NA" in the title field has not titled the trial.
     # Left in, those 16 rows are findable by a title search for NA.
     #
@@ -721,7 +747,16 @@ def load_ctgov(b):
                phase=row.get("phases", ""),
                study_type=row.get("study_type", ""),
                enrollment=row.get("enrollment", ""),
-               start_date=row.get("start_date", ""))
+               start_date=row.get("start_date", ""),
+               last_update_date=row.get("last_update_posted_date", ""),
+               completion_date=row.get("completion_date", "")
+                               or row.get("primary_completion_date", ""),
+               registration_date=row.get("first_posted_date", ""),
+               has_results=row.get("has_results", ""),
+               brief_summary=row.get("brief_summary", ""),
+               sex=row.get("sex", ""),
+               min_age=row.get("minimum_age", ""),
+               max_age=row.get("maximum_age", ""))
         b.w.identifier(k, "NCT", nct, source=key)
     b._done("ctgov", t0, n)
 
@@ -755,7 +790,13 @@ def load_who(b):
                phase=row.get("Phase", ""),
                study_type=row.get("Study_type", ""),
                enrollment=row.get("Target_size", ""),
-               start_date=row.get("Date_enrollement", ""))
+               start_date=row.get("Date_enrollement", ""),
+               registration_date=row.get("Date_registration", ""),
+               has_results=row.get("results_yes_no", ""),
+               url=row.get("results_url_link", ""),
+               sex=row.get("Inclusion_gender", ""),
+               min_age=row.get("Inclusion_agemin", ""),
+               max_age=row.get("Inclusion_agemax", ""))
         # only ids landing in a known registry namespace; protocol codes and
         # sponsor references canonicalise to TRIAL: and are noise
         for other in _SEP.split(row.get("Secondary_ID", "") or ""):
@@ -954,7 +995,13 @@ def load_chictr(b):
                phase=row.get("phase", ""),
                study_type=row.get("study_type", ""),
                enrollment=row.get("target_size", ""),
-               start_date=row.get("date_enrolment", ""))
+               start_date=row.get("date_enrolment", ""),
+               registration_date=row.get("date_registration", ""),
+               completion_date=row.get("results_date_completed", ""),
+               url=row.get("url", ""),
+               sex=row.get("gender", ""),
+               min_age=row.get("agemin", ""),
+               max_age=row.get("agemax", ""))
     b._done("chictr", t0, n)
 
 
@@ -975,6 +1022,13 @@ def load_anzctr(b):
                title=row.get("STUDY TITLE", ""),
                phase=row.get("PHASE", ""),
                study_type=row.get("STUDY TYPE", ""),
+               registration_date=row.get("SUBMIT DATE", ""),
+               completion_date=row.get("ACTUAL END DATE", "")
+                               or row.get("ANTICIPATED END DATE", ""),
+               brief_summary=row.get("BRIEF SUMMARY", ""),
+               sex=row.get("INCLUSIVE GENDER", ""),
+               min_age=row.get("MIN AGE", ""),
+               max_age=row.get("MAX AGE", ""),
                start_date=row.get("ACTUAL START DATE", "") or
                           row.get("ANTICIPATED START DATE", ""))
     b._done("anzctr", t0, n)
@@ -1002,7 +1056,13 @@ def load_isrctn(b):
                status=row.get("Overall study status", ""),
                phase=row.get("Phase", ""),
                study_type=row.get("Study type(s)", ""),
-               start_date=row.get("Date of first enrolment", ""))
+               start_date=row.get("Date of first enrolment", ""),
+               last_update_date=row.get("Record last updated", ""),
+               completion_date=row.get("Completion date", ""),
+               has_results=row.get("Basic results", ""),
+               sex=row.get("Sex", ""),
+               min_age=row.get("Lower age limit", ""),
+               max_age=row.get("Upper age limit", ""))
         # ISRCTN states its own cross-registrations in two dedicated columns
         for col in ("EudraCT/CTIS number", "ClinicalTrials.gov number"):
             _same_study(b, k, row.get(col, ""), key)
@@ -1028,7 +1088,13 @@ def load_ctis(b):
                status=row.get("Overall trial status", ""),
                phase=row.get("Trial phase", ""),
                enrollment=row.get("Number of participants enrolled", ""),
-               start_date=row.get("Start date", ""))
+               start_date=row.get("Start date", ""),
+               last_update_date=row.get("Last updated", ""),
+               completion_date=row.get("End date", ""),
+               registration_date=row.get("Decision date", ""),
+               has_results=row.get("Trial results", ""),
+               sex=row.get("Gender", ""),
+               min_age=row.get("Age group", ""))
     b._done("ctis", t0, n)
 
 
@@ -1123,7 +1189,11 @@ def load_ctri(b):
                title=row.get("public_title_of_study", ""),
                study_type=row.get("type_of_study", ""),
                enrollment=row.get("target_sample_size", ""),
-               start_date=row.get("registration_date", ""))
+               start_date=row.get("registration_date", ""),
+               registration_date=row.get("registration_date", ""),
+               sex=row.get("inclusion_gender", ""),
+               min_age=row.get("inclusion_age_from", ""),
+               max_age=row.get("inclusion_age_to", ""))
     b._done("ctri", t0, n)
 
 
@@ -1193,6 +1263,13 @@ def load_jrct(b):
                title=row.get("Public Title", ""),
                status=row.get("Recruitment status", ""),
                study_type=row.get("Study Type", ""),
+               registration_date=row.get("Date of registration", ""),
+               completion_date=row.get("Completion date", ""),
+               url=row.get("Detail URL", ""),
+               brief_summary=row.get("Brief summary", ""),
+               sex=row.get("Key inclusion & exclusion criteria - Gender", ""),
+               min_age=row.get("Key inclusion & exclusion criteria - Age Minimum", ""),
+               max_age=row.get("Key inclusion & exclusion criteria - Age Maximum", ""),
                start_date=row.get("Actual date of first enrollment", "") or
                           row.get("Anticipated date of first enrollment", ""))
     b._done("jrct", t0, n)
@@ -1293,7 +1370,14 @@ def load_cris(b):
                phase=row.get("clinical_step", ""),
                status=row.get("research_step", ""),
                study_type=row.get("research_kind", ""),
-               start_date=row.get("study_start_date", ""))
+               start_date=row.get("study_start_date", ""),
+               last_update_date=row.get("udt_date", ""),
+               completion_date=row.get("study_complete_date", ""),
+               registration_date=row.get("ins_date", ""),
+               has_results=row.get("results_yn", ""),
+               sex=row.get("target_in_sex", ""),
+               min_age=row.get("target_in_start_age", ""),
+               max_age=row.get("target_in_end_age", ""))
     b._done("cris", t0, n)
 
 
