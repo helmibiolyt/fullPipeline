@@ -9,4 +9,6 @@ mirror: true
 # Refreshed 2026-08-13 and disabled again the same day. The run took ~14
 # minutes against a 360-minute ceiling: the API returns 1,000 full studies per
 # request, so the whole registry is ~600 sequential pages, not a long crawl.
-enabled: false
+# TEMPORARY 2026-08-19: enabled to test an unattended graph_sync rebuild
+# on the new 8 GB host. Back to false as soon as it publishes.
+enabled: true
