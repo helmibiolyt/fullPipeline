@@ -43,3 +43,22 @@ db.memory.transaction.max=256m
 # 2 vCPU. Leaving these at the default lets Neo4j size its pools for a machine
 # it is not running on.
 server.cypher.parallel.worker_limit=2
+
+# Network. Without these Neo4j binds to localhost and nothing outside the box
+# can reach it - the first version of this profile omitted them entirely and
+# would have produced a database that provisioned cleanly and answered nobody.
+server.default_listen_address=0.0.0.0
+server.bolt.listen_address=0.0.0.0:7687
+server.http.listen_address=0.0.0.0:7474
+
+# The advertised address is the host's PUBLIC name, and it is not cosmetic:
+# Neo4j Browser loads over HTTP and then opens its own Bolt connection FROM THE
+# USER'S MACHINE using whatever is advertised here. Pointed at a private IP or
+# a dead host, Browser loads and then fails to connect, and the error reads as
+# a Neo4j problem rather than a config one.
+#
+# This changes when the host changes. See "Replacing the graph host" in
+# README.md.
+server.default_advertised_address=ec2-34-207-239-112.compute-1.amazonaws.com
+server.bolt.advertised_address=ec2-34-207-239-112.compute-1.amazonaws.com:7687
+server.http.advertised_address=ec2-34-207-239-112.compute-1.amazonaws.com:7474
