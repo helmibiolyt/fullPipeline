@@ -20,6 +20,32 @@ OUT="$RUNS/$(date -u +%Y%m%dT%H%M%SZ)"
 MODE=(--all)
 [ $# -gt 0 ] && MODE=("$@")
 
+# On a host too small to run the build beside the database, stop Neo4j first.
+#
+# This lives HERE, not in rebuild-graph.sh, and the distinction cost a failed
+# production run to learn. graph_sync calls build-graph.sh and import-graph.sh
+# as separate tasks - it never calls rebuild-graph.sh - so a guard placed there
+# protects a manual rebuild and nothing else. The first unattended rebuild on
+# the 8 GB host was killed exactly this way:
+#
+#     11:51:51  Killed process 7800 (java)    5.6 GB   <- Neo4j
+#     11:56:58  Killed process 8395 (python)  4.0 GB   <- the build
+#     SSH operator error: exit status = 137
+#
+# Both died. The kernel does not choose the victim you would.
+#
+# Restarted by a trap rather than at the end, so a build that fails or is
+# interrupted still leaves the database serving the previous store instead of
+# leaving the host with no graph at all.
+TOTAL_MB=$(free -m | awk '/^Mem:/ {print $2}')
+if [ "${TOTAL_MB:-0}" -lt 12000 ] && systemctl is-active --quiet neo4j 2>/dev/null; then
+  warn "${TOTAL_MB} MB RAM - stopping neo4j for the build (it does not fit"
+  warn "alongside a ${MEM} GB build at this size). The graph is DOWN until the"
+  warn "build finishes, not just for the import."
+  sudo systemctl stop neo4j 2>/dev/null || true
+  trap 'sudo systemctl start neo4j 2>/dev/null || true' EXIT
+fi
+
 step "building ${MODE[*]} -> $OUT"
 cd "$REPO/graph"
 "$VENV/bin/python" -u build.py "${MODE[@]}" --out "$OUT" --max-mem-gb "$MEM"
