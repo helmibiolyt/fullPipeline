@@ -46,12 +46,26 @@ CONF=/etc/neo4j/neo4j.conf
 # Re-applied from the pristine copy each run, so editing the snippet in git and
 # re-provisioning actually takes effect instead of appending a second block.
 sudo cp "$CONF.orig" "$CONF"
-sudo bash -c "cat '$REPO/graph/neo4j.conf.snippet' >> '$CONF'"
+# Which memory profile fits. Handing Neo4j the 16 GB numbers on an 8 GB box
+# asks for 8 GB on a machine that has 8, which leaves the OS nothing and the
+# build nothing - so the size of the host picks the profile rather than the
+# person running this remembering to.
+TOTAL_MB=$(free -m | awk '/^Mem:/ {print $2}')
+if [ "${TOTAL_MB:-0}" -lt 12000 ]; then
+  SNIPPET="$REPO/graph/neo4j.conf.8gb.snippet"
+  warn "${TOTAL_MB} MB RAM - using the 8 GB profile (2G heap / 3G page cache)."
+  warn "The build does NOT fit alongside Neo4j at this size: rebuild-graph.sh"
+  warn "will stop the database for the build, so a rebuild is ~50 minutes of"
+  warn "downtime rather than ~5. See the snippet for the alternative."
+else
+  SNIPPET="$REPO/graph/neo4j.conf.snippet"
+fi
+sudo bash -c "cat '$SNIPPET' >> '$CONF'"
 # Community Edition allows exactly one user database, so the imported one has
 # to become the default rather than be created alongside `neo4j`.
 grep -q '^initial.dbms.default_database' "$CONF" \
   || echo 'initial.dbms.default_database=biolyt' | sudo tee -a "$CONF" >/dev/null
-ok "config applied from graph/neo4j.conf.snippet"
+ok "config applied from $(basename "$SNIPPET")"
 
 step "neo4j password"
 if [ -n "${NEO4J_PASSWORD:-}" ]; then

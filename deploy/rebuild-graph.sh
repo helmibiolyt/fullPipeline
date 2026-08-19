@@ -27,9 +27,37 @@ fi
 
 echo "=== START $(date -u +%FT%TZ)  $(git log --oneline -1)"
 
+# On a host too small to run the build beside the database, Neo4j is stopped
+# for the build as well as the import.
+#
+# build.py is given --max-mem-gb 6 and Neo4j holds ~5 GB on the 8 GB profile,
+# so the two do not fit in 8. Left running, the build does not fail cleanly -
+# it drives the box into the state where ports still accept connections and
+# nothing can be scheduled, which is what happened on 2026-08-06 and needed a
+# console restart to clear. A planned 50-minute outage is a much better
+# outcome than an unplanned one of unknown length.
+#
+# The 16 GB profile is unaffected: the build runs alongside a live database and
+# only the import stops it, which is ~5 minutes.
+TOTAL_MB=$(free -m | awk '/^Mem:/ {print $2}')
+SMALL_HOST=0
+if [ "${TOTAL_MB:-0}" -lt 12000 ]; then
+    SMALL_HOST=1
+    echo "=== ${TOTAL_MB} MB RAM - stopping neo4j for the BUILD as well as the"
+    echo "=== import. The graph is down for the whole rebuild, not just ~5 min."
+    sudo systemctl stop neo4j 2>/dev/null || true
+fi
+
 bash deploy/build-graph.sh --all
 build_rc=$?
 echo "=== BUILD RC ${build_rc}"
+
+# Bring it back before the import decides anything. import-graph.sh stops the
+# database itself, so this is not wasted: it means a FAILED build leaves the
+# graph serving the previous store rather than leaving it down.
+if [ "${SMALL_HOST}" -eq 1 ]; then
+    sudo systemctl start neo4j 2>/dev/null || true
+fi
 
 # Nothing is replaced if the build failed. import-graph.sh refuses a directory
 # with no .validated marker anyway, but stopping here makes the reason legible

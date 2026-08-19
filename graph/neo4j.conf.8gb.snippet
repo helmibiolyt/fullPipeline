@@ -1,0 +1,45 @@
+# Neo4j settings for a 2 vCPU / 8 GB host. Selected automatically by
+# graph-host.sh when the machine has less than 12 GB; the 16 GB profile is in
+# neo4j.conf.snippet next to this file.
+#
+# The budget, and what changes from the 16 GB one:
+#
+#   heap          2 GB
+#   page cache    3 GB
+#   OS + slack    3 GB
+#   ------------------
+#                 8 GB
+#
+# The page cache is the number that matters and it is barely reduced, because
+# the store is ~2-3 GB: 3 GB still holds the whole graph resident, which is the
+# property that makes queries fast. The heap takes the cut instead - it is
+# working memory for query execution, and 2 GB is ample for the aggregate-
+# shaped queries this graph is asked, with the transaction caps below stopping
+# one runaway from eating it all.
+#
+# THE BUILD CANNOT RUN ALONGSIDE THIS. build.py is given --max-mem-gb 6, and
+# 6 + 5 does not fit in 8. On this profile a rebuild must either
+#
+#   * stop Neo4j first  - the graph is down for the whole ~50 minute rebuild
+#                         instead of just the ~5 minute import, or
+#   * build elsewhere   - copy the run directory across and run
+#                         import-graph.sh here, which is I/O bound and fits
+#
+# rebuild-graph.sh does the first automatically on this profile. Which is right
+# depends on how often a rebuild happens: with scrapers disabled it is a
+# deliberate act, not a weekly event, and 50 minutes of planned downtime is
+# cheaper than paying for double the RAM continuously.
+
+server.memory.heap.initial_size=2g
+server.memory.heap.max_size=2g
+server.memory.pagecache.size=3g
+
+# Transaction memory. One runaway Cypher query on a 2-core box will otherwise
+# take the whole database down with it; this makes it fail alone instead.
+# Lower than the 16 GB profile in proportion to the smaller heap.
+db.memory.transaction.total.max=1g
+db.memory.transaction.max=256m
+
+# 2 vCPU. Leaving these at the default lets Neo4j size its pools for a machine
+# it is not running on.
+server.cypher.parallel.worker_limit=2
