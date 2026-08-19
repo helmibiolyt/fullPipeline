@@ -144,7 +144,12 @@ not — regenerating them means re-embedding 93k documents.
 
 ### Replacing the graph host
 
-1. Ubuntu 24.04, 2 vCPU / 16 GB, **100 GB disk**.
+1. Ubuntu, **2 vCPU / 8 GB is enough** (measured 2026-08-19: the build
+   peaks at 5,332 MB of 7,932 with Neo4j stopped, and `graph-host.sh`
+   picks the 8 GB memory profile automatically under 12 GB). 16 GB buys
+   one thing: the build can run *beside* a live database, so downtime is
+   the ~5 minute import rather than the whole ~45 minute rebuild.
+   **50 GB disk** — the first build used 14% of 48 GB.
 2. **Edit `graph/neo4j.conf.snippet`** — it contains the host's public IP in
    `server.default_advertised_address` and the two `advertised_address` lines.
    Neo4j Browser builds its `bolt://` URL from these; pointed at a dead host it
